@@ -31,7 +31,7 @@ const H = 940
 type View = { x: number; y: number; k: number }
 
 export function MapScreen() {
-  const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, myUpdates, votes, sheet } = useApp()
+  const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, myUpdates, votes, sheet, set, toast, requireIdentity } = useApp()
   const wrap = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 0.5 })
   const [animate, setAnimate] = useState(false)
@@ -43,6 +43,7 @@ export function MapScreen() {
   const pointers = useRef(new Map<number, { x: number; y: number }>())
   const last = useRef<{ x: number; y: number; d?: number } | null>(null)
   const moved = useRef(0)
+  const press = useRef(0)
 
   const center = useCallback((px: number, py: number, k?: number, offsetY = 0) => {
     const el = wrap.current
@@ -111,6 +112,19 @@ export function MapScreen() {
     last.current = null
     moved.current = 0
     setLayersOpen(false)
+    // long-press drops a personal pin
+    window.clearTimeout(press.current)
+    const rect = wrap.current!.getBoundingClientRect()
+    const wx = (e.clientX - rect.left - view.x) / view.k
+    const wy = (e.clientY - rect.top - view.y) / view.k
+    press.current = window.setTimeout(() => {
+      if (moved.current > 8 || pointers.current.size !== 1) return
+      const pin = { id: 'pin' + Date.now(), name: `Pin ${myPins.length + 1}`, x: Math.round(wx), y: Math.round(wy) }
+      set('myPins', [...myPins, pin])
+      setLayers((l) => ({ ...l, pins: true }))
+      navigator.vibrate?.(15)
+      toast(`${pin.name} gesetzt`, { label: 'Hier treffen', run: () => requireIdentity('Damit deine Crew weiß, wer einlädt.', () => openSheet({ kind: 'newMeetup', place: pin.name })) })
+    }, 550)
   }
   const onMove = (e: React.PointerEvent) => {
     if (!pointers.current.has(e.pointerId)) return
@@ -130,6 +144,7 @@ export function MapScreen() {
     last.current = { x: cx, y: cy, d }
   }
   const onUp = (e: React.PointerEvent) => {
+    window.clearTimeout(press.current)
     pointers.current.delete(e.pointerId)
     last.current = null
   }
@@ -196,11 +211,16 @@ export function MapScreen() {
             })}
           {layers.pins &&
             myPins.map((pin) => (
-              <div key={pin.id} style={{ ...pinStyle(pin.x, pin.y, inv), pointerEvents: 'none' }}>
+              <button
+                key={pin.id}
+                style={pinStyle(pin.x, pin.y, inv)}
+                aria-label={pin.name}
+                onClick={() => toast(pin.name, { label: 'Entfernen', run: () => set('myPins', myPins.filter((x) => x.id !== pin.id)) })}
+              >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px 3px 4px', borderRadius: 99, background: '#fff', color: '#111', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
                   <MapPin size={13} /> {pin.name}
                 </span>
-              </div>
+              </button>
             ))}
           {layers.friends &&
             shareLocation &&
@@ -225,7 +245,7 @@ export function MapScreen() {
       <div className="map-overlay-top" style={{ top: 58 }}>
         <div className="map-search">
           <Search size={18} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Stage, Wasser, Bar suchen …" aria-label="Karte durchsuchen" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Suchen · lange drücken für Pin" aria-label="Karte durchsuchen" />
           {q && (
             <button className="icon-btn" style={{ width: 36, height: 36 }} onClick={() => setQ('')} aria-label="Leeren">
               <X size={18} />

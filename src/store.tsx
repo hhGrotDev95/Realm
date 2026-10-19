@@ -144,7 +144,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const toast: Ctx['toast'] = useCallback((msg, action) => {
     window.clearTimeout(toastTimer.current)
-    setToast({ id: Date.now(), msg, action })
+    setToast({ id: Date.now(), msg, action: action && { label: action.label, run: () => (action.run(), setToast(null)) } })
     toastTimer.current = window.setTimeout(() => setToast(null), 3800)
   }, [])
 
@@ -205,6 +205,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleReminder: (id) => {
         const on = !s.reminders[id]
         setS((p) => ({ ...p, reminders: { ...p.reminders, [id]: on } }))
+        if (on) scheduleReminder(id, now)
         toast(on ? 'Erinnerung 15 Min. vorher' : 'Erinnerung entfernt')
       },
       setPhase: (phase) => setS((p) => ({ ...p, phase })),
@@ -279,4 +280,28 @@ export function conflictClusters(plan: string[], day: number, resolved: Record<s
   return clusters
     .map((c) => ({ key: c.map((a) => a.id).sort().join('|'), acts: c, start: Math.min(...c.map((a) => a.start)), end: Math.max(...c.map((a) => a.end)) }))
     .filter((c) => !resolved[c.key])
+}
+
+/** Meetups disappear 30 minutes after they started. */
+export function isMeetupActive(m: Meetup, now: { day: number; min: number }) {
+  return m.day > now.day || (m.day === now.day && m.min + 30 >= now.min)
+}
+
+const timers: Record<string, number> = {}
+
+/** Asks for notification permission and fires a local notification 15 min before the set (relative to the app clock). */
+async function scheduleReminder(id: string, now: { day: number; min: number }) {
+  if (!('Notification' in window)) return
+  const perm = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission
+  if (perm !== 'granted') return
+  const a = actById[id]
+  if (a.day !== now.day) return
+  const delay = Math.max(0, a.start - 15 - now.min) * 60_000
+  window.clearTimeout(timers[id])
+  timers[id] = window.setTimeout(async () => {
+    const reg = await navigator.serviceWorker?.getRegistration()
+    const body = `${a.artist} beginnt um ${String(Math.floor((a.start % 1440) / 60)).padStart(2, '0')}:${String(a.start % 60).padStart(2, '0')}`
+    if (reg) reg.showNotification('Gleich geht’s los', { body, icon: '/icon.svg', tag: id })
+    else new Notification('Gleich geht’s los', { body, icon: '/icon.svg', tag: id })
+  }, delay)
 }

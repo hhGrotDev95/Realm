@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { CalendarPlus, ChevronRight, Footprints, Heart, MapPin, MessageCircle, Navigation } from 'lucide-react'
 import { ACTS, FRIENDS, fmt, friendsFor, stageById, ME, walkMinutes, type StageId } from '../data'
-import { useApp } from '../store'
+import { isMeetupActive, useApp } from '../store'
 import { status } from '../time'
 import { AvatarStack, StageDot, Switch, stagger } from '../ui'
 import { useScrollTop } from './Home'
@@ -22,7 +22,7 @@ export function Crew() {
     .filter((x) => x.f.length)
     .sort((x, y) => x.a.start - y.a.start)[0]
   const sharedCount = plan.filter((id) => friendsFor(id).length > 0).length
-  const meetup = meetups.filter((m) => !declined.includes(m.id) && (m.day > clock.day || (m.day === clock.day && m.min >= clock.min - 10))).sort((a, b) => a.day - b.day || a.min - b.min)[0]
+  const meetup = meetups.filter((m) => !declined.includes(m.id) && isMeetupActive(m, clock)).sort((a, b) => a.day - b.day || a.min - b.min)[0]
   const unread = chat.filter((c) => c.from !== 'me').length
 
   return (

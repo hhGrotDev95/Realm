@@ -2,7 +2,7 @@ import { motion } from 'framer-motion'
 import { ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { ACTS, actById, DAYS, FRIENDS, fmt, friendsFor, stageById, UPDATES, walkMinutes, ME } from '../data'
-import { conflictClusters, useApp } from '../store'
+import { conflictClusters, isMeetupActive, useApp } from '../store'
 import { nowNext, planFor, status, untilLabel } from '../time'
 import { AvatarStack, SourceTag, StageDot, ago, stagger } from '../ui'
 
@@ -163,7 +163,7 @@ function NowNextHero() {
 
 function MeetupModule({ i }: { i: number }) {
   const { meetups, now, openSheet, rsvp, declined } = useApp()
-  const m = meetups.filter((m) => m.day === now.day && m.min >= now.min - 10 && !declined.includes(m.id)).sort((a, b) => a.min - b.min)[0]
+  const m = meetups.filter((m) => m.day === now.day && isMeetupActive(m, now) && !declined.includes(m.id)).sort((a, b) => a.min - b.min)[0]
   if (!m) return null
   const going = m.going.includes('me')
   return (

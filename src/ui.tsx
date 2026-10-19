@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, useDragControls, type PanInfo } from 'framer-motion'
 import { Heart } from 'lucide-react'
-import { type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { friendById, stageById, type StageId, type UpdateSource } from './data'
 import { useApp } from './store'
 
@@ -85,6 +85,19 @@ export function ago(min: number) {
 
 export function Sheet({ open, onClose, children, full }: { open: boolean; onClose: () => void; children: ReactNode; full?: boolean }) {
   const controls = useDragControls()
+  const ref = useRef<HTMLDivElement>(null)
+  // move focus into the sheet and restore it on close
+  useEffect(() => {
+    if (!open) return
+    const prev = document.activeElement as HTMLElement | null
+    const t = window.setTimeout(() => {
+      if (!ref.current?.contains(document.activeElement)) ref.current?.focus({ preventScroll: true })
+    }, 50)
+    return () => {
+      window.clearTimeout(t)
+      prev?.focus?.({ preventScroll: true })
+    }
+  }, [open])
   return (
     <AnimatePresence>
       {open && (
@@ -92,8 +105,11 @@ export function Sheet({ open, onClose, children, full }: { open: boolean; onClos
           <motion.div className="scrim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
           <motion.div
             className={`sheet ${full ? 'full' : ''}`}
+            ref={ref}
+            tabIndex={-1}
             role="dialog"
             aria-modal
+            style={{ outline: 'none' }}
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
