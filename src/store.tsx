@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, online, setToken, type CrewState, type RemoteReport, type Session } from './api'
-import { ACTS, actById, CHAT, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
+import { ACTS, actById, CHAT, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
   id: string
@@ -26,6 +26,7 @@ export interface Guest {
 interface Persisted {
   guest: Guest
   phase: Phase
+  clockMode: 'demo' | 'real'
   plan: string[]
   attended: Record<string, boolean>
   resolved: Record<string, string>
@@ -65,6 +66,7 @@ function initial(): Persisted {
   return {
     guest: { id: 'g_' + rid() + rid(), nickname: null, color: COLORS[Math.floor(Math.random() * COLORS.length)], secured: null },
     phase: 'during',
+    clockMode: 'demo',
     plan: ['1-ilka-frost', '1-maduk', '1-satellite-lovers', '1-the-lowlights', '1-arcturus', '1-somna', '1-black-meridian', '0-orra', '0-dana-velk', '0-juno-reyes', '0-unit-47', '2-kairo', '2-grid-theory', '2-sunset-protocol', '2-linnea-vale', '2-vera-strand'],
     attended: { '0-orra': true, '0-dana-velk': true, '0-juno-reyes': false, '0-unit-47': true, '1-ilka-frost': true },
     resolved: {},
@@ -90,7 +92,7 @@ function initial(): Persisted {
 
 /** In live mode the demo crew, chat and meetups start empty. */
 function initialOnline(): Persisted {
-  return { ...initial(), meetups: [], chat: [], shareLocation: false, attended: {}, phase: 'during' }
+  return { ...initial(), meetups: [], chat: [], shareLocation: false, attended: {}, phase: 'during', clockMode: 'real' }
 }
 
 const KEY = 'realm.v2'
@@ -151,6 +153,7 @@ interface Ctx extends Persisted {
   resolve: (key: string, keep: string[], all: string[]) => void
   toggleReminder: (id: string) => void
   setPhase: (p: Phase) => void
+  msToStart: number
   setNickname: (n: string, color: string) => void
   secure: (how: 'passkey' | 'code') => string | undefined | Promise<string | undefined>
   requireIdentity: (reason: string, then: () => void) => void
@@ -187,6 +190,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [toastMsg, setToast] = useState<Ctx['toastMsg']>(null)
   const [focusPoi, setFocusPoi] = useState<string | null>(null)
   const [scrollTopSignal, setScrollTop] = useState(0)
+  const [tick, setTick] = useState(() => Date.now())
+  // the real clock ticks every 30 s
+  useEffect(() => {
+    if (s.clockMode !== 'real') return
+    const id = window.setInterval(() => setTick(Date.now()), 30_000)
+    return () => window.clearInterval(id)
+  }, [s.clockMode])
   const pending = useRef<(() => void) | null>(null)
   const toastTimer = useRef<number>(0)
 
@@ -296,7 +306,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const closeSheet = useCallback(() => setStack((st) => st.slice(0, -1)), [])
 
   const value = useMemo<Ctx>(() => {
-    const now = PHASE_CLOCK[s.phase]
+    const real = s.clockMode === 'real' ? realClock(new Date(tick)) : null
+    const phase = real ? real.phase : s.phase
+    const now = real ? { day: real.day, min: real.min } : PHASE_CLOCK[s.phase]
+    const msToStart = real ? real.msToStart : DEMO_MS_TO_START
     const set: Ctx['set'] = (k, v) => setS((p) => ({ ...p, [k]: v }))
     const requireIdentity: Ctx['requireIdentity'] = (reason, then) => {
       if (s.guest.nickname && (!online || s.session)) return then()
@@ -358,6 +371,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     return {
       ...s,
+      phase,
+      msToStart,
       online,
       crew,
       updates,
@@ -457,7 +472,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (on) scheduleReminder(id, now)
         toast(on ? 'Erinnerung 15 Min. vorher' : 'Erinnerung entfernt')
       },
-      setPhase: (phase) => setS((p) => ({ ...p, phase })),
+      setPhase: (phase) => setS((p) => ({ ...p, phase, clockMode: 'demo' })),
       setNickname: async (nickname, color) => {
         if (online) {
           try {
@@ -534,7 +549,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setTabRaw('home')
       },
     }
-  }, [s, tab, stack, toastMsg, focusPoi, scrollTopSignal, openSheet, closeSheet, setTab, toast, fail, refresh, ensureSession])
+  }, [s, tick, tab, stack, toastMsg, focusPoi, scrollTopSignal, openSheet, closeSheet, setTab, toast, fail, refresh, ensureSession])
 
   return <C.Provider value={value}>{children}</C.Provider>
 }

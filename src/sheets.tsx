@@ -714,7 +714,7 @@ function Identity({ reason }: { reason: string }) {
 }
 
 function Profile() {
-  const { guest, phase, setPhase, openSheet, reset, closeSheet, setTab, plan, online, deleteProfile, session } = useApp()
+  const { guest, phase, setPhase, openSheet, reset, closeSheet, setTab, plan, online, deleteProfile, session, set, clockMode } = useApp()
   const [confirmReset, setConfirmReset] = useState(false)
   return (
     <>
@@ -750,9 +750,25 @@ function Profile() {
       )}
 
       <div className="label" style={{ marginBottom: 10 }}>
-        Demo · Festivalphase
+        Uhrzeit & Festivalphase
       </div>
       <div className="list" style={{ marginBottom: 22 }}>
+        <button
+          className="list-item"
+          onClick={() => {
+            set('clockMode', 'real')
+            closeSheet()
+            setTab('home')
+          }}
+        >
+          <span className="grow">
+            <span style={{ fontWeight: 600 }}>Echtzeit</span>
+            <span className="small faint" style={{ display: 'block' }}>
+              Richtet sich nach der echten Uhr
+            </span>
+          </span>
+          {clockMode === 'real' && <Check size={18} style={{ color: 'var(--brand)' }} />}
+        </button>
         {PHASES.map((p) => (
           <button
             key={p.id}
@@ -764,12 +780,12 @@ function Profile() {
             }}
           >
             <span className="grow">
-              <span style={{ fontWeight: 600 }}>{p.label}</span>
+              <span style={{ fontWeight: 600 }}>Demo · {p.label}</span>
               <span className="small faint" style={{ display: 'block' }}>
                 {p.hint}
               </span>
             </span>
-            {phase === p.id && <Check size={18} style={{ color: 'var(--brand)' }} />}
+            {clockMode === 'demo' && phase === p.id && <Check size={18} style={{ color: 'var(--brand)' }} />}
           </button>
         ))}
       </div>
