@@ -452,6 +452,24 @@ try {
     assert.equal((await api('PATCH', `/api/admin/festivals/${slug}`, A, { status: 'published' }, null)).data.status, 'published')
   })
 
+  await test('branding: validated colour (WCAG), font and logo; published in the festival document', async () => {
+    const A = 'test-admin-token'
+    const put = (body) => api('PUT', '/api/admin/festivals/nordlicht/theme', A, body, null)
+    assert.equal((await api('PUT', '/api/admin/festivals/nordlicht/theme', lea.token, { brand: '#4fd1c5' }, null)).status, 401)
+    assert.equal((await put({ brand: 'teal' })).status, 400)
+    const dark = await put({ brand: '#1a1a6e' }) // dark blue: unreadable on the dark app background
+    assert.equal(dark.status, 400)
+    assert.match(dark.data.error, /Kontrast zu gering/)
+    assert.equal((await put({ font: 'comic-sans' })).status, 400)
+    assert.equal((await put({ logo: 'https://example.com/logo.png' })).status, 400)
+    assert.equal((await put({ logo: 'data:image/png;base64,' + 'A'.repeat(200_001) })).status, 400)
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const ok = await put({ brand: '#4FD1C5', font: 'space', logo: png })
+    assert.equal(ok.status, 200)
+    const t = (await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data.festival.theme
+    assert.deepEqual(t, { brand: '#4fd1c5', font: 'space', logo: png })
+  })
+
   await test('CORS preflight is answered', async () => {
     const r = await fetch(BASE + '/api/me', { method: 'OPTIONS', headers: { Origin: 'https://realm.app', 'Access-Control-Request-Method': 'GET' } })
     assert.equal(r.headers.get('access-control-allow-origin'), 'https://realm.app')

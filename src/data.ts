@@ -1,3 +1,4 @@
+import type { Theme } from './theme/apply'
 // Realm — demo dataset for "Realm Open Air 2027".
 // Times are minutes after midnight of the festival day (values > 1440 = after midnight).
 
@@ -301,7 +302,7 @@ export const FESTIVAL = {
   name: 'Realm Open Air',
   location: 'Lüneburger Heide' as string | null,
   status: 'published' as 'draft' | 'published' | 'archived',
-  theme: {} as { brand?: string },
+  theme: {} as Theme,
 }
 
 /** Doors open on day 0 at 10:00 local time. */
@@ -371,7 +372,7 @@ export function applyTimetableChanges(changes: TimetableChange[]) {
 
 /** The public festival document served by GET /api/festivals/:slug. */
 export interface FestivalBundle {
-  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: { brand?: string }; modules: Record<string, boolean>; updatedAt: number }
+  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; updatedAt: number }
   days: FestivalDay[]
   stages: Stage[]
   acts: Omit<Act, 'change'>[]

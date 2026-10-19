@@ -333,6 +333,27 @@ try {
     await visitor.getByRole('tab', { name: 'Alle', exact: true }).click()
     await visitor.locator('.act', { hasText: 'Nachtfalter' }).getByText('00:30').waitFor()
     if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/wizard.png`, fullPage: true })
+
+    // branding: an unreadable colour is refused, a good one with logo and font reaches visitors
+    await org.getByRole('tab', { name: 'Branding' }).click()
+    await org.getByLabel('Farbe als Hex-Wert').fill('#1a1a6e')
+    await org.getByText(/nicht gut lesbar/).waitFor()
+    if (await org.getByRole('button', { name: 'Branding speichern' }).isEnabled()) throw new Error('low-contrast colour could be saved')
+    await org.getByRole('button', { name: 'Farbe #4fd1c5' }).click()
+    await org.getByLabel('Schrift für Überschriften').selectOption('space')
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAGUlEQVR42mNk+M9QzwAEjDAGjEEBNCEWAABxPQX1o6VMmQAAAABJRU5ErkJggg==', 'base64')
+    await org.getByLabel('Logo-Datei wählen').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: png })
+    await org.getByAltText('Aktuelles Logo').waitFor()
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/branding.png`, fullPage: true })
+    await org.getByRole('button', { name: 'Branding speichern' }).click()
+    await org.getByText('Branding gespeichert').waitFor()
+    await visitor.reload()
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    const brand = await visitor.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--brand').trim())
+    if (brand !== '#4fd1c5') throw new Error('brand colour not applied: ' + brand)
+    const display = await visitor.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--display'))
+    if (!display.includes('Space Grotesk')) throw new Error('font not applied: ' + display)
+    await visitor.locator('.appbar img.logo-img').waitFor()
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {
