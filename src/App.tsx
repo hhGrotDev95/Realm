@@ -62,6 +62,11 @@ export default function App() {
         Festival-Companion V2 – Prototyp. Über den Avatar oben rechts lassen sich die Festivalphasen (Vorher → Danach) umschalten.
       </div>
       <div className="device">
+        {FESTIVAL.status !== 'published' && (
+          <div className="preview-banner" role="status">
+            {FESTIVAL.status === 'draft' ? 'Vorschau · Entwurf – für Besucher noch nicht sichtbar' : 'Archiviert – nur lesbar'}
+          </div>
+        )}
         {tab !== 'map' && <AppBar />}
         {/* enter-only transition: exit animations could stall while live data re-renders the old tab */}
         <motion.div

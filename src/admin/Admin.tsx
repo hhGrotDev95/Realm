@@ -1,11 +1,12 @@
-import { CalendarClock, LogOut, Megaphone, RotateCcw, Trash2 } from 'lucide-react'
+import { CalendarClock, FileUp, LayoutGrid, LogOut, Megaphone, Plus, RotateCcw, Settings2, Trash2, Wand2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { adminApi, api, ApiError, online, setFestival, type Announcement } from '../api'
+import { adminApi, ApiError, online, setFestival, type Announcement } from '../api'
+import { CreateFestival, ImportPanel, Settings, SetupWizard, StagesEditor } from './Setup'
 import { currentSlug } from '../festival'
-import { ACTS, DAYS, fmt, loadFestivalBundle, STAGES, stageById, type Act, type StageId, type TimetableChange } from '../data'
+import { ACTS, DAYS, FESTIVAL, fmt, loadFestivalBundle, STAGES, stageById, type Act, type StageId, type TimetableChange } from '../data'
 
 const KEY = 'realm.admin'
-type Tab = 'announcements' | 'timetable'
+type Tab = 'setup' | 'announcements' | 'timetable' | 'import' | 'stages' | 'settings'
 
 /** Parses "22:30" (or "01:30" after midnight) into festival-day minutes. */
 function parseTime(v: string): number | null {
@@ -146,11 +147,22 @@ function Console({ token, flash }: { token: string; flash: (k: 'ok' | 'err', t: 
   const [festivals, setFestivals] = useState<{ slug: string; name: string; status: string }[]>([])
   const [slug, setSlug] = useState(currentSlug)
   const [loaded, setLoaded] = useState<string | null>(null)
+  const [version, setVersion] = useState(0)
+  const [creating, setCreating] = useState(false)
   const admin = useMemo(() => adminApi(token), [token])
 
+  const loadList = useCallback(() => admin.festivals().then(setFestivals, (e) => flash('err', errText(e))), [admin, flash])
   useEffect(() => {
-    admin.festivals().then(setFestivals, (e) => flash('err', errText(e)))
-  }, [admin, flash])
+    loadList()
+  }, [loadList])
+
+  /** Re-reads the selected festival after a change (stages, import, status). */
+  const reload = useCallback(async () => {
+    const b = await admin.bundle(slug)
+    loadFestivalBundle(b)
+    setVersion((v) => v + 1)
+    loadList()
+  }, [admin, slug, loadList])
 
   // every request below is scoped to the selected festival (X-Festival)
   useEffect(() => {
@@ -160,10 +172,26 @@ function Console({ token, flash }: { token: string; flash: (k: 'ok' | 'err', t: 
       (b) => {
         loadFestivalBundle(b)
         setLoaded(slug)
+        if (b.festival.status === 'draft') setTab('setup')
+        else setTab((t) => (t === 'setup' ? 'announcements' : t))
       },
       (e) => flash('err', errText(e)),
     )
   }, [admin, slug, flash])
+
+  if (creating)
+    return (
+      <CreateFestival
+        token={token}
+        flash={flash}
+        onCancel={() => setCreating(false)}
+        onCreated={(s) => {
+          setCreating(false)
+          loadList()
+          setSlug(s)
+        }}
+      />
+    )
 
   return (
     <>
@@ -179,28 +207,59 @@ function Console({ token, flash }: { token: string; flash: (k: 'ok' | 'err', t: 
             ))}
           </select>
         </label>
+        <button className="btn secondary" style={{ alignSelf: 'flex-end' }} onClick={() => setCreating(true)}>
+          <Plus size={17} /> Neues Festival
+        </button>
       </div>
       {loaded !== slug ? (
         <p className="muted small">Lade Festival …</p>
       ) : (
-        <ConsoleTabs key={slug} tab={tab} setTab={setTab} token={token} flash={flash} />
+        <ConsoleTabs key={`${slug}:${version}`} slug={slug} tab={tab} setTab={setTab} token={token} flash={flash} reload={reload} />
       )}
     </>
   )
 }
 
-function ConsoleTabs({ tab, setTab, token, flash }: { tab: Tab; setTab: (t: Tab) => void; token: string; flash: (k: 'ok' | 'err', t: string) => void }) {
+const TABS: { id: Tab; label: string; icon: typeof Megaphone; draftOnly?: boolean }[] = [
+  { id: 'setup', label: 'Einrichtung', icon: Wand2, draftOnly: true },
+  { id: 'announcements', label: 'Meldungen', icon: Megaphone },
+  { id: 'timetable', label: 'Live-Änderungen', icon: CalendarClock },
+  { id: 'import', label: 'Import', icon: FileUp },
+  { id: 'stages', label: 'Bühnen', icon: LayoutGrid },
+  { id: 'settings', label: 'Status', icon: Settings2 },
+]
+
+function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string; tab: Tab; setTab: (t: Tab) => void; token: string; flash: (k: 'ok' | 'err', t: string) => void; reload: () => Promise<void> }) {
+  const draft = FESTIVAL.status === 'draft'
+  // the setup wizard only exists for drafts; once published the same place shows the status
+  if (tab === 'setup' && !draft) tab = 'settings'
   return (
     <>
-      <nav className="admin-tabs" role="tablist">
-        <button role="tab" aria-selected={tab === 'announcements'} className={tab === 'announcements' ? 'on' : ''} onClick={() => setTab('announcements')}>
-          <Megaphone size={17} /> Meldungen
-        </button>
-        <button role="tab" aria-selected={tab === 'timetable'} className={tab === 'timetable' ? 'on' : ''} onClick={() => setTab('timetable')}>
-          <CalendarClock size={17} /> Timetable
-        </button>
+      <nav className="admin-tabs" role="tablist" aria-label="Bereiche">
+        {TABS.filter((t) => !t.draftOnly || draft).map((t) => (
+          <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}>
+            <t.icon size={17} /> {t.label}
+          </button>
+        ))}
       </nav>
-      {tab === 'announcements' ? <Announcements token={token} flash={flash} /> : <Timetable token={token} flash={flash} />}
+      {tab === 'setup' && <SetupWizard token={token} flash={flash} slug={slug} reload={reload} />}
+      {tab === 'announcements' && <Announcements token={token} flash={flash} />}
+      {tab === 'timetable' && <Timetable token={token} flash={flash} />}
+      {tab === 'import' && (
+        <div className="card">
+          <ImportPanel token={token} flash={flash} slug={slug} reload={reload} />
+        </div>
+      )}
+      {tab === 'stages' && (
+        <div className="card">
+          <StagesEditor token={token} flash={flash} slug={slug} reload={reload} />
+        </div>
+      )}
+      {tab === 'settings' && (
+        <div className="card">
+          <Settings token={token} flash={flash} slug={slug} reload={reload} />
+        </div>
+      )}
     </>
   )
 }
@@ -212,7 +271,7 @@ function Announcements({ token, flash }: { token: string; flash: (k: 'ok' | 'err
   const [items, setItems] = useState<Announcement[] | null>(null)
   const [form, setForm] = useState({ title: '', body: '', place: '', severity: 'info' as Announcement['severity'], valid: '' })
   const [busy, setBusy] = useState(false)
-  const load = useCallback(() => api.announcements().then(setItems, (e) => flash('err', errText(e))), [flash])
+  const load = useCallback(() => admin.announcements().then(setItems, (e) => flash('err', errText(e))), [admin, flash])
   useEffect(() => {
     load()
   }, [load])
@@ -327,7 +386,7 @@ function Timetable({ token, flash }: { token: string; flash: (k: 'ok' | 'err', t
   const [day, setDay] = useState(0)
   const [changes, setChanges] = useState<TimetableChange[] | null>(null)
   const [edit, setEdit] = useState<Act | null>(null)
-  const load = useCallback(() => api.timetableChanges().then(setChanges, (e) => flash('err', errText(e))), [flash])
+  const load = useCallback(() => admin.timetableChanges().then(setChanges, (e) => flash('err', errText(e))), [admin, flash])
   useEffect(() => {
     load()
   }, [load])

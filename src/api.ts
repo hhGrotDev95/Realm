@@ -8,6 +8,8 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** the parsed error body, e.g. the row errors of a refused import (422) */
+    public data?: unknown,
   ) {
     super(message)
   }
@@ -50,7 +52,7 @@ async function readJson<T>(res: Response): Promise<T> {
     if (res.ok) throw new ApiError(0, 'Antwort unvollständig – bitte später erneut versuchen')
     data = {}
   }
-  if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error ?? 'Fehler ' + res.status)
+  if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error ?? 'Fehler ' + res.status, data)
   return data as T
 }
 
@@ -177,6 +179,16 @@ export function execute(op: OutboxOp): Promise<unknown> {
 const rand = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('')
 export const opId = (prefix: string) => `${prefix}_${rand()}`
 
+export interface ImportResult {
+  dryRun: boolean
+  mode: 'merge' | 'replace'
+  written: boolean
+  snapshotId?: string | null
+  summary: { rows: number; created: number; updated: number; unchanged: number; removed: number; stagesCreated: number }
+  errors: { row: number; message: string }[]
+  warnings: { row: number; message: string }[]
+}
+
 /** Organizer endpoints; the admin token is passed explicitly and never stored with the guest session. */
 export const adminApi = (adminToken: string) => {
   const req = async <T,>(method: string, path: string, body?: unknown): Promise<T> => {
@@ -198,6 +210,15 @@ export const adminApi = (adminToken: string) => {
     check: () => req<{ ok: true }>('GET', '/api/admin/session'),
     festivals: () => req<{ slug: string; name: string; status: string }[]>('GET', '/api/admin/festivals'),
     bundle: (slug: string) => req<FestivalBundle>('GET', `/api/festivals/${encodeURIComponent(slug)}`),
+    // reads go through the admin token too, so drafts work
+    announcements: () => req<Announcement[]>('GET', '/api/announcements'),
+    timetableChanges: () => req<TimetableChange[]>('GET', '/api/timetable/changes'),
+    createFestival: (f: { name: string; slug?: string; location?: string; startDate: string; days: number }) => req<{ slug: string; name: string; status: string }>('POST', '/api/admin/festivals', f),
+    updateFestival: (slug: string, f: { name?: string; location?: string; status?: 'draft' | 'published' | 'archived' }) => req<{ slug: string; name: string; status: string }>('PATCH', `/api/admin/festivals/${slug}`, f),
+    setStages: (slug: string, stages: { id?: string; name: string; color?: string; vibe?: string }[]) => req<{ stages: { id: string; name: string; color: string }[] }>('PUT', `/api/admin/festivals/${slug}/stages`, { stages }),
+    importTimetable: (slug: string, body: { mode: 'merge' | 'replace'; dryRun: boolean; rows: unknown[] }) => req<ImportResult>('POST', `/api/admin/festivals/${slug}/import`, body),
+    snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
+    restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),
     announce: (a: { title: string; body?: string; place?: string; severity: Announcement['severity']; validMin?: number }) => req<Announcement>('POST', '/api/admin/announcements', a),
     removeAnnouncement: (id: string) => req<void>('DELETE', `/api/admin/announcements/${id}`),
     setChange: (actId: string, c: { start?: number; end?: number; stage?: string; cancelled?: boolean; note?: string }) => req<TimetableChange>('PUT', `/api/admin/timetable/${actId}`, c),

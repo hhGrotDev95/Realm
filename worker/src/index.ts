@@ -579,6 +579,270 @@ app.delete('/api/admin/announcements/:id', async (c) => {
   return c.body(null, 204)
 })
 
+/* ---------- Festival setup (admin) ---------- */
+
+const PALETTE = ['#FF6B5A', '#5AC8FF', '#FFC94D', '#7BE0A0', '#E07BFF', '#4FD1C5', '#F6AD55', '#A58CFF']
+const WEEKDAYS = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag']
+const slugify = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    .slice(0, 50)
+
+async function festivalBySlug(c: Context<App>) {
+  const f = await c.env.DB.prepare('SELECT id, slug, name, status FROM festivals WHERE slug = ?').bind(c.req.param('slug')!).first<{ id: string; slug: string; name: string; status: string }>()
+  if (!f) throw new HttpError(404, 'Festival nicht gefunden')
+  return f
+}
+const touch = (db: D1Database, id: string) => db.prepare('UPDATE festivals SET updated_at = ? WHERE id = ?').bind(Date.now(), id)
+
+function daysFrom(start: string, count: number) {
+  const [y, m, d] = start.split('-').map(Number)
+  return Array.from({ length: count }, (_, i) => {
+    const date = new Date(Date.UTC(y, m - 1, d + i))
+    const label = WEEKDAYS[date.getUTCDay()]
+    return { idx: i, date: date.toISOString().slice(0, 10), label, short: label.slice(0, 2) }
+  })
+}
+
+app.post('/api/admin/festivals', async (c) => {
+  const b = await body(c)
+  const name = v.str(b.name, 'Name', { min: 2, max: 60 })!
+  const slug = v.str(b.slug, 'Kurzname', { min: 2, max: 40, optional: true }) ?? slugify(name)
+  if (!/^[a-z0-9-]{2,40}$/.test(slug)) throw new HttpError(400, 'Kurzname darf nur a–z, 0–9 und - enthalten')
+  const start = v.str(b.startDate, 'Startdatum', { max: 10 })!
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || Number.isNaN(Date.parse(start))) throw new HttpError(400, 'Startdatum im Format JJJJ-MM-TT')
+  const dayCount = v.int(b.days, 'Anzahl Tage', 1, 14)
+  const location = v.str(b.location, 'Ort', { max: 80, optional: true }) ?? null
+  if (await c.env.DB.prepare('SELECT 1 FROM festivals WHERE slug = ?').bind(slug).first()) throw new HttpError(409, `Kurzname „${slug}“ ist schon vergeben`)
+  const id = randomId('f')
+  const now = Date.now()
+  await c.env.DB.batch([
+    c.env.DB.prepare("INSERT INTO festivals (id, slug, name, location, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'draft', ?, ?)").bind(id, slug, name, location, now, now),
+    ...daysFrom(start, dayCount).map((d) => c.env.DB.prepare('INSERT INTO festival_days (festival_id, idx, date, label, short) VALUES (?, ?, ?, ?, ?)').bind(id, d.idx, d.date, d.label, d.short)),
+  ])
+  return c.json({ slug, name, location, status: 'draft' }, 201)
+})
+
+app.patch('/api/admin/festivals/:slug', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  const name = v.str(b.name, 'Name', { min: 2, max: 60, optional: true }) ?? f.name
+  const status = b.status === undefined ? f.status : v.oneOf(b.status, 'Status', ['draft', 'published', 'archived'] as const)
+  if (status === 'published' && f.status !== 'published') {
+    // publishing needs something to show
+    const [{ n: acts }, { n: stages }] = await Promise.all([
+      c.env.DB.prepare('SELECT COUNT(*) AS n FROM acts WHERE festival_id = ?').bind(f.id).first<{ n: number }>().then((r) => r ?? { n: 0 }),
+      c.env.DB.prepare('SELECT COUNT(*) AS n FROM stages WHERE festival_id = ?').bind(f.id).first<{ n: number }>().then((r) => r ?? { n: 0 }),
+    ])
+    if (!stages || !acts) throw new HttpError(400, 'Zum Veröffentlichen braucht das Festival mindestens eine Bühne und einen Act')
+  }
+  const updates: D1PreparedStatement[] = [c.env.DB.prepare('UPDATE festivals SET name = ?, status = ?, updated_at = ? WHERE id = ?').bind(name, status, Date.now(), f.id)]
+  if (b.location !== undefined) updates.push(c.env.DB.prepare('UPDATE festivals SET location = ? WHERE id = ?').bind(v.str(b.location, 'Ort', { max: 80, optional: true }) ?? null, f.id))
+  await c.env.DB.batch(updates)
+  return c.json({ slug: f.slug, name, status })
+})
+
+/** Replaces the stage list; stages still used by acts cannot be removed. */
+app.put('/api/admin/festivals/:slug/stages', async (c) => {
+  const f = await festivalBySlug(c)
+  const list = (await body(c)).stages
+  if (!Array.isArray(list) || list.length > 40) throw new HttpError(400, 'stages ist ungültig')
+  const stages = list.map((raw, i) => {
+    const s = (raw ?? {}) as Record<string, unknown>
+    const name = v.str(s.name, `Bühne ${i + 1}: Name`, { max: 40 })!
+    const id = v.str(s.id, `Bühne ${i + 1}: id`, { max: 40, optional: true }) ?? (slugify(name) || `buehne-${i + 1}`)
+    if (!/^[a-z0-9-]{1,40}$/.test(id)) throw new HttpError(400, `Bühne ${i + 1}: id ist ungültig`)
+    return { id, name, color: v.color(s.color) ?? PALETTE[i % PALETTE.length], vibe: v.str(s.vibe, `Bühne ${i + 1}: Vibe`, { max: 60, optional: true }) ?? '', sort: i }
+  })
+  if (new Set(stages.map((s) => s.id)).size !== stages.length) throw new HttpError(400, 'Zwei Bühnen haben denselben Namen')
+  const used = (await c.env.DB.prepare('SELECT DISTINCT stage_id FROM acts WHERE festival_id = ?').bind(f.id).all<{ stage_id: string }>()).results.map((r) => r.stage_id)
+  const missing = used.filter((u) => !stages.some((s) => s.id === u))
+  if (missing.length) throw new HttpError(409, `Bühne(n) noch mit Acts belegt: ${missing.join(', ')}`)
+  const existing = await c.env.DB.prepare('SELECT id, x, y FROM stages WHERE festival_id = ?').bind(f.id).all<{ id: string; x: number; y: number }>()
+  const pos = new Map(existing.results.map((r) => [r.id, r]))
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM stages WHERE festival_id = ? AND id NOT IN (SELECT value FROM json_each(?))').bind(f.id, JSON.stringify(stages.map((s) => s.id))),
+    ...stages.map((s, i) =>
+      c.env.DB.prepare(
+        'INSERT INTO stages (festival_id, id, name, color, x, y, vibe, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(festival_id, id) DO UPDATE SET name = excluded.name, color = excluded.color, vibe = excluded.vibe, sort = excluded.sort',
+      ).bind(f.id, s.id, s.name, s.color, pos.get(s.id)?.x ?? 200 + (i % 4) * 180, pos.get(s.id)?.y ?? 220 + Math.floor(i / 4) * 200, s.vibe, s.sort),
+    ),
+    touch(c.env.DB, f.id),
+  ])
+  return c.json({ stages })
+})
+
+type ImportRow = { row: number; id?: string; day: number; stage: string; artist: string; start: number; end: number; genre?: string; bio?: string }
+type Issue = { row: number; message: string }
+
+/**
+ * Imports a timetable that the console has already parsed (CSV/XLSX/JSON) into rows.
+ * Everything is re-validated here. merge = upsert by id; replace = additionally removes acts
+ * missing from the file after saving a snapshot. Writes only when there are no errors.
+ * Ids are stable: an explicit id, else "<day>-<artist>", so favorites survive re-imports.
+ */
+app.post('/api/admin/festivals/:slug/import', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  const mode = v.oneOf(b.mode ?? 'merge', 'mode', ['merge', 'replace'] as const)
+  const dryRun = b.dryRun === undefined ? false : v.bool(b.dryRun, 'dryRun')
+  const createStages = b.createStages === undefined ? true : v.bool(b.createStages, 'createStages')
+  if (!Array.isArray(b.rows) || b.rows.length > 2000) throw new HttpError(400, 'rows muss eine Liste mit höchstens 2000 Zeilen sein')
+  const db = c.env.DB
+  const [days, stageRows, actRows] = await db.batch([
+    db.prepare('SELECT idx FROM festival_days WHERE festival_id = ?').bind(f.id),
+    db.prepare('SELECT id, name FROM stages WHERE festival_id = ? ORDER BY sort').bind(f.id),
+    db.prepare('SELECT id, day, stage_id, artist, start_min, end_min, genre, bio FROM acts WHERE festival_id = ?').bind(f.id),
+  ])
+  const dayIdx = new Set((days.results as { idx: number }[]).map((d) => d.idx))
+  const stages = stageRows.results as { id: string; name: string }[]
+  const stageByKey = new Map<string, string>()
+  for (const s of stages) {
+    stageByKey.set(s.id, s.id)
+    stageByKey.set(s.name.toLowerCase(), s.id)
+  }
+  const newStages: { id: string; name: string }[] = []
+  const errors: Issue[] = []
+  const warnings: Issue[] = []
+  const acts: { id: string; day: number; stage: string; artist: string; start: number; end: number; genre: string; bio: string; row: number }[] = []
+  const seen = new Map<string, number>()
+
+  for (const raw of b.rows as Record<string, unknown>[]) {
+    const r = raw as Partial<ImportRow>
+    const row = typeof r.row === 'number' ? r.row : acts.length + errors.length + 1
+    const fail = (message: string) => errors.push({ row, message })
+    const artist = typeof r.artist === 'string' ? r.artist.trim() : ''
+    if (!artist) {
+      fail('Act/Künstler fehlt')
+      continue
+    }
+    if (artist.length > 80) {
+      fail('Act-Name ist länger als 80 Zeichen')
+      continue
+    }
+    if (typeof r.day !== 'number' || !dayIdx.has(r.day)) {
+      fail(`Tag ${typeof r.day === 'number' ? r.day + 1 : '?'} gibt es in diesem Festival nicht`)
+      continue
+    }
+    if (typeof r.start !== 'number' || typeof r.end !== 'number' || !Number.isInteger(r.start) || !Number.isInteger(r.end) || r.start < 0 || r.end > 36 * 60) {
+      fail('Beginn oder Ende fehlt oder ist ungültig')
+      continue
+    }
+    if (r.end <= r.start) {
+      fail('Ende liegt nicht nach dem Beginn')
+      continue
+    }
+    const stageName = typeof r.stage === 'string' ? r.stage.trim() : ''
+    if (!stageName) {
+      fail('Bühne fehlt')
+      continue
+    }
+    let stage = stageByKey.get(stageName.toLowerCase()) ?? stageByKey.get(slugify(stageName))
+    if (!stage) {
+      if (!createStages) {
+        fail(`Bühne „${stageName}“ ist unbekannt`)
+        continue
+      }
+      stage = slugify(stageName) || `buehne-${stages.length + newStages.length + 1}`
+      newStages.push({ id: stage, name: stageName })
+      stageByKey.set(stageName.toLowerCase(), stage)
+      stageByKey.set(stage, stage)
+      warnings.push({ row, message: `Neue Bühne „${stageName}“ wird angelegt` })
+    }
+    let id = typeof r.id === 'string' && r.id.trim() ? r.id.trim().toLowerCase() : `${r.day}-${slugify(artist)}`
+    if (!/^[a-z0-9-]{1,60}$/.test(id)) {
+      fail(`id „${id}“ darf nur a–z, 0–9 und - enthalten`)
+      continue
+    }
+    const dupKey = `${r.day}|${stage}|${r.start}|${artist.toLowerCase()}`
+    if (seen.has(dupKey)) {
+      warnings.push({ row, message: `Doppelt (wie Zeile ${seen.get(dupKey)}) – übersprungen` })
+      continue
+    }
+    seen.set(dupKey, row)
+    if (acts.some((a) => a.id === id)) {
+      // same artist twice on one day: keep both with distinct, still deterministic ids
+      let n = 2
+      while (acts.some((a) => a.id === `${id}-${n}`)) n++
+      id = `${id}-${n}`
+    }
+    acts.push({ id, day: r.day, stage, artist, start: r.start, end: r.end, genre: typeof r.genre === 'string' ? r.genre.trim().slice(0, 60) : '', bio: typeof r.bio === 'string' ? r.bio.trim().slice(0, 1000) : '', row })
+  }
+
+  // overlapping slots on the same stage are allowed but flagged
+  for (const a of acts)
+    for (const o of acts)
+      if (o.row > a.row && o.day === a.day && o.stage === a.stage && o.start < a.end && a.start < o.end)
+        warnings.push({ row: o.row, message: `Überschneidet sich auf derselben Bühne mit Zeile ${a.row} (${a.artist})` })
+
+  type Existing = { id: string; day: number; stage_id: string; artist: string; start_min: number; end_min: number; genre: string; bio: string }
+  const before = new Map((actRows.results as Existing[]).map((a) => [a.id, a]))
+  const same = (a: (typeof acts)[number], e: Existing) => a.day === e.day && a.stage === e.stage_id && a.artist === e.artist && a.start === e.start_min && a.end === e.end_min && a.genre === e.genre && a.bio === e.bio
+  const summary = {
+    rows: (b.rows as unknown[]).length,
+    created: acts.filter((a) => !before.has(a.id)).length,
+    updated: acts.filter((a) => before.has(a.id) && !same(a, before.get(a.id)!)).length,
+    unchanged: acts.filter((a) => before.has(a.id) && same(a, before.get(a.id)!)).length,
+    removed: mode === 'replace' ? [...before.keys()].filter((id) => !acts.some((a) => a.id === id)).length : 0,
+    stagesCreated: newStages.length,
+  }
+  errors.sort((x, y) => x.row - y.row)
+  warnings.sort((x, y) => x.row - y.row)
+  if (dryRun || errors.length) return c.json({ dryRun: true, mode, summary, errors, warnings, written: false }, errors.length && !dryRun ? 422 : 200)
+
+  let snapshotId: string | null = null
+  const writes: D1PreparedStatement[] = []
+  if (mode === 'replace') {
+    snapshotId = randomId('snap')
+    writes.push(
+      db.prepare('INSERT INTO import_snapshots (id, festival_id, created_at, note, data) VALUES (?, ?, ?, ?, ?)').bind(snapshotId, f.id, Date.now(), `Vor Import (${summary.rows} Zeilen)`, JSON.stringify({ stages, acts: actRows.results })),
+      db.prepare('DELETE FROM acts WHERE festival_id = ? AND id NOT IN (SELECT value FROM json_each(?))').bind(f.id, JSON.stringify(acts.map((a) => a.id))),
+    )
+  }
+  newStages.forEach((s, i) =>
+    writes.push(
+      db.prepare('INSERT INTO stages (festival_id, id, name, color, x, y, vibe, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, s.id, s.name, PALETTE[(stages.length + i) % PALETTE.length], 200 + ((stages.length + i) % 4) * 180, 220 + Math.floor((stages.length + i) / 4) * 200, '', stages.length + i),
+    ),
+  )
+  for (const a of acts)
+    writes.push(
+      db.prepare(
+        `INSERT INTO acts (festival_id, id, day, stage_id, artist, start_min, end_min, genre, bio, popularity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.5)
+         ON CONFLICT(festival_id, id) DO UPDATE SET day = excluded.day, stage_id = excluded.stage_id, artist = excluded.artist, start_min = excluded.start_min, end_min = excluded.end_min, genre = excluded.genre, bio = excluded.bio`,
+      ).bind(f.id, a.id, a.day, a.stage, a.artist, a.start, a.end, a.genre, a.bio),
+    )
+  writes.push(touch(db, f.id))
+  await db.batch(writes)
+  return c.json({ dryRun: false, mode, summary, errors, warnings, written: true, snapshotId })
+})
+
+app.get('/api/admin/festivals/:slug/snapshots', async (c) => {
+  const f = await festivalBySlug(c)
+  const rows = await c.env.DB.prepare('SELECT id, created_at AS createdAt, note FROM import_snapshots WHERE festival_id = ? ORDER BY created_at DESC LIMIT 20').bind(f.id).all()
+  return c.json(rows.results)
+})
+
+app.post('/api/admin/festivals/:slug/snapshots/:id/restore', async (c) => {
+  const f = await festivalBySlug(c)
+  const snap = await c.env.DB.prepare('SELECT data FROM import_snapshots WHERE id = ? AND festival_id = ?').bind(c.req.param('id'), f.id).first<{ data: string }>()
+  if (!snap) throw new HttpError(404, 'Snapshot nicht gefunden')
+  const data = JSON.parse(snap.data) as { stages: { id: string; name: string }[]; acts: { id: string; day: number; stage_id: string; artist: string; start_min: number; end_min: number; genre: string; bio: string }[] }
+  const db = c.env.DB
+  await db.batch([
+    db.prepare('DELETE FROM acts WHERE festival_id = ?').bind(f.id),
+    // stages removed since the snapshot come back so every restored act has its stage
+    ...data.stages.map((st, i) => db.prepare('INSERT OR IGNORE INTO stages (festival_id, id, name, color, x, y, vibe, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, st.id, st.name, PALETTE[i % PALETTE.length], 200 + (i % 4) * 180, 220 + Math.floor(i / 4) * 200, '', i)),
+    ...data.acts.map((a) =>
+      db.prepare('INSERT INTO acts (festival_id, id, day, stage_id, artist, start_min, end_min, genre, bio, popularity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.5)').bind(f.id, a.id, a.day, a.stage_id, a.artist, a.start_min, a.end_min, a.genre, a.bio),
+    ),
+    touch(db, f.id),
+  ])
+  return c.json({ restored: data.acts.length })
+})
+
 /* ---------- Timetable changes ---------- */
 
 type ChangeRow = { act_id: string; start_min: number | null; end_min: number | null; stage: string | null; cancelled: number; note: string | null; updated_at: number }
