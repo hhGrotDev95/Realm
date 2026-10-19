@@ -61,6 +61,14 @@ try {
     await page.getByPlaceholder(/Nachricht/).fill('Hallo Crew')
     await page.getByRole('button', { name: 'Senden' }).click()
     await page.locator('.bubble.me', { hasText: 'Hallo Crew' }).waitFor()
+    // moderation: report someone else's message, delete your own
+    await page.locator('.bubble.them', { hasText: 'Klingt gut' }).click()
+    await page.getByRole('button', { name: 'Melden', exact: true }).click()
+    await page.getByText('Ausgeblendet – von der Crew gemeldet').waitFor()
+    page.once('dialog', (d) => d.accept())
+    await page.locator('.bubble.me', { hasText: 'Hallo Crew' }).click()
+    await page.getByRole('button', { name: 'Löschen', exact: true }).click()
+    await page.getByText('Nachricht gelöscht').waitFor()
     await page.keyboard.press('Escape')
   })
   await step('wrapped opens after the festival', async () => {

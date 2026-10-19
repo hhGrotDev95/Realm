@@ -43,7 +43,7 @@ interface Persisted {
   // backend (only used when VITE_API_URL is set)
   session: Pick<Session, 'id' | 'token'> | null
   crewRef: { id: string; name: string; code: string } | null
-  remote: { me: string; members: CrewState['members'] } | null
+  remote: { me: string; owner?: string; members: CrewState['members'] } | null
   remoteReports: RemoteReport[]
   pendingJoin: string | null
   outbox: OutboxOp[]
@@ -54,6 +54,8 @@ interface Persisted {
 /** The crew as the UI sees it – demo friends or live members from the server. */
 export interface CrewView {
   live: boolean
+  /** owner id ('me' when it is you); the owner moderates the crew */
+  owner: string | null
   name: string
   code: string | null
   members: Friend[]
@@ -146,6 +148,7 @@ export type SheetState =
   | { kind: 'wrapped' }
   | { kind: 'chat' }
   | { kind: 'shared' }
+  | { kind: 'members' }
   | { kind: 'steps' }
   | null
 
@@ -188,6 +191,9 @@ interface Ctx extends Persisted {
   deleteProfile: () => Promise<void>
   inviteLink: () => string | null
   netOnline: boolean
+  deleteMessage: (id: string) => void
+  flagMessage: (id: string) => void
+  removeMember: (id: string) => void
 }
 
 const C = createContext<Ctx>(null!)
@@ -246,11 +252,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return {
         ...p,
         crewRef: cs.crew,
-        remote: { me: cs.me, members: cs.members },
+        remote: { me: cs.me, owner: cs.owner, members: cs.members },
         chat: [
           // incremental polls only carry new messages: keep the ones we already have
           ...(incremental && p.crewRef?.id === cs.crew.id ? p.chat.filter((m) => !m.pending && !cs.messages.some((n) => n.id === m.id)) : []),
-          ...cs.messages.map((m) => ({ id: m.id, from: me(m.from), text: m.text, min: minuteOfDay(m.at), at: m.at })),
+          ...cs.messages.map((m) => ({ id: m.id, from: me(m.from), text: m.text ?? '', min: minuteOfDay(m.at), at: m.at, deleted: m.deleted, hidden: m.hidden, flaggedByMe: m.flaggedByMe })),
           ...queued.flatMap((o) => (o.kind === 'message' && o.crewId === cs.crew.id ? [{ id: o.id, from: 'me', text: o.text, min: minuteOfDay(o.at), pending: true }] : [])),
         ],
         meetups: [
@@ -287,10 +293,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setS((p) => ({ ...p, session: null, crewRef: null, remote: null }))
-      if (e instanceof ApiError && e.status === 404) setS((p) => ({ ...p, crewRef: null, remote: null }))
+      if (e instanceof ApiError && e.status === 404 && crewId) {
+        setS((p) => ({ ...p, crewRef: null, remote: null, chat: [], meetups: [], declined: [] }))
+        toast('Du bist nicht mehr Mitglied dieser Crew')
+      }
       return !retryable(e)
     }
-  }, [applyCrew])
+  }, [applyCrew, toast])
 
   const sRef = useRef(s)
   sRef.current = s
@@ -458,6 +467,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const synced = s.remote!.members.flatMap((m) => m.steps.map((x) => x.syncedAt))
           return {
             live: true,
+            owner: s.remote!.owner === s.remote!.me ? 'me' : (s.remote!.owner ?? null),
             name: s.crewRef!.name,
             code: s.crewRef!.code,
             members,
@@ -468,6 +478,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         })()
       : {
           live: false,
+          owner: online ? null : 'me', // the demo crew is yours to try moderation
           name: online ? 'Noch keine Crew' : 'Demo-Crew',
           code: null,
           members: online ? [] : FRIENDS,
@@ -525,6 +536,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
       crew,
       updates,
       inviteLink: () => (s.crewRef ? `${location.origin}/?join=${s.crewRef.code}` : null),
+      deleteMessage: (id) => {
+        const mark = () => setS((p) => ({ ...p, chat: p.chat.map((m) => (m.id === id ? { ...m, deleted: true, text: '' } : m)) }))
+        if (!online) return mark()
+        if (!crewId) return
+        api.deleteMessage(crewId, id).then(() => (mark(), refresh()), fail)
+      },
+      flagMessage: (id) =>
+        requireIdentity('Meldungen brauchen einen Namen, damit Missbrauch erkennbar bleibt.', () => {
+          const mark = (hidden: boolean) => setS((p) => ({ ...p, chat: p.chat.map((m) => (m.id === id ? { ...m, flaggedByMe: true, hidden: m.hidden || hidden } : m)) }))
+          if (!online) {
+            mark(true)
+            return toast('Gemeldet – die Nachricht ist ausgeblendet')
+          }
+          if (!crewId) return
+          api.flagMessage(crewId, id).then((r) => {
+            mark(r.hidden)
+            toast(r.hidden ? 'Gemeldet – die Nachricht ist jetzt ausgeblendet' : 'Gemeldet – danke')
+          }, fail)
+        }),
+      removeMember: (id) => {
+        if (!online || !crewId) return toast('Im Demo-Modus können keine Mitglieder entfernt werden')
+        api.removeMember(crewId, id).then(() => {
+          toast('Mitglied entfernt')
+          refresh()
+        }, fail)
+      },
       createCrew: async (name) => {
         try {
           const c = await api.createCrew(name)

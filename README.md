@@ -46,6 +46,7 @@ Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt e
 | --- | --- |
 | Profil | `POST /api/guests`, `GET/PATCH/DELETE /api/me`, `POST /api/me/recovery`, `POST /api/restore`, `PUT /api/me/plan`, `PUT/DELETE /api/me/steps` |
 | Crew | `POST /api/crews`, `POST /api/crews/join`, `GET /api/crews/:id` (Snapshot), `POST /api/crews/:id/leave`, `PUT /api/crews/:id/location`, `POST /api/crews/:id/messages`, `POST /api/crews/:id/meetups` |
+| Moderation | `DELETE /api/crews/:id/messages/:msgId` (eigene / Gründer:in), `POST /api/crews/:id/messages/:msgId/flag` (ab 2 Meldungen ausgeblendet), `DELETE /api/crews/:id/members/:guestId` (Gründer:in, sperrt Wiederbeitritt) |
 | Meetups | `PUT /api/meetups/:id/rsvp`, `DELETE /api/meetups/:id` |
 | Meldungen | `GET/POST /api/reports`, `PUT /api/reports/:id/vote` |
 | Offiziell | `GET /api/announcements` (öffentlich), `POST/PATCH/DELETE /api/admin/announcements[/:id]` (Admin-Token) |

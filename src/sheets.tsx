@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion'
-import { Bell, BellRing, Check, ChevronRight, Copy, Fingerprint, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
+import { Flag, Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Copy, Fingerprint, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
 import { CAT_ICON } from './screens/MapScreen'
@@ -35,6 +35,7 @@ export function Sheets() {
           {s?.kind === 'restore' && <Restore />}
           {s?.kind === 'chat' && <Chat />}
           {s?.kind === 'shared' && <Shared />}
+          {s?.kind === 'members' && <Members />}
           {s?.kind === 'steps' && <Steps />}
         </motion.div>
       </AnimatePresence>
@@ -70,6 +71,8 @@ function sheetLabel(s: SheetState): string {
       return 'Crew-Chat'
     case 'shared':
       return 'Gemeinsame Acts'
+    case 'members':
+      return 'Mitglieder'
     case 'steps':
       return 'Step-Challenge'
     default:
@@ -981,7 +984,7 @@ function Restore() {
 /* ---------------- Crew sub pages ---------------- */
 function Chat() {
   const { crew } = useApp()
-  const { chat, sendChat, requireIdentity, openSheet, now } = useApp()
+  const { chat, sendChat, requireIdentity, openSheet, now, deleteMessage, flagMessage } = useApp()
   const [text, setText] = useState('')
   const [active, setActive] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null)
@@ -1007,27 +1010,53 @@ function Chat() {
                   {(crew.byId[m.from]?.name ?? 'Gast')} · {fmt(m.min)}
                 </span>
               )}
-              <button className={`bubble ${me ? 'me' : 'them'} ${m.pending ? 'pending' : ''}`} style={{ textAlign: 'left' }} onClick={() => setActive(active === m.id ? null : m.id)}>
-                {m.text}
-              </button>
+              {m.deleted || (m.hidden && !me) ? (
+                <span className={`bubble ${me ? 'me' : 'them'} removed`}>{m.deleted ? 'Nachricht gelöscht' : 'Ausgeblendet – von der Crew gemeldet'}</span>
+              ) : (
+                <button className={`bubble ${me ? 'me' : 'them'} ${m.pending ? 'pending' : ''}`} style={{ textAlign: 'left' }} onClick={() => setActive(active === m.id ? null : m.id)} aria-expanded={active === m.id}>
+                  {m.text}
+                </button>
+              )}
               {m.pending && <span className="tiny faint" style={{ marginTop: 2 }}>Wird gesendet …</span>}
+              {me && m.hidden && !m.deleted && <span className="tiny faint" style={{ marginTop: 2 }}>Von der Crew gemeldet – für andere ausgeblendet</span>}
               <AnimatePresence>
-                {active === m.id && (
-                  <motion.button
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="btn ghost sm"
-                    style={{ color: 'var(--brand)' }}
-                    onClick={() => {
-                      setActive(null)
-                      requireIdentity('Damit deine Crew weiß, wer einlädt.', () =>
-                        openSheet({ kind: 'newMeetup', note: m.text.slice(0, 60), place: /archive/i.test(m.text) ? 'Archive Entrance' : undefined, poi: /archive/i.test(m.text) ? 'stage-archive' : undefined }),
-                      )
-                    }}
-                  >
-                    <CalendarPlus size={15} /> In Meetup umwandeln
-                  </motion.button>
+                {active === m.id && !m.pending && (
+                  <motion.div className="msg-actions" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
+                    <button
+                      className="btn ghost sm"
+                      style={{ color: 'var(--brand)' }}
+                      onClick={() => {
+                        setActive(null)
+                        requireIdentity('Damit deine Crew weiß, wer einlädt.', () =>
+                          openSheet({ kind: 'newMeetup', note: m.text.slice(0, 60), place: /archive/i.test(m.text) ? 'Archive Entrance' : undefined, poi: /archive/i.test(m.text) ? 'stage-archive' : undefined }),
+                        )
+                      }}
+                    >
+                      <CalendarPlus size={15} /> In Meetup umwandeln
+                    </button>
+                    {(me || crew.owner === 'me') && (
+                      <button
+                        className="btn ghost sm"
+                        onClick={() => {
+                          setActive(null)
+                          if (confirm(me ? 'Nachricht für alle löschen?' : 'Nachricht als Crew-Gründer:in für alle löschen?')) deleteMessage(m.id)
+                        }}
+                      >
+                        <Trash2 size={15} /> Löschen
+                      </button>
+                    )}
+                    {!me && !m.flaggedByMe && (
+                      <button
+                        className="btn ghost sm"
+                        onClick={() => {
+                          setActive(null)
+                          flagMessage(m.id)
+                        }}
+                      >
+                        <Flag size={15} /> Melden
+                      </button>
+                    )}
+                  </motion.div>
                 )}
               </AnimatePresence>
             </motion.div>
@@ -1053,6 +1082,51 @@ function Chat() {
           <Send size={19} />
         </button>
       </form>
+    </>
+  )
+}
+
+function Members() {
+  const { crew, guest, removeMember } = useApp()
+  const rows = [{ id: 'me', name: guest.nickname ?? 'Du', color: guest.color }, ...crew.members]
+  const canModerate = crew.owner === 'me' && crew.live
+  return (
+    <>
+      <div className="sheet-head">
+        <div className="grow">
+          <h2 style={{ fontSize: 24 }}>Mitglieder</h2>
+          <div className="small muted">
+            {rows.length} {rows.length === 1 ? 'Person' : 'Personen'} in {crew.name}
+          </div>
+        </div>
+      </div>
+      <div className="list">
+        {rows.map((m) => (
+          <div key={m.id} className="list-item">
+            <Avatar id={m.id} />
+            <span className="grow" style={{ fontWeight: 500 }}>
+              {m.id === 'me' ? `${m.name} (du)` : m.name}
+            </span>
+            {crew.owner === m.id && (
+              <span className="tag official">
+                <Crown size={12} /> Gründer:in
+              </span>
+            )}
+            {canModerate && m.id !== 'me' && (
+              <button
+                className="btn ghost sm"
+                aria-label={`${m.name} entfernen`}
+                onClick={() => confirm(`${m.name} aus der Crew entfernen? Die Person kann mit dem Code nicht wieder beitreten.`) && removeMember(m.id)}
+              >
+                <UserMinus size={16} /> Entfernen
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="tiny faint" style={{ marginTop: 14 }}>
+        Nachrichten, die zwei Mitglieder melden, werden für alle außer der verfassenden Person ausgeblendet. {canModerate ? 'Als Gründer:in kannst du Nachrichten löschen und Mitglieder entfernen.' : ''}
+      </p>
     </>
   )
 }
