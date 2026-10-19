@@ -32,6 +32,8 @@ const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePa
 const errors = []
 const user = async () => {
   const ctx = await browser.newContext({ viewport: { width: 400, height: 860 } })
+  // pin the app clock to "Friday 19:52" so the scenario does not depend on today's date
+  await ctx.addInitScript(() => localStorage.getItem('realm.v2') || localStorage.setItem('realm.v2', JSON.stringify({ clockMode: 'demo', phase: 'during' })))
   const page = await ctx.newPage()
   page.on('pageerror', (e) => errors.push(e.message))
   return page

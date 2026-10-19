@@ -287,3 +287,25 @@ export function fmt(min: number) {
   const m = ((min % 1440) + 1440) % 1440
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 }
+
+/** Doors open on day 0 at 10:00 local time. */
+export const FESTIVAL_START = new Date(2027, 6, 15, 10, 0)
+const DAY_MS = 86_400_000
+
+/**
+ * Real-time clock. A festival day runs from 06:00 to 06:00, so a set at 01:30
+ * still belongs to the previous day (minute 1530), matching the timetable.
+ */
+export function realClock(date = new Date()): { phase: Phase; day: number; min: number; msToStart: number } {
+  const shifted = new Date(date.getTime() - 6 * 3_600_000)
+  const day0 = new Date(FESTIVAL_START.getFullYear(), FESTIVAL_START.getMonth(), FESTIVAL_START.getDate())
+  const today = new Date(shifted.getFullYear(), shifted.getMonth(), shifted.getDate())
+  const day = Math.round((today.getTime() - day0.getTime()) / DAY_MS)
+  const min = shifted.getHours() * 60 + shifted.getMinutes() + 360
+  const msToStart = FESTIVAL_START.getTime() - date.getTime()
+  const phase: Phase = day < 0 ? 'before' : day === 0 && min < 14 * 60 ? (msToStart > 0 ? 'before' : 'arrival') : day <= 2 ? 'during' : day <= 3 ? 'departure' : 'after'
+  return { phase, day, min, msToStart }
+}
+
+/** Countdown shown in the "before" phase of the demo. */
+export const DEMO_MS_TO_START = ((9 * 24 + 14) * 60 + 22) * 60_000

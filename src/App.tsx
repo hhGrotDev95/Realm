@@ -19,8 +19,17 @@ const TABS: { id: Tab; label: string; icon: typeof House }[] = [
 ]
 
 export function AppBar({ floating }: { floating?: boolean }) {
-  const { phase, now, openSheet } = useApp()
-  const sub = phase === 'during' || phase === 'arrival' ? `${DAYS[now.day]?.label ?? ''} · ${fmt(now.min)}` : PHASES.find((p) => p.id === phase)!.hint
+  const { phase, now, openSheet, clockMode, msToStart } = useApp()
+  const sub =
+    phase === 'during' || phase === 'arrival'
+      ? `${DAYS[now.day]?.label ?? ''} · ${fmt(now.min)}`
+      : clockMode === 'real'
+        ? phase === 'before'
+          ? `Noch ${Math.ceil(msToStart / 86_400_000)} Tage`
+          : phase === 'departure'
+            ? 'Abreisetag'
+            : 'Bis nächstes Jahr'
+        : PHASES.find((p) => p.id === phase)!.hint
   return (
     <header className={`appbar ${floating ? 'floating' : ''}`}>
       <div className="logo" aria-hidden>
