@@ -431,3 +431,24 @@ textarea.field { height: 88px; padding: 12px 14px; resize: none; }
 .act.cancelled .name { text-decoration: line-through; color: var(--text-3); }
 .tl-act.cancelled { opacity: 0.45; }
 .tl-act.cancelled b { text-decoration: line-through; }
+
+/* ---------- Organizer console ---------- */
+.admin { min-height: 100dvh; background: var(--bg); }
+.admin-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; padding: 14px 20px; background: rgba(10,10,13,.92); backdrop-filter: blur(16px); border-bottom: 1px solid var(--line); }
+.admin-bar .logo { width: 32px; height: 32px; border-radius: 9px; background: var(--brand); color: var(--brand-ink); display: grid; place-items: center; font-family: var(--display); font-weight: 800; }
+.admin-main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+.admin-login { max-width: 420px; margin: 8vh auto 0; display: flex; flex-direction: column; gap: 12px; }
+.admin-tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+.admin-tabs button { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 16px; border-radius: 999px; color: var(--text-2); font-weight: 600; }
+.admin-tabs button.on { background: var(--surface-2); color: var(--text); }
+.admin-grid { display: grid; gap: 16px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 860px) { .admin-grid { grid-template-columns: 1.1fr 1fr; } }
+.admin-h { font-family: var(--display); font-size: 20px; margin: 0 0 14px; letter-spacing: -0.01em; }
+.admin-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; font-size: 13px; color: var(--text-2); font-weight: 500; flex: 1; min-width: 0; }
+.admin-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.admin-row .admin-field { min-width: 140px; }
+.admin-sel { background: var(--surface-2); border-radius: 12px; }
+.admin .list-item { min-height: 44px; padding-left: 8px; padding-right: 8px; }
+select.field { appearance: none; }
+.admin-toast { left: 50%; right: auto; transform: translateX(-50%); bottom: 24px; position: fixed; }
+.admin-toast.err { background: var(--crit); color: #fff; }

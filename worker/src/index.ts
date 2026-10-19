@@ -376,6 +376,7 @@ const admin = async (c: Context<App>, next: () => Promise<void>) => {
   await next()
 }
 app.use('/api/admin/*', admin)
+app.get('/api/admin/session', (c) => c.json({ ok: true }))
 
 const SEVERITY_ALL = ['info', 'warning', 'critical'] as const
 function announcementInput(b: Record<string, unknown>, partial = false) {

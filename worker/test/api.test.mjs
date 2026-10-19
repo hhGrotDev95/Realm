@@ -207,6 +207,8 @@ try {
 
   await test('announcements: admin-only writes, public reads, expiry', async () => {
     const draft = { title: 'Gewitterwarnung ab 22:30', body: 'Open-Air-Bühnen pausieren kurz.', place: 'Gelände', severity: 'warning', validMin: 180 }
+    assert.equal((await api('GET', '/api/admin/session', 'wrong')).status, 401)
+    assert.equal((await api('GET', '/api/admin/session', 'test-admin-token')).status, 200)
     assert.equal((await api('POST', '/api/admin/announcements', null, draft)).status, 401)
     assert.equal((await api('POST', '/api/admin/announcements', lea.token, draft)).status, 401)
     assert.equal((await api('POST', '/api/admin/announcements', 'test-admin-token', { ...draft, severity: 'panic' })).status, 400)
