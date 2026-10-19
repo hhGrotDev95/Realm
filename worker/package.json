@@ -1,0 +1,21 @@
+{
+  "name": "realm-api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "migrate:local": "wrangler d1 migrations apply realm --local",
+    "migrate:remote": "wrangler d1 migrations apply realm --remote",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc -p .",
+    "test": "node test/api.test.mjs"
+  },
+  "dependencies": {
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261019.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.151.2"
+  }
+}

@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { Beer, Check, Cross, DoorOpen, Droplet, Info, Layers, LocateFixed, Bus, Music, Search, Tent, Toilet, Utensils, X, MapPin, TriangleAlert, Users, Satellite, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { FRIENDS, ME, POIS, STAGES, UPDATES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
 import { useApp } from '../store'
 import { AppBar } from '../App'
 
@@ -31,7 +31,8 @@ const H = 940
 type View = { x: number; y: number; k: number }
 
 export function MapScreen() {
-  const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, myUpdates, votes, sheet, set, toast, requireIdentity } = useApp()
+  const { crew } = useApp()
+  const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, updates, votes, sheet, set, toast, requireIdentity } = useApp()
   const wrap = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 0.5 })
   const [animate, setAnimate] = useState(false)
@@ -160,7 +161,7 @@ export function MapScreen() {
   }
 
   const routePoi = route ? POIS.find((p) => p.id === route) : null
-  const reports = [...myUpdates, ...UPDATES].filter((u) => u.poi && u.source !== 'official' && votes[u.id] !== 'fixed')
+  const reports = updates.filter((u) => u.poi && u.source !== 'official' && votes[u.id] !== 'fixed')
   const inv = 1 / view.k
   const selectedPoi = sheet?.kind === 'poi' ? sheet.id : null
 
@@ -224,7 +225,7 @@ export function MapScreen() {
             ))}
           {layers.friends &&
             shareLocation &&
-            FRIENDS.filter((f) => f.at && f.at !== 'camp').map((f, i) => {
+            crew.members.filter((f) => f.at && f.at !== 'camp').map((f, i) => {
               const s = stageById[f.at as keyof typeof stageById]
               const a = (i * 2.4) % (Math.PI * 2)
               return (

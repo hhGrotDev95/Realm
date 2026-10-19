@@ -54,13 +54,12 @@ export default function App() {
       </div>
       <div className="device">
         {tab !== 'map' && <AppBar />}
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
+        {/* enter-only transition: exit animations could stall while live data re-renders the old tab */}
+        <motion.div
             key={tab}
             style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: tab === 'map' ? 'absolute' : 'relative', inset: 0 }}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
           >
             {tab === 'home' && <Home />}
@@ -68,7 +67,6 @@ export default function App() {
             {tab === 'map' && <MapScreen />}
             {tab === 'crew' && <Crew />}
           </motion.div>
-        </AnimatePresence>
 
         <nav className="nav" aria-label="Hauptnavigation">
           {TABS.map((t) => {

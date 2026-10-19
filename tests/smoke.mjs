@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { chromium } from 'playwright'
 
 const PORT = 4321
-const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' })
+const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore', detached: true })
 const url = `http://localhost:${PORT}`
 for (let i = 0; i < 50; i++) {
   try {
@@ -70,5 +70,7 @@ try {
   process.exitCode = 1
 } finally {
   await browser.close()
-  server.kill()
+  try {
+    process.kill(-server.pid)
+  } catch {}
 }

@@ -1,14 +1,14 @@
 import { AnimatePresence, motion, useDragControls, type PanInfo } from 'framer-motion'
 import { Heart } from 'lucide-react'
 import { useEffect, useRef, type ReactNode } from 'react'
-import { friendById, stageById, type StageId, type UpdateSource } from './data'
+import { stageById, type StageId, type UpdateSource } from './data'
 import { useApp } from './store'
 
 export const spring = { type: 'spring', stiffness: 420, damping: 36 } as const
 
 export function Avatar({ id, size }: { id: string; size?: 'lg' | 'xl' }) {
-  const { guest } = useApp()
-  const f = id === 'me' ? { name: guest.nickname ?? 'Du', color: guest.color } : friendById[id]
+  const { guest, crew } = useApp()
+  const f = id === 'me' ? { name: guest.nickname ?? 'Du', color: guest.color } : (crew.byId[id] ?? { name: '?', color: '#55545f' })
   return (
     <span className={`avatar ${size ?? ''}`} style={{ background: f.color }} title={f.name}>
       {f.name[0]}
