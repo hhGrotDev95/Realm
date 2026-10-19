@@ -1,7 +1,8 @@
 // Realm — demo dataset for "Realm Open Air 2027".
 // Times are minutes after midnight of the festival day (values > 1440 = after midnight).
 
-export type StageId = 'generator' | 'archive' | 'lagoon' | 'forest' | 'observatory'
+/** Stage ids are defined per festival (e.g. 'generator' in the demo). */
+export type StageId = string
 
 export interface Stage {
   id: StageId
@@ -19,7 +20,7 @@ export const STAGES: Stage[] = [
   { id: 'forest', name: 'Forest Hall', color: '#7BE0A0', x: 220, y: 620, vibe: 'Indie · Live' },
   { id: 'observatory', name: 'Observatory', color: '#E07BFF', x: 470, y: 760, vibe: 'Ambient · Late' },
 ]
-export const stageById = Object.fromEntries(STAGES.map((s) => [s.id, s])) as Record<StageId, Stage>
+export const stageById: Record<StageId, Stage> = Object.fromEntries(STAGES.map((s) => [s.id, s]))
 
 export interface FestivalDay {
   idx: number
@@ -152,7 +153,7 @@ export const ACTS: Act[] = LINEUP.flatMap((rows, day) =>
   }),
 ).sort((a, b) => a.day - b.day || a.start - b.start)
 
-export const actById = Object.fromEntries(ACTS.map((a) => [a.id, a])) as Record<string, Act>
+export const actById: Record<string, Act> = Object.fromEntries(ACTS.map((a) => [a.id, a]))
 
 export interface Friend {
   id: string
@@ -294,8 +295,19 @@ export function fmt(min: number) {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 }
 
+/** Name, place and look of the festival on screen – the demo's values until a festival is loaded. */
+export const FESTIVAL = {
+  slug: 'realm-open-air',
+  name: 'Realm Open Air',
+  location: 'Lüneburger Heide' as string | null,
+  theme: {} as { brand?: string },
+}
+
 /** Doors open on day 0 at 10:00 local time. */
-export const FESTIVAL_START = new Date(2027, 6, 15, 10, 0)
+const festivalStart = () => {
+  const [y, m, d] = DAYS[0].date.split('-').map(Number)
+  return new Date(y, m - 1, d, 10, 0)
+}
 const DAY_MS = 86_400_000
 
 /**
@@ -304,12 +316,14 @@ const DAY_MS = 86_400_000
  */
 export function realClock(date = new Date()): { phase: Phase; day: number; min: number; msToStart: number } {
   const shifted = new Date(date.getTime() - 6 * 3_600_000)
-  const day0 = new Date(FESTIVAL_START.getFullYear(), FESTIVAL_START.getMonth(), FESTIVAL_START.getDate())
+  const start = festivalStart()
+  const day0 = new Date(start.getFullYear(), start.getMonth(), start.getDate())
   const today = new Date(shifted.getFullYear(), shifted.getMonth(), shifted.getDate())
   const day = Math.round((today.getTime() - day0.getTime()) / DAY_MS)
   const min = shifted.getHours() * 60 + shifted.getMinutes() + 360
-  const msToStart = FESTIVAL_START.getTime() - date.getTime()
-  const phase: Phase = day < 0 ? 'before' : day === 0 && min < 14 * 60 ? (msToStart > 0 ? 'before' : 'arrival') : day <= 2 ? 'during' : day <= 3 ? 'departure' : 'after'
+  const msToStart = start.getTime() - date.getTime()
+  const last = DAYS.length - 1
+  const phase: Phase = day < 0 ? 'before' : day === 0 && min < 14 * 60 ? (msToStart > 0 ? 'before' : 'arrival') : day <= last ? 'during' : day <= last + 1 ? 'departure' : 'after'
   return { phase, day, min, msToStart }
 }
 
@@ -352,4 +366,48 @@ export function applyTimetableChanges(changes: TimetableChange[]) {
       : undefined
   }
   ACTS.sort((x, y) => x.day - y.day || x.start - y.start)
+}
+
+/** The public festival document served by GET /api/festivals/:slug. */
+export interface FestivalBundle {
+  festival: { slug: string; name: string; location: string | null; status: string; theme: { brand?: string }; modules: Record<string, boolean>; updatedAt: number }
+  days: FestivalDay[]
+  stages: Stage[]
+  acts: Omit<Act, 'change'>[]
+  pois: Poi[]
+}
+
+const replace = <T,>(arr: T[], items: T[]) => arr.splice(0, arr.length, ...items)
+const refill = <T,>(map: Record<string, T>, entries: [string, T][]) => {
+  for (const k of Object.keys(map)) delete map[k]
+  Object.assign(map, Object.fromEntries(entries))
+}
+
+/**
+ * Swaps the built-in demo data for a festival loaded from the API. The shared arrays and
+ * lookup maps are updated in place so every module keeps working with the same references.
+ */
+export function loadFestivalBundle(b: FestivalBundle) {
+  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, theme: b.festival.theme ?? {} })
+  replace(DAYS, b.days)
+  replace(STAGES, b.stages)
+  refill(stageById, STAGES.map((st) => [st.id, st]))
+  replace(ACTS, b.acts.map((a) => ({ ...a })))
+  refill(actById, ACTS.map((a) => [a.id, a]))
+  replace(POIS, b.pois)
+  ORIGINAL.clear()
+  for (const a of ACTS) ORIGINAL.set(a.id, { start: a.start, end: a.end, stage: a.stage })
+  applied = ''
+}
+
+/** "15.–17. Juli 2027" from the festival days. */
+export function dateRange() {
+  if (!DAYS.length) return ''
+  const fmtDay = (iso: string) => new Date(iso + 'T12:00:00')
+  const a = fmtDay(DAYS[0].date)
+  const b = fmtDay(DAYS[DAYS.length - 1].date)
+  const month = (d: Date) => d.toLocaleDateString('de-DE', { month: 'long' })
+  return a.getMonth() === b.getMonth()
+    ? `${a.getDate()}.–${b.getDate()}. ${month(b)} ${b.getFullYear()}`
+    : `${a.getDate()}. ${month(a)} – ${b.getDate()}. ${month(b)} ${b.getFullYear()}`
 }

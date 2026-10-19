@@ -38,12 +38,24 @@ Profil & Einstellungen öffnen sich über den Avatar oben rechts (dort auch der 
 - **Step-Challenge**: explizites Opt-in, nur Tagessumme, crew-intern, „Top 10 %“ statt öffentlichem Rang.
 - Zustand lokal persistiert (localStorage), Bottom-Sheets mit Drag-to-dismiss & Escape, Tap auf aktiven Tab scrollt nach oben, `prefers-reduced-motion` respektiert.
 
+## Plattform: ein Festival = ein Mandant
+
+Realm ist eine Festivalplattform: Jedes Festival ist ein isolierter Mandant mit eigenem Timetable, Bühnen, Karte, Crews, Meldungen und Plänen.
+
+- Die App wählt das Festival über `?f=<slug>` (gemerkt), sonst `VITE_FESTIVAL` (Standard `realm-open-air`). Im Profil lässt sich zwischen veröffentlichten Festivals wechseln.
+- Festivaldaten kommen aus `GET /api/festivals/:slug` und werden offline zwischengespeichert; ein beschädigter oder fremder Cache wird verworfen.
+- Jede mandantenbezogene Anfrage trägt `X-Festival: <slug>`; der Worker löst den Mandanten serverseitig auf und filtert jede Abfrage danach. Manipulierte IDs (Crew, Act, Meldung, Ankündigung) eines anderen Festivals ergeben 404 bzw. werden abgelehnt.
+- Status: `draft` nur für Admins sichtbar, `published` öffentlich, `archived` lesbar, aber schreibgeschützt (außer für Admins).
+- Lokaler Zustand (Plan, Crew, Outbox) liegt je Festival unter `realm.v2:<slug>`; der alte Einzel-Festival-Speicher wird für das Standardfestival übernommen.
+- Demo-Daten für zwei Festivals (`realm-open-air`, `nordlicht`) erzeugt `worker/scripts/build-seed.mts` als Migration `0006`.
+
 ## Backend (`worker/`)
 
 Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt eine pseudonyme ID und ein Bearer-Token (gespeichert wird nur der SHA-256-Hash).
 
 | Bereich | Endpunkte |
 | --- | --- |
+| Festivals | `GET /api/festivals` (veröffentlichte), `GET /api/festivals/:slug` (Festivaldokument), `GET /api/admin/festivals` (alle, Admin) |
 | Profil | `POST /api/guests`, `GET/PATCH/DELETE /api/me`, `POST /api/me/recovery`, `POST /api/restore`, `PUT /api/me/plan`, `PUT/DELETE /api/me/steps` |
 | Crew | `POST /api/crews`, `POST /api/crews/join`, `GET /api/crews/:id` (Snapshot), `POST /api/crews/:id/leave`, `PUT /api/crews/:id/location`, `POST /api/crews/:id/messages`, `POST /api/crews/:id/meetups` |
 | Moderation | `DELETE /api/crews/:id/messages/:msgId` (eigene / Gründer:in), `POST /api/crews/:id/messages/:msgId/flag` (ab 2 Meldungen ausgeblendet), `DELETE /api/crews/:id/members/:guestId` (Gründer:in, sperrt Wiederbeitritt) |
@@ -89,7 +101,7 @@ npm run deploy                        # ALLOWED_ORIGINS in wrangler.toml auf die
 ## Tests
 
 - `npm run test:e2e` – Smoke-Test der Demo-App (7 Abläufe)
-- `cd worker && npm test` – 16 API-Integrationstests gegen `wrangler dev` mit lokaler D1
+- `cd worker && npm test` – API-Integrationstests gegen `wrangler dev` mit lokaler D1 (inkl. Mandantentrennung, Entwurf/Archiv) und ein Migrationstest, der Altdaten durch alle Migrationen führt
 - `npm run test:live` – zwei Browser-Nutzer gegen die echte API (Crew gründen, per Link beitreten, Chat, Meetup-Zusage, geteilte Pläne, Meldung bestätigen, Wiederherstellung auf neuem Gerät)
 
 ## Visuelles System

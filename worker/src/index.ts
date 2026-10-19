@@ -10,21 +10,21 @@ export interface Env {
 }
 
 type Guest = { id: string; nickname: string | null; color: string }
-type App = { Bindings: Env; Variables: { guest: Guest } }
+type Festival = { id: string; slug: string; status: 'draft' | 'published' | 'archived'; stages: string[] }
+type App = { Bindings: Env; Variables: { guest: Guest; festival: Festival; isAdmin: boolean } }
 
 const MIN = 60_000
 const FLAGS_TO_HIDE = 2
 const REPORT_TTL = 60 * MIN
 const STILL_EXTENDS = 30 * MIN
 const FIXED_TO_RETIRE = 2
-const LOCATIONS = ['generator', 'archive', 'lagoon', 'forest', 'observatory', 'camp'] as const
 const SEVERITIES = ['info', 'warning'] as const
 
 const app = new Hono<App>()
 
 app.use('/api/*', async (c, next) => {
   const allowed = c.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim())
-  return cors({ origin: (o) => (allowed.includes('*') || allowed.includes(o) ? o : null), allowHeaders: ['Authorization', 'Content-Type'], allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], maxAge: 86400 })(c, next)
+  return cors({ origin: (o) => (allowed.includes('*') || allowed.includes(o) ? o : null), allowHeaders: ['Authorization', 'Content-Type', 'X-Festival'], allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], maxAge: 86400 })(c, next)
 })
 
 app.onError((err, c) => {
@@ -77,12 +77,81 @@ const requireName = (g: Guest) => {
   if (!g.nickname) throw new HttpError(403, 'Bitte zuerst einen Namen wählen')
 }
 
-async function membership(db: D1Database, crewId: string, guestId: string) {
-  const m = await db.prepare('SELECT 1 FROM crew_members WHERE crew_id = ? AND guest_id = ?').bind(crewId, guestId).first()
+/** Membership is checked together with the tenant: a crew of another festival does not exist here. */
+async function membership(c: Context<App>, crewId: string, guestId = c.get('guest').id) {
+  const m = await c.env.DB.prepare('SELECT 1 FROM crew_members m JOIN crews c ON c.id = m.crew_id WHERE m.crew_id = ? AND m.guest_id = ? AND c.festival_id = ?')
+    .bind(crewId, guestId, c.get('festival').id)
+    .first()
   if (!m) throw new HttpError(404, 'Crew nicht gefunden')
 }
 
+async function isAdminRequest(c: Context<App>) {
+  const expected = c.env.ADMIN_TOKEN
+  if (!expected) return false
+  const given = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '') ?? ''
+  // constant-time comparison via hashing both sides
+  const [a, b] = await Promise.all([sha256(given), sha256(expected)])
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+async function loadFestival(db: D1Database, slug: string): Promise<Festival | null> {
+  const f = await db.prepare('SELECT id, slug, status FROM festivals WHERE slug = ?').bind(slug).first<Omit<Festival, 'stages'>>()
+  if (!f) return null
+  const stages = await db.prepare('SELECT id FROM stages WHERE festival_id = ?').bind(f.id).all<{ id: string }>()
+  return { ...f, stages: stages.results.map((s) => s.id) }
+}
+
+/**
+ * Resolves the tenant from the X-Festival header (a slug) on the server. Drafts exist only for
+ * admins; archived festivals are read-only until reactivated.
+ */
+const tenant = async (c: Context<App>, next: () => Promise<void>) => {
+  const slug = c.req.header('X-Festival')
+  if (!slug) throw new HttpError(400, 'X-Festival fehlt')
+  const f = await loadFestival(c.env.DB, slug)
+  const admin = c.get('isAdmin') ?? (await isAdminRequest(c))
+  if (!f || (f.status === 'draft' && !admin)) throw new HttpError(404, 'Festival nicht gefunden')
+  if (f.status === 'archived' && c.req.method !== 'GET' && !admin) throw new HttpError(403, 'Festival ist archiviert und schreibgeschützt')
+  c.set('festival', f)
+  await next()
+}
+
+async function actExists(c: Context<App>, actId: string) {
+  return !!(await c.env.DB.prepare('SELECT 1 FROM acts WHERE festival_id = ? AND id = ?').bind(c.get('festival').id, actId).first())
+}
+
 app.get('/api/health', (c) => c.json({ ok: true }))
+
+/* ---------- Festivals (public) ---------- */
+
+type FestivalRow = { id: string; slug: string; name: string; location: string | null; status: string; theme: string; modules: string; updated_at: number }
+
+app.get('/api/festivals', async (c) => {
+  const rows = await c.env.DB.prepare("SELECT slug, name, location FROM festivals WHERE status = 'published' ORDER BY name").all()
+  return c.json(rows.results)
+})
+
+/** Everything the visitor app needs to render a festival, in one cacheable document. */
+app.get('/api/festivals/:slug', async (c) => {
+  const f = await c.env.DB.prepare('SELECT * FROM festivals WHERE slug = ?').bind(c.req.param('slug')).first<FestivalRow>()
+  if (!f || (f.status === 'draft' && !(await isAdminRequest(c)))) throw new HttpError(404, 'Festival nicht gefunden')
+  const db = c.env.DB
+  const [days, stages, acts, pois] = await db.batch([
+    db.prepare('SELECT idx, date, label, short FROM festival_days WHERE festival_id = ? ORDER BY idx').bind(f.id),
+    db.prepare('SELECT id, name, color, x, y, vibe FROM stages WHERE festival_id = ? ORDER BY sort, name').bind(f.id),
+    db.prepare('SELECT id, day, stage_id AS stage, artist, start_min AS start, end_min AS "end", genre, bio, popularity FROM acts WHERE festival_id = ? ORDER BY day, start_min').bind(f.id),
+    db.prepare('SELECT id, cat, name, x, y, detail, status, important FROM pois WHERE festival_id = ?').bind(f.id),
+  ])
+  return c.json({
+    festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), updatedAt: f.updated_at },
+    days: days.results,
+    stages: stages.results,
+    acts: acts.results,
+    pois: (pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+  })
+})
 
 /* ---------- Guest identity ---------- */
 
@@ -117,10 +186,16 @@ app.use('/api/meetups/*', auth)
 app.use('/api/reports', auth)
 app.use('/api/reports/*', auth)
 
+// tenant-scoped routes (the profile itself – PATCH/DELETE /api/me, recovery – is global)
+for (const path of ['/api/me/plan', '/api/me/steps', '/api/crews', '/api/crews/*', '/api/meetups/*', '/api/reports', '/api/reports/*', '/api/announcements', '/api/timetable/*'])
+  app.use(path, tenant)
+app.get('/api/me', tenant)
+
 app.get('/api/me', async (c) => {
   const g = c.get('guest')
-  const crews = await c.env.DB.prepare('SELECT c.id, c.name, c.code FROM crews c JOIN crew_members m ON m.crew_id = c.id WHERE m.guest_id = ? ORDER BY m.joined_at').bind(g.id).all()
-  const plan = await c.env.DB.prepare('SELECT act_id FROM plans WHERE guest_id = ?').bind(g.id).all<{ act_id: string }>()
+  const fid = c.get('festival').id
+  const crews = await c.env.DB.prepare('SELECT c.id, c.name, c.code FROM crews c JOIN crew_members m ON m.crew_id = c.id WHERE m.guest_id = ? AND c.festival_id = ? ORDER BY m.joined_at').bind(g.id, fid).all()
+  const plan = await c.env.DB.prepare('SELECT act_id FROM plans WHERE guest_id = ? AND festival_id = ?').bind(g.id, fid).all<{ act_id: string }>()
   const secured = await c.env.DB.prepare('SELECT recovery_hash IS NOT NULL AS s FROM guests WHERE id = ?').bind(g.id).first<{ s: number }>()
   return c.json({ ...g, secured: !!secured?.s, crews: crews.results, plan: plan.results.map((r) => r.act_id) })
 })
@@ -155,23 +230,30 @@ app.put('/api/me/plan', async (c) => {
   const acts = (await body(c)).acts
   if (!Array.isArray(acts) || acts.length > 200 || !acts.every((a) => typeof a === 'string' && a.length <= 60)) throw new HttpError(400, 'acts ist ungültig')
   const id = c.get('guest').id
+  const fid = c.get('festival').id
+  // only acts of this festival are stored; unknown ids (stale or foreign) are reported back
+  const known = new Set((await c.env.DB.prepare('SELECT id FROM acts WHERE festival_id = ?').bind(fid).all<{ id: string }>()).results.map((r) => r.id))
   const unique = [...new Set(acts as string[])]
-  await c.env.DB.batch([c.env.DB.prepare('DELETE FROM plans WHERE guest_id = ?').bind(id), ...unique.map((a) => c.env.DB.prepare('INSERT INTO plans (guest_id, act_id) VALUES (?, ?)').bind(id, a))])
-  return c.json({ acts: unique })
+  const accepted = unique.filter((a) => known.has(a))
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM plans WHERE guest_id = ? AND festival_id = ?').bind(id, fid),
+    ...accepted.map((a) => c.env.DB.prepare('INSERT INTO plans (guest_id, festival_id, act_id) VALUES (?, ?, ?)').bind(id, fid, a)),
+  ])
+  return c.json({ acts: accepted, rejected: unique.filter((a) => !known.has(a)) })
 })
 
 app.put('/api/me/steps', async (c) => {
   const b = await body(c)
-  const day = v.int(b.day, 'day', 0, 2)
+  const day = v.int(b.day, 'day', 0, 13)
   const total = v.int(b.total, 'total', 0, 150_000)
-  await c.env.DB.prepare('INSERT INTO steps (guest_id, day, total, synced_at) VALUES (?, ?, ?, ?) ON CONFLICT(guest_id, day) DO UPDATE SET total = excluded.total, synced_at = excluded.synced_at')
-    .bind(c.get('guest').id, day, total, Date.now())
+  await c.env.DB.prepare('INSERT INTO steps (guest_id, festival_id, day, total, synced_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(guest_id, festival_id, day) DO UPDATE SET total = excluded.total, synced_at = excluded.synced_at')
+    .bind(c.get('guest').id, c.get('festival').id, day, total, Date.now())
     .run()
   return c.json({ day, total })
 })
 
 app.delete('/api/me/steps', async (c) => {
-  await c.env.DB.prepare('DELETE FROM steps WHERE guest_id = ?').bind(c.get('guest').id).run()
+  await c.env.DB.prepare('DELETE FROM steps WHERE guest_id = ? AND festival_id = ?').bind(c.get('guest').id, c.get('festival').id).run()
   return c.body(null, 204)
 })
 
@@ -186,7 +268,7 @@ app.post('/api/crews', async (c) => {
   const code = randomCode(2)
   const now = Date.now()
   await c.env.DB.batch([
-    c.env.DB.prepare('INSERT INTO crews (id, code, name, created_by, created_at) VALUES (?, ?, ?, ?, ?)').bind(id, code, name, g.id, now),
+    c.env.DB.prepare('INSERT INTO crews (id, festival_id, code, name, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, c.get('festival').id, code, name, g.id, now),
     c.env.DB.prepare('INSERT INTO crew_members (crew_id, guest_id, joined_at) VALUES (?, ?, ?)').bind(id, g.id, now),
   ])
   return c.json({ id, name, code }, 201)
@@ -197,7 +279,7 @@ app.post('/api/crews/join', async (c) => {
   requireName(g)
   await rateLimit(c.env.DB, 'join:' + g.id, 20, 60 * MIN)
   const code = normalizeCode(v.str((await body(c)).code, 'Code', { max: 20 })!)
-  const crew = await c.env.DB.prepare('SELECT id, name, code FROM crews WHERE code = ?').bind(code).first<{ id: string; name: string; code: string }>()
+  const crew = await c.env.DB.prepare('SELECT id, name, code FROM crews WHERE code = ? AND festival_id = ?').bind(code, c.get('festival').id).first<{ id: string; name: string; code: string }>()
   if (!crew) throw new HttpError(404, 'Einladung nicht gefunden')
   const banned = await c.env.DB.prepare('SELECT 1 FROM crew_bans WHERE crew_id = ? AND guest_id = ?').bind(crew.id, g.id).first()
   if (banned) throw new HttpError(403, 'Du wurdest aus dieser Crew entfernt')
@@ -208,6 +290,7 @@ app.post('/api/crews/join', async (c) => {
 })
 
 app.post('/api/crews/:id/leave', async (c) => {
+  await membership(c, c.req.param('id'))
   await c.env.DB.prepare('DELETE FROM crew_members WHERE crew_id = ? AND guest_id = ?').bind(c.req.param('id'), c.get('guest').id).run()
   return c.body(null, 204)
 })
@@ -216,7 +299,7 @@ app.post('/api/crews/:id/leave', async (c) => {
 app.get('/api/crews/:id', async (c) => {
   const crewId = c.req.param('id')
   const g = c.get('guest')
-  await membership(c.env.DB, crewId, g.id)
+  await membership(c, crewId)
   const since = Number(c.req.query('since') ?? 0) || 0
   const db = c.env.DB
   const [crew, members, plans, steps, messages, meetups, rsvps] = await db.batch([
@@ -224,8 +307,8 @@ app.get('/api/crews/:id', async (c) => {
     db.prepare(
       'SELECT g.id, g.nickname, g.color, m.share_location, CASE WHEN m.share_location = 1 THEN m.location END AS location, CASE WHEN m.share_location = 1 THEN m.location_at END AS location_at FROM crew_members m JOIN guests g ON g.id = m.guest_id WHERE m.crew_id = ? ORDER BY m.joined_at',
     ).bind(crewId),
-    db.prepare('SELECT p.guest_id, p.act_id FROM plans p JOIN crew_members m ON m.guest_id = p.guest_id WHERE m.crew_id = ?').bind(crewId),
-    db.prepare('SELECT s.guest_id, s.day, s.total, s.synced_at FROM steps s JOIN crew_members m ON m.guest_id = s.guest_id WHERE m.crew_id = ?').bind(crewId),
+    db.prepare('SELECT p.guest_id, p.act_id FROM plans p JOIN crew_members m ON m.guest_id = p.guest_id WHERE m.crew_id = ? AND p.festival_id = ?').bind(crewId, c.get('festival').id),
+    db.prepare('SELECT s.guest_id, s.day, s.total, s.synced_at FROM steps s JOIN crew_members m ON m.guest_id = s.guest_id WHERE m.crew_id = ? AND s.festival_id = ?').bind(crewId, c.get('festival').id),
     db.prepare(
       `SELECT * FROM (
          SELECT m.id, m.guest_id, m.text, m.created_at, m.deleted,
@@ -283,10 +366,10 @@ app.get('/api/crews/:id', async (c) => {
 app.put('/api/crews/:id/location', async (c) => {
   const crewId = c.req.param('id')
   const g = c.get('guest')
-  await membership(c.env.DB, crewId, g.id)
+  await membership(c, crewId)
   const b = await body(c)
   const share = v.bool(b.share, 'share')
-  const location = b.location === null || b.location === undefined ? null : v.oneOf(b.location, 'location', LOCATIONS)
+  const location = b.location === null || b.location === undefined ? null : v.oneOf(b.location, 'location', [...c.get('festival').stages, 'camp'])
   await c.env.DB.prepare('UPDATE crew_members SET share_location = ?, location = ?, location_at = ? WHERE crew_id = ? AND guest_id = ?')
     .bind(share ? 1 : 0, share ? location : null, share && location ? Date.now() : null, crewId, g.id)
     .run()
@@ -297,7 +380,7 @@ app.post('/api/crews/:id/messages', async (c) => {
   const crewId = c.req.param('id')
   const g = c.get('guest')
   requireName(g)
-  await membership(c.env.DB, crewId, g.id)
+  await membership(c, crewId)
   await rateLimit(c.env.DB, 'msg:' + g.id, 30, MIN)
   const b = await body(c)
   const text = v.str(b.text, 'Nachricht', { max: 500 })!
@@ -314,7 +397,7 @@ app.post('/api/crews/:id/messages', async (c) => {
 async function messageFor(c: Context<App>) {
   const crewId = c.req.param('id')!
   const g = c.get('guest')
-  await membership(c.env.DB, crewId, g.id)
+  await membership(c, crewId)
   const m = await c.env.DB.prepare('SELECT m.id, m.guest_id, m.deleted, c.created_by AS owner FROM messages m JOIN crews c ON c.id = m.crew_id WHERE m.id = ? AND m.crew_id = ?')
     .bind(c.req.param('msgId')!, crewId)
     .first<{ id: string; guest_id: string; deleted: number; owner: string }>()
@@ -348,7 +431,7 @@ app.delete('/api/crews/:id/members/:guestId', async (c) => {
   const crewId = c.req.param('id')
   const target = c.req.param('guestId')
   const g = c.get('guest')
-  await membership(c.env.DB, crewId, g.id)
+  await membership(c, crewId)
   const crew = await c.env.DB.prepare('SELECT created_by FROM crews WHERE id = ?').bind(crewId).first<{ created_by: string }>()
   if (crew?.created_by !== g.id) throw new HttpError(403, 'Nur wer die Crew gegründet hat, kann Mitglieder entfernen')
   if (target === g.id) throw new HttpError(400, 'Verlasse die Crew stattdessen')
@@ -364,7 +447,7 @@ app.post('/api/crews/:id/meetups', async (c) => {
   const crewId = c.req.param('id')
   const g = c.get('guest')
   requireName(g)
-  await membership(c.env.DB, crewId, g.id)
+  await membership(c, crewId)
   await rateLimit(c.env.DB, 'meetup:' + g.id, 20, 60 * MIN)
   const b = await body(c)
   const m = {
@@ -372,10 +455,11 @@ app.post('/api/crews/:id/meetups', async (c) => {
     place: v.str(b.place, 'Treffpunkt', { max: 60 })!,
     poi: v.str(b.poi, 'poi', { max: 40, optional: true }) ?? null,
     actId: v.str(b.actId, 'actId', { max: 60, optional: true }) ?? null,
-    day: v.int(b.day, 'day', 0, 3),
+    day: v.int(b.day, 'day', 0, 13),
     min: v.int(b.min, 'min', 0, 30 * 60),
     note: v.str(b.note, 'Notiz', { max: 140, optional: true }) ?? '',
   }
+  if (m.actId && !(await actExists(c, m.actId))) throw new HttpError(400, 'Act gehört nicht zu diesem Festival')
   const existing = await c.env.DB.prepare('SELECT crew_id, created_by FROM meetups WHERE id = ?').bind(m.id).first<{ crew_id: string; created_by: string }>()
   if (existing) {
     if (existing.created_by !== g.id || existing.crew_id !== crewId) throw new HttpError(409, 'id ist bereits vergeben')
@@ -391,7 +475,7 @@ app.post('/api/crews/:id/meetups', async (c) => {
 async function meetupFor(c: Context<App>) {
   const m = await c.env.DB.prepare('SELECT id, crew_id, created_by FROM meetups WHERE id = ?').bind(c.req.param('id')).first<{ id: string; crew_id: string; created_by: string }>()
   if (!m) throw new HttpError(404, 'Meetup nicht gefunden')
-  await membership(c.env.DB, m.crew_id, c.get('guest').id)
+  await membership(c, m.crew_id)
   return m
 }
 
@@ -427,23 +511,24 @@ const toAnnouncement = (r: AnnouncementRow, now: number) => ({
 
 app.get('/api/announcements', async (c) => {
   const now = Date.now()
-  const rows = await c.env.DB.prepare('SELECT * FROM announcements WHERE expires_at IS NULL OR expires_at > ? ORDER BY created_at DESC LIMIT 50').bind(now).all<AnnouncementRow>()
+  const rows = await c.env.DB.prepare('SELECT * FROM announcements WHERE festival_id = ? AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC LIMIT 50').bind(c.get('festival').id, now).all<AnnouncementRow>()
   return c.json(rows.results.map((r) => toAnnouncement(r, now)))
 })
 
-// Constant-time comparison via hashing both sides.
 const admin = async (c: Context<App>, next: () => Promise<void>) => {
-  const expected = c.env.ADMIN_TOKEN
-  if (!expected) throw new HttpError(403, 'Admin-Zugang ist nicht eingerichtet')
-  const given = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '') ?? ''
-  const [a, b] = await Promise.all([sha256(given), sha256(expected)])
-  let diff = 0
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
-  if (diff !== 0) throw new HttpError(401, 'Admin-Token ungültig')
+  if (!c.env.ADMIN_TOKEN) throw new HttpError(403, 'Admin-Zugang ist nicht eingerichtet')
+  if (!(await isAdminRequest(c))) throw new HttpError(401, 'Admin-Token ungültig')
+  c.set('isAdmin', true)
   await next()
 }
 app.use('/api/admin/*', admin)
 app.get('/api/admin/session', (c) => c.json({ ok: true }))
+app.get('/api/admin/festivals', async (c) => {
+  const rows = await c.env.DB.prepare('SELECT slug, name, status FROM festivals ORDER BY status, name').all()
+  return c.json(rows.results)
+})
+// festival-scoped admin routes
+for (const path of ['/api/admin/announcements', '/api/admin/announcements/*', '/api/admin/timetable/*']) app.use(path, tenant)
 
 const SEVERITY_ALL = ['info', 'warning', 'critical'] as const
 function announcementInput(b: Record<string, unknown>, partial = false) {
@@ -462,8 +547,8 @@ app.post('/api/admin/announcements', async (c) => {
   const a = announcementInput(await body(c))
   const now = Date.now()
   const row: AnnouncementRow = { id: randomId('a'), title: a.title!, body: a.body ?? null, place: a.place ?? null, poi: a.poi ?? null, severity: a.severity!, created_at: now, expires_at: a.validMin ? now + a.validMin * MIN : null }
-  await c.env.DB.prepare('INSERT INTO announcements (id, title, body, place, poi, severity, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(row.id, row.title, row.body, row.place, row.poi, row.severity, row.created_at, row.expires_at)
+  await c.env.DB.prepare('INSERT INTO announcements (id, festival_id, title, body, place, poi, severity, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(row.id, c.get('festival').id, row.title, row.body, row.place, row.poi, row.severity, row.created_at, row.expires_at)
     .run()
   return c.json(toAnnouncement(row, now), 201)
 })
@@ -471,7 +556,7 @@ app.post('/api/admin/announcements', async (c) => {
 app.patch('/api/admin/announcements/:id', async (c) => {
   const a = announcementInput(await body(c), true)
   const now = Date.now()
-  const cur = await c.env.DB.prepare('SELECT * FROM announcements WHERE id = ?').bind(c.req.param('id')).first<AnnouncementRow>()
+  const cur = await c.env.DB.prepare('SELECT * FROM announcements WHERE id = ? AND festival_id = ?').bind(c.req.param('id'), c.get('festival').id).first<AnnouncementRow>()
   if (!cur) throw new HttpError(404, 'Meldung nicht gefunden')
   const next: AnnouncementRow = {
     ...cur,
@@ -489,7 +574,7 @@ app.patch('/api/admin/announcements/:id', async (c) => {
 })
 
 app.delete('/api/admin/announcements/:id', async (c) => {
-  const res = await c.env.DB.prepare('DELETE FROM announcements WHERE id = ?').bind(c.req.param('id')).run()
+  const res = await c.env.DB.prepare('DELETE FROM announcements WHERE id = ? AND festival_id = ?').bind(c.req.param('id'), c.get('festival').id).run()
   if (!res.meta.changes) throw new HttpError(404, 'Meldung nicht gefunden')
   return c.body(null, 204)
 })
@@ -498,37 +583,37 @@ app.delete('/api/admin/announcements/:id', async (c) => {
 
 type ChangeRow = { act_id: string; start_min: number | null; end_min: number | null; stage: string | null; cancelled: number; note: string | null; updated_at: number }
 const toChange = (r: ChangeRow) => ({ actId: r.act_id, start: r.start_min, end: r.end_min, stage: r.stage, cancelled: !!r.cancelled, note: r.note, updatedAt: r.updated_at })
-const STAGES = ['generator', 'archive', 'lagoon', 'forest', 'observatory'] as const
 
 app.get('/api/timetable/changes', async (c) => {
-  const rows = await c.env.DB.prepare('SELECT * FROM timetable_changes ORDER BY updated_at DESC').all<ChangeRow>()
+  const rows = await c.env.DB.prepare('SELECT * FROM timetable_changes WHERE festival_id = ? ORDER BY updated_at DESC').bind(c.get('festival').id).all<ChangeRow>()
   return c.json(rows.results.map(toChange))
 })
 
 app.put('/api/admin/timetable/:actId', async (c) => {
   const actId = c.req.param('actId')
-  if (!/^[0-2]-[a-z0-9-]{1,60}$/.test(actId)) throw new HttpError(400, 'actId ist ungültig')
+  if (!/^[a-z0-9-]{1,60}$/.test(actId)) throw new HttpError(400, 'actId ist ungültig')
+  if (!(await actExists(c, actId))) throw new HttpError(404, 'Act gehört nicht zu diesem Festival')
   const b = await body(c)
   const time = (x: unknown, name: string) => (x === undefined || x === null ? null : v.int(x, name, 0, 30 * 60))
   const start = time(b.start, 'start')
   const end = time(b.end, 'end')
   if ((start === null) !== (end === null)) throw new HttpError(400, 'start und end gehören zusammen')
   if (start !== null && end! <= start) throw new HttpError(400, 'end muss nach start liegen')
-  const stage = b.stage === undefined || b.stage === null ? null : v.oneOf(b.stage, 'stage', STAGES)
+  const stage = b.stage === undefined || b.stage === null ? null : v.oneOf(b.stage, 'stage', c.get('festival').stages)
   const cancelled = b.cancelled === undefined ? false : v.bool(b.cancelled, 'cancelled')
   const note = v.str(b.note, 'Hinweis', { max: 140, optional: true }) ?? null
   if (start === null && stage === null && !cancelled) throw new HttpError(400, 'Keine Änderung angegeben')
   const row: ChangeRow = { act_id: actId, start_min: start, end_min: end, stage, cancelled: cancelled ? 1 : 0, note, updated_at: Date.now() }
   await c.env.DB.prepare(
-    'INSERT INTO timetable_changes (act_id, start_min, end_min, stage, cancelled, note, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(act_id) DO UPDATE SET start_min = excluded.start_min, end_min = excluded.end_min, stage = excluded.stage, cancelled = excluded.cancelled, note = excluded.note, updated_at = excluded.updated_at',
+    'INSERT INTO timetable_changes (festival_id, act_id, start_min, end_min, stage, cancelled, note, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(festival_id, act_id) DO UPDATE SET start_min = excluded.start_min, end_min = excluded.end_min, stage = excluded.stage, cancelled = excluded.cancelled, note = excluded.note, updated_at = excluded.updated_at',
   )
-    .bind(row.act_id, row.start_min, row.end_min, row.stage, row.cancelled, row.note, row.updated_at)
+    .bind(c.get('festival').id, row.act_id, row.start_min, row.end_min, row.stage, row.cancelled, row.note, row.updated_at)
     .run()
   return c.json(toChange(row))
 })
 
 app.delete('/api/admin/timetable/:actId', async (c) => {
-  const res = await c.env.DB.prepare('DELETE FROM timetable_changes WHERE act_id = ?').bind(c.req.param('actId')).run()
+  const res = await c.env.DB.prepare('DELETE FROM timetable_changes WHERE festival_id = ? AND act_id = ?').bind(c.get('festival').id, c.req.param('actId')).run()
   if (!res.meta.changes) throw new HttpError(404, 'Keine Änderung für diesen Act')
   return c.body(null, 204)
 })
@@ -542,9 +627,9 @@ app.get('/api/reports', async (c) => {
     `SELECT r.id, r.title, r.place, r.poi, r.severity, r.created_at, r.expires_at, r.guest_id,
        (SELECT COUNT(*) FROM votes WHERE report_id = r.id AND kind = 'still') AS still,
        (SELECT kind FROM votes WHERE report_id = r.id AND guest_id = ?) AS my_vote
-     FROM reports r WHERE r.expires_at > ? ORDER BY r.created_at DESC LIMIT 100`,
+     FROM reports r WHERE r.festival_id = ? AND r.expires_at > ? ORDER BY r.created_at DESC LIMIT 100`,
   )
-    .bind(g.id, now)
+    .bind(g.id, c.get('festival').id, now)
     .all<Record<string, unknown>>()
   return c.json(
     rows.results.map((r) => {
@@ -580,9 +665,9 @@ app.post('/api/reports', async (c) => {
     poi: v.str(b.poi, 'poi', { max: 40, optional: true }) ?? null,
     severity: b.severity === undefined ? 'info' : v.oneOf(b.severity, 'severity', SEVERITIES),
   }
-  const res = await c.env.DB.prepare('INSERT OR IGNORE INTO reports (id, guest_id, title, place, poi, severity, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(r.id, g.id, r.title, r.place, r.poi, r.severity, now, now + REPORT_TTL).run()
+  const res = await c.env.DB.prepare('INSERT OR IGNORE INTO reports (id, festival_id, guest_id, title, place, poi, severity, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(r.id, c.get('festival').id, g.id, r.title, r.place, r.poi, r.severity, now, now + REPORT_TTL).run()
   if (!res.meta.changes) {
-    const prev = await c.env.DB.prepare('SELECT 1 FROM reports WHERE id = ? AND guest_id = ?').bind(r.id, g.id).first()
+    const prev = await c.env.DB.prepare('SELECT 1 FROM reports WHERE id = ? AND guest_id = ? AND festival_id = ?').bind(r.id, g.id, c.get('festival').id).first()
     if (!prev) throw new HttpError(409, 'id ist bereits vergeben')
     return c.json({ ...r, source: 'unconfirmed', confirms: 1, mine: true, myVote: null, ageMin: 0, validMin: REPORT_TTL / MIN }, 200)
   }
@@ -596,7 +681,7 @@ app.put('/api/reports/:id/vote', async (c) => {
   const kind = v.oneOf((await body(c)).kind, 'kind', ['still', 'fixed'] as const)
   const id = c.req.param('id')
   const now = Date.now()
-  const r = await c.env.DB.prepare('SELECT id, guest_id, expires_at FROM reports WHERE id = ? AND expires_at > ?').bind(id, now).first<{ id: string; guest_id: string; expires_at: number }>()
+  const r = await c.env.DB.prepare('SELECT id, guest_id, expires_at FROM reports WHERE id = ? AND festival_id = ? AND expires_at > ?').bind(id, c.get('festival').id, now).first<{ id: string; guest_id: string; expires_at: number }>()
   if (!r) throw new HttpError(404, 'Meldung ist abgelaufen')
   await c.env.DB.prepare('INSERT INTO votes (report_id, guest_id, kind, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(report_id, guest_id) DO UPDATE SET kind = excluded.kind, created_at = excluded.created_at').bind(id, g.id, kind, now).run()
   if (kind === 'still') {

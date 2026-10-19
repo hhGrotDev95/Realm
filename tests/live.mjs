@@ -39,7 +39,7 @@ const user = async () => {
     } catch {} // browser error pages (offline reload) have no storage
   })
   const page = await ctx.newPage()
-  page.on('pageerror', (e) => errors.push(e.message))
+  page.on('pageerror', (e) => errors.push(e.stack ?? e.message))
   return page
 }
 const step = async (name, fn) => {
@@ -65,6 +65,13 @@ try {
     await name(lea, 'Lea')
     await lea.getByText(/Person.* · Code/).waitFor()
     code = (await lea.getByText(/Person.* · Code/).textContent()).match(/[A-Z0-9]{4}-[A-Z0-9]{4}/)[0]
+  })
+
+  await step('Lea plans her acts (every live festival starts with an empty plan)', async () => {
+    await nav(lea, 'Line-up')
+    for (const artist of ['Maduk', 'Arcturus']) await lea.locator('.act', { hasText: artist }).getByRole('button', { name: 'Zum Plan hinzufügen' }).click()
+    await lea.waitForTimeout(1200) // plan upload is debounced
+    await nav(lea, 'Crew')
   })
 
   await step('Ben joins via invite link', async () => {
@@ -199,13 +206,13 @@ try {
   })
 
   await step('organizer cancels an act: plan alert and struck-through row', async () => {
-    const res = await fetch(`${API}/api/admin/timetable/1-maduk`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer e2e-admin' }, body: JSON.stringify({ cancelled: true, note: 'Krankheit' }) })
+    const res = await fetch(`${API}/api/admin/timetable/1-maduk`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer e2e-admin', 'X-Festival': 'realm-open-air' }, body: JSON.stringify({ cancelled: true, note: 'Krankheit' }) })
     if (!res.ok) throw new Error('admin PUT failed ' + res.status)
     await lea.reload()
     await lea.locator('.alert.critical', { hasText: 'Maduk: abgesagt' }).waitFor({ timeout: 15000 })
     await nav(lea, 'Line-up')
     await lea.locator('.act.cancelled', { hasText: 'Maduk' }).getByText('Abgesagt').waitFor()
-    await fetch(`${API}/api/admin/timetable/1-maduk`, { method: 'DELETE', headers: { Authorization: 'Bearer e2e-admin' } })
+    await fetch(`${API}/api/admin/timetable/1-maduk`, { method: 'DELETE', headers: { Authorization: 'Bearer e2e-admin', 'X-Festival': 'realm-open-air' } })
     await nav(lea, 'Home')
   })
 
@@ -258,6 +265,24 @@ try {
     await ben.getByText('Gemeldet – danke').waitFor()
     await lea.keyboard.press('Escape')
     await ben.keyboard.press('Escape')
+  })
+
+  await step('tenants: switching festival shows other data and keeps crews apart', async () => {
+    await lea.keyboard.press('Escape')
+    await lea.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    await lea.locator('.sheet').getByRole('button', { name: /Nordlicht Sessions/ }).click()
+    await lea.getByRole('heading', { name: 'Nordlicht Sessions' }).waitFor()
+    await nav(lea, 'Line-up')
+    await lea.getByRole('tab', { name: 'Alle', exact: true }).click()
+    await lea.locator('.act', { hasText: 'Tidewater' }).waitFor()
+    if (await lea.locator('.act', { hasText: 'Maduk' }).count()) throw new Error('acts of another festival leaked')
+    await nav(lea, 'Crew')
+    await lea.getByRole('heading', { name: 'Crew gründen' }).waitFor() // no crew here yet
+    await lea.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    await lea.locator('.sheet').getByRole('button', { name: /Realm Open Air/ }).click()
+    await lea.getByRole('heading', { name: 'Realm Open Air' }).waitFor()
+    await nav(lea, 'Crew')
+    await lea.getByText('Zeltplatz 14', { exact: true }).waitFor({ timeout: 15000 })
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

@@ -157,8 +157,38 @@ Nachweis:
 | `npm run test:a11y` | 13 Ansichten, 0 Befunde |
 | `npm run test:live` | 14 Szenarien bestanden |
 
+GitHub Actions auf PR #6: grün, gemergt.
+
+# Plattform (Produktvision „digitales Zuhause eines Festivals“)
+
+Fahrplan, je Schritt ein PR: 1 Mandanten · 2 Festival anlegen + Import · 3 Branding · 4 Module · 5 FAQ + FAQ-Bot · 6 Karteneditor · 7 DE/EN · 8 Push · 9 Nutzungszahlen · 10 Kalender, Gruppenroute, Festival-Chat.
+
+## P1 · Mandantenfähigkeit — erledigt (Branch `claude/realm-tenants`)
+
+- Migration `0005_festivals.sql`: `festivals` (Status Entwurf/veröffentlicht/archiviert, Theme- und Modul-JSON), `festival_days`, `stages`, `acts`, `pois` mit Constraints und Indizes; `festival_id` auf Crews, Meldungen, Ankündigungen; Pläne, Schritte und Timetable-Änderungen mit Festival im Primärschlüssel neu aufgebaut. Altdaten werden dem ursprünglichen Festival `realm` zugeordnet.
+- Migration `0006` (generiert aus `src/data.ts` per `worker/scripts/build-seed.mts`): Demo-Festival „Realm Open Air“ und ein zweites, „Nordlicht Sessions“, inklusive absichtlich kollidierender Act-ID `1-maduk`.
+- Worker: Mandant aus `X-Festival`, serverseitig aufgelöst; Mitgliedschaft, Crews, Beitrittscodes, Pläne (nur bekannte Acts, Rest als `rejected`), Schritte, Standorte (nur eigene Bühnen), Meetups (nur eigene Acts), Meldungen, Votes, Ankündigungen und Timetable-Änderungen sind festivalgebunden. Entwürfe nur für Admins, Archiv schreibgeschützt.
+- App: lädt das Festival vor dem ersten Rendern (Offline-Cache zuerst, frische Daten im Hintergrund), Festivalname, Daten und Ort aus den Festivaldaten, Zustand je Festival getrennt, Festivalwechsel im Profil; Fehlerbildschirm statt leerer App, wenn ein Festival weder online noch im Cache ist.
+- Konsole: Festivalauswahl inkl. Entwürfen; Meldungen und Timetable wirken nur auf das gewählte Festival. CLI: `--festival`/`REALM_FESTIVAL`.
+
+Durch die Tests gefundene und behobene Fehler:
+- `ALTER TABLE … ADD COLUMN … REFERENCES` mit Standardwert scheitert in SQLite bei aktiven Fremdschlüsseln – fiel nur bei vorhandenen Daten auf (Migrationstest).
+- Der API-Client wertete eine abgebrochene Antwort als leeren Erfolg `{}`; beim Offline-Neuladen wurde so ein leeres Festival gespeichert und die App startete nicht mehr. Jetzt: unlesbare Antwort = Netzwerkfehler, Festivaldokument wird vor Speichern und Laden geprüft.
+
+Bekannte Grenze: Die Geländegrafik der Karte ist noch die des Demo-Festivals; eigene Geländepläne kommen mit dem Karteneditor (P6).
+
+Dateien: `worker/migrations/0005_festivals.sql`, `worker/migrations/0006_seed_demo_festivals.sql`, `worker/scripts/build-seed.mts`, `worker/scripts/announce.mjs`, `worker/src/index.ts`, `worker/test/api.test.mjs`, `worker/test/migration.test.mjs`, `worker/package.json`, `src/festival.ts`, `src/main.tsx`, `src/api.ts`, `src/data.ts`, `src/store.tsx`, `src/sheets.tsx`, `src/admin/Admin.tsx`, `src/App.tsx`, `src/screens/Home.tsx`, `src/screens/Wrapped.tsx`, `src/screens/Lineup.tsx`, `tests/live.mjs`, `README.md`.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler |
+| `cd worker && npm test` | 23 API-Tests (neu: Festivals, Mandantentrennung, Entwurf/Archiv) + Migrationstest |
+| `npm run test:e2e` (Demo) | 9 Abläufe bestanden |
+| `npm run test:a11y` | 13 Ansichten, 0 Befunde |
+| `npm run test:live` | 16 Szenarien (neu: Plan anlegen, Festivalwechsel mit getrennten Crews) |
+
 ## Nächste Schritte
 
-1. Bundle unter 500 kB bringen (Build warnt inzwischen): Karte, Wrapped und Sheets nachladen.
-2. Deployment auf Cloudflare (braucht Konto/Freigabe).
-3. Web-Push für Meetups, Planänderungen und offizielle Warnungen (VAPID-Schlüssel nötig).
+1. P2: Festival anlegen (Assistent) und Import aus JSON/CSV/XLSX mit stabilen IDs.
+2. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen).
+3. Deployment (Cloudflare-Konto nötig), danach Push.

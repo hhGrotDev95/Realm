@@ -8,7 +8,7 @@
     "migrate:remote": "wrangler d1 migrations apply realm --remote",
     "deploy": "wrangler deploy",
     "typecheck": "tsc -p .",
-    "test": "node test/api.test.mjs",
+    "test": "node test/api.test.mjs && node test/migration.test.mjs",
     "announce": "node scripts/announce.mjs"
   },
   "dependencies": {

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, execute, online, opId, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
-import { ACTS, actById, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
+import { DEFAULT_FESTIVAL } from './festival'
+import { ACTS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
   id: string
@@ -98,17 +99,21 @@ function initial(): Persisted {
   }
 }
 
-/** In live mode the demo crew, chat and meetups start empty. */
+/** In live mode the demo crew, chat, meetups and plan start empty – every festival starts clean. */
 function initialOnline(): Persisted {
-  return { ...initial(), meetups: [], chat: [], shareLocation: false, attended: {}, phase: 'during', clockMode: 'real' }
+  return { ...initial(), plan: [], reminders: {}, meetups: [], chat: [], shareLocation: false, attended: {}, phase: 'during', clockMode: 'real' }
 }
 
-const KEY = 'realm.v2'
+// Local state is kept per festival, so plans and crews never mix between tenants.
+const LEGACY_KEY = 'realm.v2'
+// evaluated lazily: the festival is only known after boot
+const storageKey = () => (online ? `realm.v2:${FESTIVAL.slug}` : LEGACY_KEY)
 const fresh = () => (online ? initialOnline() : initial())
 function load(): Persisted {
   let state = fresh()
   try {
-    const raw = localStorage.getItem(KEY)
+    // the single-festival version stored everything under one key: adopt it for the default festival
+    const raw = localStorage.getItem(storageKey()) ?? (online && FESTIVAL.slug === DEFAULT_FESTIVAL ? localStorage.getItem(LEGACY_KEY) : null)
     if (raw) state = { ...state, ...JSON.parse(raw) }
   } catch {}
   // invite links: /?join=ABCD-EFGH
@@ -207,6 +212,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [focusPoi, setFocusPoi] = useState<string | null>(null)
   const [scrollTopSignal, setScrollTop] = useState(0)
   const [tick, setTick] = useState(() => Date.now())
+  // fresher festival data was loaded after the first render (see main.tsx)
+  useEffect(() => {
+    const h = () => setTick(Date.now())
+    window.addEventListener('realm:festival-updated', h)
+    return () => window.removeEventListener('realm:festival-updated', h)
+  }, [])
   // the real clock ticks every 30 s
   useEffect(() => {
     if (s.clockMode !== 'real') return
@@ -218,7 +229,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem(KEY, JSON.stringify(s))
+      localStorage.setItem(storageKey(), JSON.stringify(s))
     } catch {}
   }, [s])
 
@@ -461,7 +472,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               color: m.color,
               at: (m.location as Friend['at']) ?? null,
               seen: m.locationAt ? Math.max(0, Math.round((Date.now() - m.locationAt) / 60000)) : 0,
-              steps: m.steps.find((x) => x.day === Math.max(0, Math.min(2, now.day)))?.total ?? 0,
+              steps: m.steps.find((x) => x.day === Math.max(0, Math.min(DAYS.length - 1, now.day)))?.total ?? 0,
             }))
           const plans = Object.fromEntries(s.remote!.members.map((m) => [m.id, m.plan]))
           const synced = s.remote!.members.flatMap((m) => m.steps.map((x) => x.syncedAt))
@@ -612,7 +623,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           if (s.session) await api.deleteMe()
           setToken(null)
-          localStorage.removeItem(KEY)
+          localStorage.removeItem(storageKey())
           setS(fresh())
           setStack([])
           setTabRaw('home')
@@ -729,7 +740,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setS((p) => ({ ...p, chat: [...p.chat, { id: 'c' + rid(), from: 'me', text, min: now.min }] }))
       },
       reset: () => {
-        localStorage.removeItem(KEY)
+        localStorage.removeItem(storageKey())
         setS(fresh())
         setStack([])
         setTabRaw('home')

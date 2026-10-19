@@ -1,5 +1,5 @@
 // Thin client for the Realm API (worker/). Without VITE_API_URL the app runs in demo mode.
-import type { TimetableChange } from './data'
+import type { FestivalBundle, TimetableChange } from './data'
 
 export const API_URL: string | undefined = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || undefined
 export const online = !!API_URL
@@ -18,20 +18,38 @@ export const setToken = (t: string | null) => {
   token = t
 }
 
+/** The tenant: every festival-scoped request carries its slug in X-Festival. */
+let festival: string | null = null
+export const setFestival = (slug: string) => {
+  festival = slug
+}
+const festivalHeader = (): Record<string, string> => (festival ? { 'X-Festival': festival } : {})
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   if (!API_URL) throw new ApiError(0, 'Kein Server konfiguriert')
   let res: Response
   try {
     res = await fetch(API_URL + path, {
       method,
-      headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      headers: { ...festivalHeader(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   } catch {
     throw new ApiError(0, 'Keine Verbindung – bitte später erneut versuchen')
   }
   if (res.status === 204) return undefined as T
-  const data = await res.json().catch(() => ({}))
+  return readJson<T>(res)
+}
+
+/** A body that cannot be read (e.g. cut off by a lost connection) is a network error, never an empty success. */
+async function readJson<T>(res: Response): Promise<T> {
+  let data: unknown
+  try {
+    data = await res.json()
+  } catch {
+    if (res.ok) throw new ApiError(0, 'Antwort unvollständig – bitte später erneut versuchen')
+    data = {}
+  }
   if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error ?? 'Fehler ' + res.status)
   return data as T
 }
@@ -103,6 +121,8 @@ export type Session = { id: string; token: string; nickname: string | null; colo
 type CrewRef = { id: string; name: string; code: string }
 
 export const api = {
+  festivals: () => call<{ slug: string; name: string; location: string | null }[]>('GET', '/api/festivals'),
+  festival: (slug: string) => call<FestivalBundle>('GET', `/api/festivals/${encodeURIComponent(slug)}`),
   createGuest: (nickname: string | null, color: string) => call<Session>('POST', '/api/guests', { nickname, color }),
   me: () => call<{ id: string; nickname: string | null; color: string; secured: boolean; crews: CrewRef[]; plan: string[] }>('GET', '/api/me'),
   updateMe: (nickname: string, color: string) => call('PATCH', '/api/me', { nickname, color }),
@@ -165,19 +185,19 @@ export const adminApi = (adminToken: string) => {
     try {
       res = await fetch(API_URL + path, {
         method,
-        headers: { Authorization: 'Bearer ' + adminToken, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+        headers: { ...festivalHeader(), Authorization: 'Bearer ' + adminToken, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body),
       })
     } catch {
       throw new ApiError(0, 'Keine Verbindung zum Server')
     }
     if (res.status === 204) return undefined as T
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error ?? 'Fehler ' + res.status)
-    return data as T
+    return readJson<T>(res)
   }
   return {
     check: () => req<{ ok: true }>('GET', '/api/admin/session'),
+    festivals: () => req<{ slug: string; name: string; status: string }[]>('GET', '/api/admin/festivals'),
+    bundle: (slug: string) => req<FestivalBundle>('GET', `/api/festivals/${encodeURIComponent(slug)}`),
     announce: (a: { title: string; body?: string; place?: string; severity: Announcement['severity']; validMin?: number }) => req<Announcement>('POST', '/api/admin/announcements', a),
     removeAnnouncement: (id: string) => req<void>('DELETE', `/api/admin/announcements/${id}`),
     setChange: (actId: string, c: { start?: number; end?: number; stage?: string; cancelled?: boolean; note?: string }) => req<TimetableChange>('PUT', `/api/admin/timetable/${actId}`, c),

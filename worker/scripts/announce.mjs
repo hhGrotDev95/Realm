@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Organizer CLI for official announcements.
+// The festival is chosen with --festival <slug> or REALM_FESTIVAL (default: realm-open-air).
 //   REALM_API=https://… REALM_ADMIN_TOKEN=… node scripts/announce.mjs add "Gewitterwarnung ab 22:30" --severity warning --body "…" --place "Gelände" --valid 180
 //   … node scripts/announce.mjs list
 //   … node scripts/announce.mjs remove <id>
@@ -14,10 +15,12 @@ for (let i = 0; i < rest.length; i++) {
   else positional.push(rest[i])
 }
 
+const FESTIVAL = flags.festival ?? process.env.REALM_FESTIVAL ?? 'realm-open-air'
+
 async function call(method, path, body) {
   const res = await fetch(API + path, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}) },
+    headers: { 'Content-Type': 'application/json', 'X-Festival': FESTIVAL, ...(TOKEN ? { Authorization: 'Bearer ' + TOKEN } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   })
   const data = res.status === 204 ? null : await res.json()
@@ -44,7 +47,7 @@ try {
     await call('DELETE', `/api/admin/announcements/${positional[0]}`)
     console.log('Entfernt')
   } else {
-    console.log('Verwendung: announce.mjs list | add "<Titel>" [--severity info|warning|critical] [--body …] [--place …] [--poi …] [--valid <Min.>] | remove <id>')
+    console.log('Verwendung: announce.mjs [--festival <slug>] list | add "<Titel>" [--severity info|warning|critical] [--body …] [--place …] [--poi …] [--valid <Min.>] | remove <id>')
     process.exitCode = 2
   }
 } catch (e) {
