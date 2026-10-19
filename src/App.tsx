@@ -36,7 +36,7 @@ export function AppBar({ floating }: { floating?: boolean }) {
         R
       </div>
       <div className="title">
-        <strong>Realm Open Air</strong>
+        <h1 className="appbar-h">Realm Open Air</h1>
         <span>{sub}</span>
       </div>
       <button className="icon-btn" aria-label="Profil & Einstellungen" onClick={() => openSheet({ kind: 'profile' })}>

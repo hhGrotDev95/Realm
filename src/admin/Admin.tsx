@@ -77,7 +77,7 @@ function AdminShell({ children, onLogout, msg }: { children: React.ReactNode; on
           R
         </div>
         <div className="grow">
-          <strong>Realm · Veranstalter-Konsole</strong>
+          <h1 style={{ fontSize: 15, margin: 0, fontWeight: 700 }}>Realm · Veranstalter-Konsole</h1>
           <span className="tiny faint" style={{ display: 'block' }}>
             Änderungen erscheinen in der App innerhalb einer Minute
           </span>

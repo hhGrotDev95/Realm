@@ -166,7 +166,7 @@ export function MapScreen() {
   const selectedPoi = sheet?.kind === 'poi' ? sheet.id : null
 
   return (
-    <div style={{ position: 'absolute', inset: 0 }}>
+    <main style={{ position: 'absolute', inset: 0 }} aria-label="Festivalkarte">
       <div ref={wrap} className="map-wrap" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onWheel={onWheel}>
         <div
           style={{
@@ -338,7 +338,7 @@ export function MapScreen() {
           <LocateFixed size={21} />
         </button>
       </div>
-    </div>
+    </main>
   )
 }
 

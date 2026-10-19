@@ -245,7 +245,6 @@ export const UPDATES: FestivalUpdate[] = [
   { id: 'u1', source: 'official', severity: 'warning', title: 'Gewitterwarnung ab 22:30', body: 'Bei Blitzschlag werden die Open-Air-Bühnen kurz pausiert. Folge den Hinweisen des Personals.', place: 'Gesamtes Gelände', ageMin: 9, validMin: 180, phases: ['during'] },
   { id: 'u2', source: 'confirmed', severity: 'info', title: 'Wasserstelle Lagoon leer', place: 'Lagoon', poi: 'w2', ageMin: 14, validMin: 46, confirms: 12, phases: ['during'] },
   { id: 'u3', source: 'unconfirmed', severity: 'info', title: 'Nord-Eingang ca. 25 Min. Wartezeit', place: 'Eingang Nord', poi: 'en1', ageMin: 7, validMin: 23, confirms: 2, phases: ['during', 'arrival'] },
-  { id: 'u4', source: 'official', severity: 'info', title: 'Arcturus startet 15 Minuten später', body: 'Neue Startzeit: 22:30 Uhr auf der Generator Stage.', place: 'Generator', ageMin: 32, phases: ['during'] },
   { id: 'u5', source: 'app', severity: 'info', title: 'Offline-Modus aktiv', body: 'Timetable, Karte und dein Plan funktionieren auch ohne Netz.', ageMin: 120, phases: ['before', 'arrival', 'during'] },
   { id: 'u6', source: 'official', severity: 'info', title: 'Shuttle-Takt erhöht auf 10 Minuten', place: 'Shuttle-Terminal', poi: 'sh1', ageMin: 40, phases: ['arrival', 'departure'] },
   { id: 'u7', source: 'official', severity: 'info', title: 'Timetable ist final', body: 'Zwei Änderungen seit deinem letzten Besuch: Somna und Fjordlight haben getauscht.', ageMin: 60 * 26, phases: ['before'] },

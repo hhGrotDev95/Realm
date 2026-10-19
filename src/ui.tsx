@@ -83,7 +83,7 @@ export function ago(min: number) {
   return `vor ${Math.round(min / 1440)} T.`
 }
 
-export function Sheet({ open, onClose, children, full }: { open: boolean; onClose: () => void; children: ReactNode; full?: boolean }) {
+export function Sheet({ open, onClose, children, full, label }: { open: boolean; onClose: () => void; children: ReactNode; full?: boolean; label: string }) {
   const controls = useDragControls()
   const ref = useRef<HTMLDivElement>(null)
   // move focus into the sheet and restore it on close
@@ -109,6 +109,7 @@ export function Sheet({ open, onClose, children, full }: { open: boolean; onClos
             tabIndex={-1}
             role="dialog"
             aria-modal
+            aria-label={label}
             style={{ outline: 'none' }}
             initial={{ y: '100%' }}
             animate={{ y: 0 }}

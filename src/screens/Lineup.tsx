@@ -220,7 +220,9 @@ export function ActRow({ a, showDay }: { a: Act; showDay?: boolean }) {
   const st = status(a, now)
   const friends = crew.friendsFor(a.id)
   return (
-    <motion.div layout="position" className={`act ${st} ${a.change?.cancelled ? 'cancelled' : ''}`} role="button" tabIndex={0} onClick={() => openSheet({ kind: 'act', id: a.id })} onKeyDown={(e) => e.key === 'Enter' && openSheet({ kind: 'act', id: a.id })} style={{ cursor: 'pointer' }}>
+    <motion.div layout="position" className={`act ${st} ${a.change?.cancelled ? 'cancelled' : ''}`}>
+      {/* the row and the heart are sibling controls – never nest interactive elements */}
+      <button className="act-main" onClick={() => openSheet({ kind: 'act', id: a.id })}>
       <div className="time">
         {fmt(a.start)}
         <small>{showDay ? DAYS[a.day].short : st === 'live' ? 'live' : fmt(a.end)}</small>
@@ -238,6 +240,7 @@ export function ActRow({ a, showDay }: { a: Act; showDay?: boolean }) {
           )}
         </div>
       </div>
+      </button>
       <FavButton id={a.id} />
     </motion.div>
   )
