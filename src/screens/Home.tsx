@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
-import { ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
+import { Users, ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { ACTS, actById, DAYS, FRIENDS, fmt, friendsFor, stageById, UPDATES, walkMinutes, ME } from '../data'
+import { ACTS, actById, DAYS, fmt, stageById, walkMinutes, ME } from '../data'
 import { conflictClusters, isMeetupActive, useApp } from '../store'
 import { nowNext, planFor, status, untilLabel } from '../time'
 import { AvatarStack, SourceTag, StageDot, ago, stagger } from '../ui'
@@ -33,8 +33,8 @@ export function Home() {
 }
 
 function useRelevantUpdates(n = 2) {
-  const { phase, myUpdates, votes, dismissed } = useApp()
-  const all = [...myUpdates, ...UPDATES].filter((u) => u.phases.includes(phase) && votes[u.id] !== 'fixed' && !dismissed.includes(u.id))
+  const { phase, updates, votes, dismissed } = useApp()
+  const all = updates.filter((u) => u.phases.includes(phase) && votes[u.id] !== 'fixed' && !dismissed.includes(u.id))
   const rank = (u: (typeof all)[0]) => (u.severity === 'critical' ? 0 : u.severity === 'warning' ? 1 : 2) * 1000 + (u.source === 'app' ? 500 : 0) + u.ageMin
   return { urgent: all.filter((u) => u.severity !== 'info' && u.source === 'official').sort((a, b) => rank(a) - rank(b))[0], top: all.sort((a, b) => rank(a) - rank(b)).slice(0, n + 1), total: all.length }
 }
@@ -91,6 +91,7 @@ function UpdatesModule({ i, exclude }: { i: number; exclude?: string }) {
 }
 
 function NowNextHero() {
+  const { crew } = useApp()
   const { plan, now, openSheet, setTab, setFocusPoi } = useApp()
   const { live, next } = nowNext(plan, now)
   const focus = next ?? live
@@ -109,7 +110,7 @@ function NowNextHero() {
     )
   }
   const isLive = status(focus, now) === 'live'
-  const friends = friendsFor(focus.id)
+  const friends = crew.friendsFor(focus.id)
   const stage = stageById[focus.stage]
   const walk = walkMinutes(ME.x, ME.y, stage.x, stage.y)
   const pct = isLive ? ((now.min - focus.start) / (focus.end - focus.start)) * 100 : 0
@@ -188,9 +189,27 @@ function MeetupModule({ i }: { i: number }) {
 }
 
 function CrewPeek({ i }: { i: number }) {
+  const { crew } = useApp()
   const { setTab, stepsOptIn } = useApp()
-  const byStage = FRIENDS.filter((f) => f.at && f.at !== 'camp').reduce<Record<string, string[]>>((acc, f) => ((acc[f.at!] ??= []).push(f.id), acc), {})
+  const byStage = crew.members.filter((f) => f.at && f.at !== 'camp').reduce<Record<string, string[]>>((acc, f) => ((acc[f.at!] ??= []).push(f.id), acc), {})
   const top = Object.entries(byStage).sort((a, b) => b[1].length - a[1].length)[0]
+  if (!top)
+    return (
+      <motion.section {...stagger(i)}>
+        <button className="tile" onClick={() => setTab('crew')}>
+          <span className="tile-icon">
+            <Users size={20} />
+          </span>
+          <span className="grow">
+            <span style={{ fontWeight: 600 }}>{crew.members.length ? `${crew.members.length} in deiner Crew` : 'Crew starten'}</span>
+            <span className="small faint" style={{ display: 'block' }}>
+              {crew.members.length ? 'Niemand teilt gerade den Standort' : 'Freunde einladen, Meetups planen'}
+            </span>
+          </span>
+          <ChevronRight size={18} className="faint" />
+        </button>
+      </motion.section>
+    )
   return (
     <motion.section {...stagger(i)}>
       <button className="tile" onClick={() => setTab('crew')}>
@@ -267,7 +286,7 @@ function Countdown() {
 }
 
 function Before() {
-  const { plan, resolved, setTab, openSheet, requireIdentity, toast } = useApp()
+  const { plan, resolved, setTab, openSheet, requireIdentity, toast, online, inviteLink } = useApp()
   const conflicts = DAYS.flatMap((d) => conflictClusters(plan, d.idx, resolved))
   return (
     <>
@@ -318,7 +337,9 @@ function Before() {
           style={{ marginTop: 14 }}
           onClick={() =>
             requireIdentity('Damit deine Freunde wissen, von wem die Einladung kommt.', () => {
-              navigator.clipboard?.writeText('https://realm.app/crew/join/7KX2').catch(() => {})
+              const link = online ? inviteLink() : `${location.origin}/?join=DEMO-CREW`
+              if (!link) return setTab('crew')
+              navigator.clipboard?.writeText(link).catch(() => {})
               toast('Einladungslink kopiert')
             })
           }

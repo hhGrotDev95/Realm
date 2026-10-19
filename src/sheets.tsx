@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { Bell, BellRing, Check, ChevronRight, Copy, Fingerprint, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ACTS, actById, DAYS, FRIENDS, friendById, friendsFor, fmt, ME, PHASES, POIS, stageById, UPDATES, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
+import { ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
 import { CAT_ICON } from './screens/MapScreen'
 import { ActRow } from './screens/Lineup'
 import { useApp, type SheetState } from './store'
@@ -32,6 +32,7 @@ export function Sheets() {
           {s?.kind === 'updates' && <Updates />}
           {s?.kind === 'report' && <Report poi={s.poi} />}
           {s?.kind === 'secure' && <Secure />}
+          {s?.kind === 'restore' && <Restore />}
           {s?.kind === 'chat' && <Chat />}
           {s?.kind === 'shared' && <Shared />}
           {s?.kind === 'steps' && <Steps />}
@@ -52,13 +53,14 @@ function goRoute(poi: string, app: ReturnType<typeof useApp>) {
 
 /* ---------------- Act ---------------- */
 function ActSheet({ id }: { id: string }) {
+  const { crew } = useApp()
   const app = useApp()
   const { plan, toggleFav, now, reminders, toggleReminder, openSheet, requireIdentity, attended, setAttended } = app
   const a = actById[id]
   const s = stageById[a.stage]
   const st = status(a, now)
   const inPlan = plan.includes(id)
-  const friends = friendsFor(id)
+  const friends = crew.friendsFor(id)
   const tendency = Math.round(a.popularity * 100)
   const walk = walkMinutes(ME.x, ME.y, s.x, s.y)
   return (
@@ -117,7 +119,7 @@ function ActSheet({ id }: { id: string }) {
           <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
             {friends.map((f) => (
               <span key={f} className="chip" style={{ paddingLeft: 4 }}>
-                <Avatar id={f} /> {friendById[f].name}
+                <Avatar id={f} /> {(crew.byId[f]?.name ?? 'Gast')}
               </span>
             ))}
           </div>
@@ -168,11 +170,11 @@ function ActSheet({ id }: { id: string }) {
 /* ---------------- POI ---------------- */
 function PoiSheet({ id }: { id: string }) {
   const app = useApp()
-  const { openSheet, requireIdentity, now, myUpdates, votes, vote, plan } = app
+  const { openSheet, requireIdentity, now, updates, votes, vote, plan } = app
   const p = POIS.find((x) => x.id === id)!
   const I = CAT_ICON[p.cat]
   const walk = walkMinutes(ME.x, ME.y, p.x, p.y)
-  const reports = [...myUpdates, ...UPDATES].filter((u) => u.poi === id && votes[u.id] !== 'fixed')
+  const reports = updates.filter((u) => u.poi === id && votes[u.id] !== 'fixed')
   const stageId = p.cat === 'stage' ? (p.id.replace('stage-', '') as keyof typeof stageById) : null
   const stageActs = stageId ? ACTS.filter((a) => a.stage === stageId && a.day === Math.max(0, Math.min(2, now.day)) && status(a, now) !== 'past').slice(0, 3) : []
   const statusText = p.status === 'closed' ? 'Geschlossen' : p.status === 'busy' ? 'Geöffnet · viel los' : p.status === 'open' ? 'Geöffnet' : null
@@ -237,13 +239,14 @@ function PoiSheet({ id }: { id: string }) {
 
 /* ---------------- Conflict resolver ---------------- */
 function Resolver({ ids, k }: { ids: string[]; k: string }) {
+  const { crew } = useApp()
   const { resolve, closeSheet } = useApp()
   const acts = ids.map((i) => actById[i])
   const [pick, setPick] = useState<string | null>(null)
   const [battle, setBattle] = useState(false)
   const start = Math.min(...acts.map((a) => a.start))
   const end = Math.max(...acts.map((a) => a.end))
-  const maxFriends = Math.max(1, ...acts.map((a) => friendsFor(a.id).length))
+  const maxFriends = Math.max(1, ...acts.map((a) => crew.friendsFor(a.id).length))
   const totalPop = acts.reduce((s, a) => s + a.popularity, 0)
   return (
     <>
@@ -276,7 +279,7 @@ function Resolver({ ids, k }: { ids: string[]; k: string }) {
           <motion.div key="l" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {acts.map((a) => {
               const s = stageById[a.stage]
-              const f = friendsFor(a.id)
+              const f = crew.friendsFor(a.id)
               const on = pick === a.id
               return (
                 <button
@@ -389,6 +392,7 @@ function Battle({ ids, onDone }: { ids: string[]; onDone: (winner: string) => vo
 
 /* ---------------- Meetups ---------------- */
 function MeetupSheet({ id }: { id: string }) {
+  const { crew } = useApp()
   const app = useApp()
   const { meetups, rsvp, closeSheet, sendChat } = app
   const m = meetups.find((x) => x.id === id)
@@ -439,7 +443,7 @@ function MeetupSheet({ id }: { id: string }) {
       <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
         {m.going.map((f) => (
           <span key={f} className="chip" style={{ paddingLeft: 4 }}>
-            <Avatar id={f} /> {f === 'me' ? 'Du' : friendById[f].name}
+            <Avatar id={f} /> {f === 'me' ? 'Du' : (crew.byId[f]?.name ?? 'Gast')}
           </span>
         ))}
       </div>
@@ -565,9 +569,9 @@ function UpdateItem({ u, vote, voted }: { u: FestivalUpdate; vote: (id: string, 
 }
 
 function Updates() {
-  const { phase, myUpdates, votes, vote, openSheet } = useApp()
+  const { phase, updates, votes, vote, openSheet } = useApp()
   const [f, setF] = useState<UpdateSource | 'all'>('all')
-  const all = [...myUpdates, ...UPDATES].filter((u) => u.phases.includes(phase) && votes[u.id] !== 'fixed')
+  const all = updates.filter((u) => u.phases.includes(phase) && votes[u.id] !== 'fixed')
   const list = all.filter((u) => f === 'all' || u.source === f)
   return (
     <>
@@ -710,7 +714,7 @@ function Identity({ reason }: { reason: string }) {
 }
 
 function Profile() {
-  const { guest, phase, setPhase, openSheet, reset, closeSheet, setTab, plan } = useApp()
+  const { guest, phase, setPhase, openSheet, reset, closeSheet, setTab, plan, online, deleteProfile, session } = useApp()
   const [confirmReset, setConfirmReset] = useState(false)
   return (
     <>
@@ -778,11 +782,18 @@ function Profile() {
           <WifiOff size={18} className="faint" />
           <span className="grow small">Offline verfügbar: Timetable, Karte, {plan.length} geplante Acts</span>
         </div>
-        <div className="list-item small faint">ID {guest.id.slice(0, 10)}… · pseudonym</div>
+        <div className="list-item small faint">
+          {online ? (session ? `ID ${session.id.slice(0, 10)}… · pseudonym · verbunden` : 'Noch kein Profil auf dem Server – entsteht beim ersten sozialen Feature') : `ID ${guest.id.slice(0, 10)}… · pseudonym · Demo-Modus`}
+        </div>
+        {online && (
+          <button className="list-item small" onClick={() => openSheet({ kind: 'restore' })}>
+            <KeyRound size={18} className="faint" /> Profil mit Code wiederherstellen
+          </button>
+        )}
         {confirmReset ? (
           <div className="list-item">
-            <span className="grow small">Alle lokalen Daten löschen?</span>
-            <button className="btn danger sm" onClick={reset}>
+            <span className="grow small">{online ? 'Profil und alle Daten auf dem Server endgültig löschen?' : 'Alle lokalen Daten löschen?'}</span>
+            <button className="btn danger sm" onClick={online ? deleteProfile : reset}>
               Löschen
             </button>
             <button className="btn ghost sm" onClick={() => setConfirmReset(false)}>
@@ -791,7 +802,7 @@ function Profile() {
           </div>
         ) : (
           <button className="list-item small" style={{ color: 'var(--crit)' }} onClick={() => setConfirmReset(true)}>
-            <RotateCcw size={18} /> Demo zurücksetzen
+            <RotateCcw size={18} /> {online ? 'Profil löschen' : 'Demo zurücksetzen'}
           </button>
         )}
       </div>
@@ -800,8 +811,20 @@ function Profile() {
 }
 
 function Secure() {
-  const { secure, guest, toast, closeSheet } = useApp()
+  const { secure, guest, toast, closeSheet, online, requireIdentity } = useApp()
   const [code, setCode] = useState<string | undefined>(guest.recoveryCode)
+  const [busy, setBusy] = useState(false)
+  const makeCode = () =>
+    requireIdentity('Dein Profil braucht einen Namen, bevor es gesichert wird.', async () => {
+      setBusy(true)
+      setCode(await secure('code'))
+      setBusy(false)
+    })
+  const passkey = (label: string) => {
+    secure('passkey')
+    toast(`Mit ${label} gesichert`)
+    closeSheet()
+  }
   return (
     <>
       <div className="sheet-head">
@@ -814,7 +837,7 @@ function Secure() {
       {code ? (
         <>
           <div className="code">{code}</div>
-          <p className="small muted">Bewahre diesen Code sicher auf. Er ist der einzige Weg zurück zu deinem Profil.</p>
+          <p className="small muted">Bewahre diesen Code sicher auf. Er ist der einzige Weg zurück zu deinem Profil{online ? ' – auch auf einem neuen Gerät' : ''}. Ein neuer Code macht den alten ungültig.</p>
           <button
             className="btn secondary block"
             onClick={() => {
@@ -828,51 +851,72 @@ function Secure() {
             Fertig
           </button>
         </>
+      ) : online ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button className="btn primary block" disabled={busy} onClick={makeCode}>
+            <KeyRound size={17} /> {busy ? 'Wird erstellt …' : 'Recovery-Code erstellen'}
+          </button>
+          <p className="tiny faint" style={{ textAlign: 'center' }}>
+            Passkey sowie Apple- und Google-Anmeldung folgen in der nativen App.
+          </p>
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button
-            className="btn primary block"
-            onClick={() => {
-              secure('passkey')
-              toast('Mit Passkey gesichert')
-              closeSheet()
-            }}
-          >
+          <button className="btn primary block" onClick={() => passkey('Passkey')}>
             <Fingerprint size={18} /> Mit Passkey sichern
           </button>
           <div className="row" style={{ gap: 8 }}>
-            <button
-              className="btn secondary grow"
-              onClick={() => {
-                secure('passkey')
-                toast('Mit Apple gesichert')
-                closeSheet()
-              }}
-            >
+            <button className="btn secondary grow" onClick={() => passkey('Apple')}>
               Apple
             </button>
-            <button
-              className="btn secondary grow"
-              onClick={() => {
-                secure('passkey')
-                toast('Mit Google gesichert')
-                closeSheet()
-              }}
-            >
+            <button className="btn secondary grow" onClick={() => passkey('Google')}>
               Google
             </button>
           </div>
-          <button className="btn ghost block" onClick={() => setCode(secure('code'))}>
+          <button className="btn ghost block" onClick={makeCode}>
             <KeyRound size={17} /> Recovery-Code erstellen
           </button>
+          <p className="tiny faint" style={{ textAlign: 'center' }}>
+            Demo-Modus: Die Sicherung wird nur simuliert.
+          </p>
         </div>
       )}
     </>
   )
 }
 
+function Restore() {
+  const { restore, closeSheet } = useApp()
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  return (
+    <>
+      <div className="sheet-head">
+        <div className="grow">
+          <h2>Profil wiederherstellen</h2>
+          <div className="small muted">Gib den Recovery-Code ein, den du beim Sichern erhalten hast. Dein aktuelles Gastprofil auf diesem Gerät wird ersetzt.</div>
+        </div>
+      </div>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault()
+          setBusy(true)
+          if (await restore(code)) closeSheet()
+          setBusy(false)
+        }}
+      >
+        <input className="field code" style={{ height: 'auto' }} placeholder="XXXX-XXXX-XXXX-XXXX" value={code} onChange={(e) => setCode(e.target.value)} autoCapitalize="characters" autoComplete="one-time-code" />
+        <button className="btn primary block" style={{ marginTop: 14 }} disabled={busy || code.replace(/[^a-z0-9]/gi, '').length < 16}>
+          {busy ? 'Wird geprüft …' : 'Wiederherstellen'}
+        </button>
+      </form>
+    </>
+  )
+}
+
 /* ---------------- Crew sub pages ---------------- */
 function Chat() {
+  const { crew } = useApp()
   const { chat, sendChat, requireIdentity, openSheet, now } = useApp()
   const [text, setText] = useState('')
   const [active, setActive] = useState<string | null>(null)
@@ -884,7 +928,7 @@ function Chat() {
         <div className="grow">
           <h2 style={{ fontSize: 24 }}>Crew-Chat</h2>
           <div className="row small muted" style={{ gap: 8 }}>
-            <AvatarStack ids={FRIENDS.map((f) => f.id)} max={5} /> {FRIENDS.length + 1} Personen
+            <AvatarStack ids={crew.members.map((f) => f.id)} max={5} /> {crew.members.length + 1} Personen
           </div>
         </div>
       </div>
@@ -896,7 +940,7 @@ function Chat() {
             <motion.div key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', flexDirection: 'column', alignItems: me ? 'flex-end' : 'flex-start' }}>
               {showName && (
                 <span className="tiny faint" style={{ margin: '8px 0 3px 4px' }}>
-                  {friendById[m.from].name} · {fmt(m.min)}
+                  {(crew.byId[m.from]?.name ?? 'Gast')} · {fmt(m.min)}
                 </span>
               )}
               <button className={`bubble ${me ? 'me' : 'them'}`} style={{ textAlign: 'left' }} onClick={() => setActive(active === m.id ? null : m.id)}>
@@ -949,11 +993,12 @@ function Chat() {
 }
 
 function Shared() {
+  const { crew } = useApp()
   const { plan } = useApp()
   const [day, setDay] = useState<number | 'all'>('all')
   const [friend, setFriend] = useState<string | null>(null)
   const acts = useMemo(
-    () => ACTS.filter((a) => plan.includes(a.id) && (day === 'all' || a.day === day)).filter((a) => (friend ? friendsFor(a.id).includes(friend) : friendsFor(a.id).length > 0)),
+    () => ACTS.filter((a) => plan.includes(a.id) && (day === 'all' || a.day === day)).filter((a) => (friend ? crew.friendsFor(a.id).includes(friend) : crew.friendsFor(a.id).length > 0)),
     [plan, day, friend],
   )
   return (
@@ -975,7 +1020,7 @@ function Shared() {
         ))}
       </div>
       <div className="chips" style={{ marginBottom: 6 }}>
-        {FRIENDS.map((f) => (
+        {crew.members.map((f) => (
           <button key={f.id} className={`chip ${friend === f.id ? 'on' : ''}`} style={{ paddingLeft: 4 }} onClick={() => setFriend(friend === f.id ? null : f.id)}>
             <Avatar id={f.id} /> {f.name}
           </button>
@@ -996,11 +1041,23 @@ function Shared() {
 }
 
 function Steps() {
-  const { stepsOptIn, set, guest, requireIdentity, toast } = useApp()
+  const { crew } = useApp()
+  const { stepsOptIn, set, guest, requireIdentity, toast, online, remote, now } = useApp()
+  const day = Math.max(0, Math.min(2, now.day))
   const [scope, setScope] = useState<'day' | 'fest'>('day')
-  const me = { id: 'me', name: guest.nickname ?? 'Du', steps: 12840 }
-  const rows = [...FRIENDS.map((f) => ({ id: f.id, name: f.name, steps: scope === 'day' ? f.steps : f.steps * 2 + 3100 })), { ...me, steps: scope === 'day' ? me.steps : me.steps * 2 + 2400 }].sort((a, b) => b.steps - a.steps)
-  const max = rows[0].steps
+  // demo: festival total is extrapolated; live: the server only has what native apps synced
+  const myLive = remote?.members.find((m) => m.id === remote.me)?.steps ?? []
+  const liveTotal = (steps: { day: number; total: number }[]) => (scope === 'day' ? (steps.find((x) => x.day === day)?.total ?? 0) : steps.reduce((n, x) => n + x.total, 0))
+  const meSteps = online ? liveTotal(myLive) : scope === 'day' ? 12840 : 12840 * 2 + 2400
+  const rows = [
+    ...crew.members.map((f) => ({
+      id: f.id,
+      name: f.name,
+      steps: online ? liveTotal(remote?.members.find((m) => m.id === f.id)?.steps ?? []) : scope === 'day' ? f.steps : f.steps * 2 + 3100,
+    })),
+    { id: 'me', name: guest.nickname ?? 'Du', steps: meSteps },
+  ].sort((a, b) => b.steps - a.steps)
+  const max = Math.max(1, rows[0].steps)
   if (!stepsOptIn)
     return (
       <>
@@ -1040,7 +1097,7 @@ function Steps() {
         <div className="grow">
           <span className="label">Step-Challenge</span>
           <h2>Platz {myRank}</h2>
-          <div className="small muted">von {rows.length} in deiner Crew · Top 10 % aller 842 Teilnehmenden</div>
+          <div className="small muted">von {rows.length} in deiner Crew{online ? '' : ' · Top 10 % aller 842 Teilnehmenden'}</div>
         </div>
       </div>
       <Segmented
@@ -1070,7 +1127,10 @@ function Steps() {
         ))}
       </div>
       <div className="row tiny faint" style={{ marginTop: 14 }}>
-        <Sparkles size={14} /> <span className="grow">Letzter Sync vor 4 Min. · keine Preise, nur Ehre</span>
+        <Sparkles size={14} />{' '}
+        <span className="grow">
+          {online ? (myLive.length ? `Letzter Sync vor ${Math.round((Date.now() - Math.max(...myLive.map((x) => x.syncedAt))) / 60000)} Min.` : 'Deine Schritte kommen aus der iOS-/Android-App') : 'Letzter Sync vor 4 Min.'} · keine Preise, nur Ehre
+        </span>
         <button className="btn ghost sm" onClick={() => set('stepsOptIn', false)}>
           Beenden
         </button>

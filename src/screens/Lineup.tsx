@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { GanttChart, Heart, LayoutList, Search, SlidersHorizontal, TriangleAlert, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { ACTS, DAYS, fmt, friendsFor, STAGES, stageById, type Act, type StageId } from '../data'
+import { ACTS, DAYS, fmt, STAGES, stageById, type Act, type StageId } from '../data'
 import { conflictClusters, useApp } from '../store'
 import { status } from '../time'
 import { AvatarStack, FavButton, Segmented, StageDot, spring } from '../ui'
@@ -215,9 +215,10 @@ function Empty({ mode, q, onAll }: { mode: Mode; q: string; onAll: () => void })
 }
 
 export function ActRow({ a, showDay }: { a: Act; showDay?: boolean }) {
+  const { crew } = useApp()
   const { now, openSheet } = useApp()
   const st = status(a, now)
-  const friends = friendsFor(a.id)
+  const friends = crew.friendsFor(a.id)
   return (
     <motion.div layout="position" className={`act ${st}`} role="button" tabIndex={0} onClick={() => openSheet({ kind: 'act', id: a.id })} onKeyDown={(e) => e.key === 'Enter' && openSheet({ kind: 'act', id: a.id })} style={{ cursor: 'pointer' }}>
       <div className="time">
