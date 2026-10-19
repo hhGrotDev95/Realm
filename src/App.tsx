@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect } from 'react'
 import { House, ListMusic, Map as MapIcon, Users } from 'lucide-react'
-import { DAYS, PHASES, fmt } from './data'
+import { DAYS, FESTIVAL, PHASES, fmt } from './data'
 import { Crew } from './screens/Crew'
 import { Home } from './screens/Home'
 import { Lineup } from './screens/Lineup'
@@ -36,7 +36,7 @@ export function AppBar({ floating }: { floating?: boolean }) {
         R
       </div>
       <div className="title">
-        <h1 className="appbar-h">Realm Open Air</h1>
+        <h1 className="appbar-h">{FESTIVAL.name}</h1>
         <span>{sub}</span>
       </div>
       <button className="icon-btn" aria-label="Profil & Einstellungen" onClick={() => openSheet({ kind: 'profile' })}>

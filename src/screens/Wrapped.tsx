@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { Share2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { actById, DAYS, fmt, stageById, STAGES, type StageId } from '../data'
+import { FESTIVAL, actById, DAYS, fmt, stageById, STAGES, type StageId } from '../data'
 import { useApp } from '../store'
 
 const DURATION = 5200
@@ -17,7 +17,7 @@ export function Wrapped() {
     const seen = planned.filter((a) => attended[a.id] !== false)
     const confirmed = planned.filter((a) => attended[a.id] === true).length
     const stageCount = seen.reduce<Record<string, number>>((acc, a) => ((acc[a.stage] = (acc[a.stage] ?? 0) + 1), acc), {})
-    const fav = (Object.entries(stageCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'generator') as StageId
+    const fav = (Object.entries(stageCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? STAGES[0]?.id ?? '') as StageId
     const minutes = seen.reduce((s, a) => s + (a.end - a.start), 0)
     const latest = [...seen].sort((a, b) => b.end - a.end)[0]
     const earliest = [...seen].sort((a, b) => a.start - b.start)[0]
@@ -31,7 +31,7 @@ export function Wrapped() {
       body: (
         <>
           <div className="label" style={{ color: 'rgba(255,255,255,.7)' }}>
-            Realm Open Air 2027
+            {FESTIVAL.name}
           </div>
           <h3 style={{ fontSize: 48 }}>{guest.nickname ? `${guest.nickname},` : 'Hey,'} das war dein Festival.</h3>
           <p style={{ opacity: 0.8 }}>Drei Tage. Fünf Stages. Eine Crew.</p>
@@ -112,7 +112,7 @@ export function Wrapped() {
             style={{ background: '#fff', color: '#111', alignSelf: 'flex-start', marginTop: 12 }}
             onClick={(e) => {
               e.stopPropagation()
-              const text = `Mein Realm 2027: ${data.seen.length} Sets, Lieblingsstage ${stageById[data.fav].name}.`
+              const text = `Mein ${FESTIVAL.name}: ${data.seen.length} Sets, Lieblingsstage ${stageById[data.fav]?.name ?? '–'}.`
               if (navigator.share) navigator.share({ text }).catch(() => {})
               else {
                 navigator.clipboard?.writeText(text).catch(() => {})

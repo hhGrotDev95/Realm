@@ -1,7 +1,8 @@
 import { CalendarClock, LogOut, Megaphone, RotateCcw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { adminApi, api, ApiError, online, type Announcement } from '../api'
-import { ACTS, DAYS, fmt, STAGES, stageById, type Act, type StageId, type TimetableChange } from '../data'
+import { adminApi, api, ApiError, online, setFestival, type Announcement } from '../api'
+import { currentSlug } from '../festival'
+import { ACTS, DAYS, fmt, loadFestivalBundle, STAGES, stageById, type Act, type StageId, type TimetableChange } from '../data'
 
 const KEY = 'realm.admin'
 type Tab = 'announcements' | 'timetable'
@@ -138,8 +139,57 @@ function Login({ onLogin }: { onLogin: (t: string) => void }) {
   )
 }
 
+const STATUS: Record<string, string> = { draft: 'Entwurf', published: 'Veröffentlicht', archived: 'Archiviert' }
+
 function Console({ token, flash }: { token: string; flash: (k: 'ok' | 'err', t: string) => void }) {
   const [tab, setTab] = useState<Tab>('announcements')
+  const [festivals, setFestivals] = useState<{ slug: string; name: string; status: string }[]>([])
+  const [slug, setSlug] = useState(currentSlug)
+  const [loaded, setLoaded] = useState<string | null>(null)
+  const admin = useMemo(() => adminApi(token), [token])
+
+  useEffect(() => {
+    admin.festivals().then(setFestivals, (e) => flash('err', errText(e)))
+  }, [admin, flash])
+
+  // every request below is scoped to the selected festival (X-Festival)
+  useEffect(() => {
+    setLoaded(null)
+    setFestival(slug)
+    admin.bundle(slug).then(
+      (b) => {
+        loadFestivalBundle(b)
+        setLoaded(slug)
+      },
+      (e) => flash('err', errText(e)),
+    )
+  }, [admin, slug, flash])
+
+  return (
+    <>
+      <div className="row" style={{ gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+        <label className="admin-field" style={{ marginBottom: 0, maxWidth: 360 }}>
+          <span>Festival</span>
+          <select className="field" value={slug} onChange={(e) => setSlug(e.target.value)}>
+            {!festivals.some((f) => f.slug === slug) && <option value={slug}>{slug}</option>}
+            {festivals.map((f) => (
+              <option key={f.slug} value={f.slug}>
+                {f.name} · {STATUS[f.status] ?? f.status}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {loaded !== slug ? (
+        <p className="muted small">Lade Festival …</p>
+      ) : (
+        <ConsoleTabs key={slug} tab={tab} setTab={setTab} token={token} flash={flash} />
+      )}
+    </>
+  )
+}
+
+function ConsoleTabs({ tab, setTab, token, flash }: { tab: Tab; setTab: (t: Tab) => void; token: string; flash: (k: 'ok' | 'err', t: string) => void }) {
   return (
     <>
       <nav className="admin-tabs" role="tablist">

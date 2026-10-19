@@ -13,7 +13,7 @@ export function Lineup() {
   const app = useApp()
   const { plan, now, phase, resolved, openSheet } = app
   const live = phase === 'during' || phase === 'arrival'
-  const [day, setDay] = useState(live ? Math.max(0, Math.min(2, now.day)) : 0)
+  const [day, setDay] = useState(live ? Math.max(0, Math.min(DAYS.length - 1, now.day)) : 0)
   const [mode, setMode] = useState<Mode>(plan.length ? 'plan' : 'all')
   const [view, setView] = useState<'list' | 'timeline'>('list')
   const [q, setQ] = useState('')

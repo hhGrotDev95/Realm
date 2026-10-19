@@ -1,7 +1,9 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { Flag, Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Copy, Fingerprint, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
+import { switchFestival } from './festival'
+import { api } from './api'
+import { FESTIVAL, ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
 import { CAT_ICON } from './screens/MapScreen'
 import { ActRow } from './screens/Lineup'
 import { useApp, type SheetState } from './store'
@@ -227,7 +229,7 @@ function PoiSheet({ id }: { id: string }) {
   const walk = walkMinutes(ME.x, ME.y, p.x, p.y)
   const reports = updates.filter((u) => u.poi === id && votes[u.id] !== 'fixed')
   const stageId = p.cat === 'stage' ? (p.id.replace('stage-', '') as keyof typeof stageById) : null
-  const stageActs = stageId ? ACTS.filter((a) => a.stage === stageId && a.day === Math.max(0, Math.min(2, now.day)) && status(a, now) !== 'past').slice(0, 3) : []
+  const stageActs = stageId ? ACTS.filter((a) => a.stage === stageId && a.day === Math.max(0, Math.min(DAYS.length - 1, now.day)) && status(a, now) !== 'past').slice(0, 3) : []
   const statusText = p.status === 'closed' ? 'Geschlossen' : p.status === 'busy' ? 'Geöffnet · viel los' : p.status === 'open' ? 'Geöffnet' : null
   return (
     <>
@@ -800,6 +802,7 @@ function Profile() {
         </button>
       )}
 
+      {online && <FestivalPicker />}
       <div className="label" style={{ marginBottom: 10 }}>
         Uhrzeit & Festivalphase
       </div>
@@ -872,6 +875,37 @@ function Profile() {
             <RotateCcw size={18} /> {online ? 'Profil löschen' : 'Demo zurücksetzen'}
           </button>
         )}
+      </div>
+    </>
+  )
+}
+
+/** Every festival is its own tenant: switching reloads the app with that festival's data. */
+function FestivalPicker() {
+  const [list, setList] = useState<{ slug: string; name: string; location: string | null }[] | null>(null)
+  useEffect(() => {
+    api.festivals().then(setList, () => setList([]))
+  }, [])
+  if (!list || list.length < 2) return null
+  return (
+    <>
+      <div className="label" style={{ marginBottom: 10 }}>
+        Festival
+      </div>
+      <div className="list" style={{ marginBottom: 22 }}>
+        {list.map((f) => (
+          <button key={f.slug} className="list-item" onClick={() => f.slug !== FESTIVAL.slug && switchFestival(f.slug)} aria-current={f.slug === FESTIVAL.slug}>
+            <span className="grow">
+              <span style={{ fontWeight: 600 }}>{f.name}</span>
+              {f.location && (
+                <span className="small faint" style={{ display: 'block' }}>
+                  {f.location}
+                </span>
+              )}
+            </span>
+            {f.slug === FESTIVAL.slug && <Check size={18} style={{ color: 'var(--brand)' }} />}
+          </button>
+        ))}
       </div>
     </>
   )
@@ -1182,7 +1216,7 @@ function Shared() {
 function Steps() {
   const { crew } = useApp()
   const { stepsOptIn, set, guest, requireIdentity, toast, online, remote, now } = useApp()
-  const day = Math.max(0, Math.min(2, now.day))
+  const day = Math.max(0, Math.min(DAYS.length - 1, now.day))
   const [scope, setScope] = useState<'day' | 'fest'>('day')
   // demo: festival total is extrapolated; live: the server only has what native apps synced
   const myLive = remote?.members.find((m) => m.id === remote.me)?.steps ?? []

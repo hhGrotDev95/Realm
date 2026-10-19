@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { CalendarClock, Users, ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { ACTS, actById, DAYS, fmt, stageById, walkMinutes, ME } from '../data'
+import { dateRange, FESTIVAL, ACTS, actById, DAYS, fmt, stageById, walkMinutes, ME } from '../data'
 import { conflictClusters, isMeetupActive, useApp } from '../store'
 import { nowNext, planFor, status, untilLabel } from '../time'
 import { AvatarStack, SourceTag, StageDot, ago, stagger } from '../ui'
@@ -299,7 +299,7 @@ function Countdown() {
   ] as const
   return (
     <motion.div {...stagger(0)} className="hero">
-      <span className="label next">Realm Open Air 2027</span>
+      <span className="label next">{FESTIVAL.name}</span>
       <div className="row" style={{ gap: 18, margin: '14px 0 6px', alignItems: 'flex-end' }}>
         {parts.map(([n, l]) => (
           <div key={l}>
@@ -310,7 +310,10 @@ function Countdown() {
           </div>
         ))}
       </div>
-      <p className="meta">15.–17. Juli · Lüneburger Heide</p>
+      <p className="meta">
+        {dateRange()}
+        {FESTIVAL.location ? ` · ${FESTIVAL.location}` : ''}
+      </p>
     </motion.div>
   )
 }
@@ -483,7 +486,7 @@ function After() {
         <span className="label" style={{ color: 'rgba(255,255,255,.75)' }}>
           Festival Wrapped
         </span>
-        <h1 style={{ fontSize: 46 }}>Dein Realm 2027.</h1>
+        <h1 style={{ fontSize: 46 }}>Dein {FESTIVAL.name}.</h1>
         <p className="meta" style={{ color: 'rgba(255,255,255,.85)' }}>
           {seen} Sets gesehen · {plan.length} im Plan · 3 Tage
         </p>
@@ -530,7 +533,7 @@ function After() {
       </motion.section>
       <motion.section {...stagger(3)} className="card row">
         <Footprints size={20} className="faint" />
-        <span className="small muted grow">Realm 2028 · Early-Bird ab 1. Oktober</span>
+        <span className="small muted grow">Bis zum nächsten {FESTIVAL.name}!</span>
       </motion.section>
     </>
   )

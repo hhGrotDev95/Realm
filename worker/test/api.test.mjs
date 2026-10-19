@@ -14,6 +14,11 @@ const run = (args) =>
     p.on('exit', (code) => (code === 0 ? res() : rej(new Error('wrangler ' + args.join(' ') + ' failed'))))
   })
 await run(['d1', 'migrations', 'apply', 'realm', '--local', '--persist-to', persist])
+// a draft and an archived festival to test visibility and write protection
+await run([
+  'd1', 'execute', 'realm', '--local', '--persist-to', persist, '--command',
+  "INSERT INTO festivals (id, slug, name, status, created_at, updated_at) VALUES ('fdraft', 'geheim', 'Geheimfestival', 'draft', 0, 0), ('farch', 'vorbei', 'Vorbei Fest', 'archived', 0, 0)",
+])
 const server = spawn('npx', ['wrangler', 'dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', 'ADMIN_TOKEN:test-admin-token'], { stdio: 'ignore', detached: true })
 
 for (let i = 0; ; i++) {
@@ -24,10 +29,10 @@ for (let i = 0; ; i++) {
   await new Promise((r) => setTimeout(r, 200))
 }
 
-async function api(method, path, token, body) {
+async function api(method, path, token, body, festival = 'realm-open-air') {
   const res = await fetch(BASE + path, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(festival ? { 'X-Festival': festival } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const text = await res.text()
@@ -295,6 +300,74 @@ try {
     assert.equal(a.stage, 'archive')
     assert.equal((await api('DELETE', '/api/admin/timetable/2-kairo', A)).status, 204)
     assert.equal((await api('DELETE', '/api/admin/timetable/2-kairo', A)).status, 404)
+  })
+
+  await test('festivals: public list and bundle, drafts hidden, header required', async () => {
+    const list = (await api('GET', '/api/festivals', null, undefined, null)).data
+    assert.deepEqual(
+      list.map((f) => f.slug).sort(),
+      ['nordlicht', 'realm-open-air'],
+    )
+    const b = (await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data
+    assert.equal(b.festival.name, 'Nordlicht Sessions')
+    assert.deepEqual(
+      b.stages.map((s) => s.id),
+      ['pier', 'werft'],
+    )
+    assert.equal(b.acts.length, 5)
+    assert.equal((await api('GET', '/api/festivals/gibts-nicht', null, undefined, null)).status, 404)
+    // tenant routes refuse requests without or with an unknown festival
+    assert.equal((await api('GET', '/api/announcements', null, undefined, null)).status, 400)
+    assert.equal((await api('GET', '/api/announcements', null, undefined, 'gibts-nicht')).status, 404)
+  })
+
+  await test('tenant isolation: data of one festival is invisible and unreachable from another', async () => {
+    const A = 'test-admin-token'
+    const N = 'nordlicht'
+    const nina = (await api('POST', '/api/guests', null, { nickname: 'Nina' })).data
+    // crews: a realm crew cannot be read, joined or written to from nordlicht – even with the right id/code
+    assert.equal((await api('GET', `/api/crews/${crew.id}`, lea.token, undefined, N)).status, 404)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages`, lea.token, { text: 'falsches Festival' }, N)).status, 404)
+    assert.equal((await api('POST', '/api/crews/join', nina.token, { code: crew.code }, N)).status, 404)
+    // plans are stored per festival; the colliding id "1-maduk" exists in both, unknown ids are rejected
+    const p = (await api('PUT', '/api/me/plan', nina.token, { acts: ['1-maduk', '0-orra', '0-tidewater'] }, N)).data
+    assert.deepEqual(p.acts.sort(), ['0-tidewater', '1-maduk'])
+    assert.deepEqual(p.rejected, ['0-orra'])
+    assert.deepEqual((await api('GET', '/api/me', nina.token, undefined, 'realm-open-air')).data.plan, [])
+    assert.deepEqual((await api('GET', '/api/me', nina.token, undefined, N)).data.plan.sort(), ['0-tidewater', '1-maduk'])
+    // announcements and timetable changes stay in their festival
+    const ann = (await api('POST', '/api/admin/announcements', A, { title: 'Nur Nordlicht' }, N)).data
+    assert.ok(!(await api('GET', '/api/announcements')).data.some((x) => x.id === ann.id))
+    assert.ok((await api('GET', '/api/announcements', null, undefined, N)).data.some((x) => x.id === ann.id))
+    assert.equal((await api('DELETE', `/api/admin/announcements/${ann.id}`, A)).status, 404)
+    assert.equal((await api('PUT', '/api/admin/timetable/0-orra', A, { cancelled: true }, N)).status, 404)
+    assert.equal((await api('PUT', '/api/admin/timetable/1-maduk', A, { stage: 'generator' }, N)).status, 400)
+    assert.equal((await api('PUT', '/api/admin/timetable/1-maduk', A, { stage: 'pier' }, N)).status, 200)
+    assert.ok(!(await api('GET', '/api/timetable/changes')).data.some((x) => x.actId === '1-maduk' && x.stage === 'pier'))
+    // reports and votes
+    const r = (await api('POST', '/api/reports', nina.token, { title: 'Kai gesperrt' }, N)).data
+    assert.ok(!(await api('GET', '/api/reports', lea.token)).data.some((x) => x.id === r.id))
+    assert.equal((await api('PUT', `/api/reports/${r.id}/vote`, lea.token, { kind: 'fixed' })).status, 404)
+    // locations are validated against this festival's stages
+    const nc = (await api('POST', '/api/crews', nina.token, { name: 'Hafen' }, N)).data
+    assert.equal((await api('PUT', `/api/crews/${nc.id}/location`, nina.token, { share: true, location: 'generator' }, N)).status, 400)
+    assert.equal((await api('PUT', `/api/crews/${nc.id}/location`, nina.token, { share: true, location: 'pier' }, N)).status, 200)
+    // meetups only for acts of this festival
+    assert.equal((await api('POST', `/api/crews/${nc.id}/meetups`, nina.token, { place: 'Kai', day: 0, min: 1100, actId: '0-orra' }, N)).status, 400)
+  })
+
+  await test('drafts are admin-only; archived festivals are read-only', async () => {
+    assert.ok(!(await api('GET', '/api/festivals', null, undefined, null)).data.some((f) => f.slug === 'geheim'))
+    assert.equal((await api('GET', '/api/festivals/geheim', null, undefined, null)).status, 404)
+    assert.equal((await api('GET', '/api/festivals/geheim', 'test-admin-token', undefined, null)).status, 200)
+    assert.equal((await api('GET', '/api/announcements', null, undefined, 'geheim')).status, 404)
+    assert.equal((await api('POST', '/api/admin/announcements', 'test-admin-token', { title: 'Vorschau-Test' }, 'geheim')).status, 201)
+    // archived: reading works, writing is refused for visitors but allowed for admins
+    assert.equal((await api('GET', '/api/festivals/vorbei', null, undefined, null)).status, 200)
+    assert.equal((await api('GET', '/api/announcements', null, undefined, 'vorbei')).status, 200)
+    assert.equal((await api('POST', '/api/crews', lea.token, { name: 'Zu spät' }, 'vorbei')).status, 403)
+    assert.equal((await api('PUT', '/api/me/plan', lea.token, { acts: [] }, 'vorbei')).status, 403)
+    assert.equal((await api('POST', '/api/admin/announcements', 'test-admin-token', { title: 'Danke fürs Kommen' }, 'vorbei')).status, 201)
   })
 
   await test('CORS preflight is answered', async () => {
