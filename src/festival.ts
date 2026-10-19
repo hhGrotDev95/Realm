@@ -1,5 +1,5 @@
 // Which festival this app shows, and loading its data from the API (with an offline copy).
-import { api, online, setFestival } from './api'
+import { adminApi, api, online, setFestival } from './api'
 import { loadFestivalBundle, type FestivalBundle } from './data'
 
 export const DEFAULT_FESTIVAL = (import.meta.env.VITE_FESTIVAL as string | undefined) || 'realm-open-air'
@@ -45,6 +45,18 @@ export async function bootFestival(): Promise<BootResult> {
   if (!online) return { ok: true, fresh: Promise.resolve(false) }
   const slug = currentSlug()
   setFestival(slug)
+  // organizer preview of a draft: uses the console's admin token from this tab and is never cached
+  const adminToken = new URLSearchParams(location.search).get('preview') ? safe(() => sessionStorage.getItem('realm.admin'), null) : null
+  if (adminToken) {
+    try {
+      const b = await adminApi(adminToken).bundle(slug)
+      if (!isBundle(b)) throw new Error('Festivaldaten unvollständig')
+      loadFestivalBundle(b)
+      return { ok: true, fresh: Promise.resolve(false) }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'Vorschau nicht möglich' }
+    }
+  }
   const stored = safe(() => JSON.parse(localStorage.getItem(bundleKey(slug)) ?? 'null') as unknown, null)
   const cached = isBundle(stored) && stored.festival.slug === slug ? stored : null
   const fetchFresh = async () => {

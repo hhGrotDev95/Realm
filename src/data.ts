@@ -300,6 +300,7 @@ export const FESTIVAL = {
   slug: 'realm-open-air',
   name: 'Realm Open Air',
   location: 'Lüneburger Heide' as string | null,
+  status: 'published' as 'draft' | 'published' | 'archived',
   theme: {} as { brand?: string },
 }
 
@@ -370,7 +371,7 @@ export function applyTimetableChanges(changes: TimetableChange[]) {
 
 /** The public festival document served by GET /api/festivals/:slug. */
 export interface FestivalBundle {
-  festival: { slug: string; name: string; location: string | null; status: string; theme: { brand?: string }; modules: Record<string, boolean>; updatedAt: number }
+  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: { brand?: string }; modules: Record<string, boolean>; updatedAt: number }
   days: FestivalDay[]
   stages: Stage[]
   acts: Omit<Act, 'change'>[]
@@ -388,7 +389,7 @@ const refill = <T,>(map: Record<string, T>, entries: [string, T][]) => {
  * lookup maps are updated in place so every module keeps working with the same references.
  */
 export function loadFestivalBundle(b: FestivalBundle) {
-  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, theme: b.festival.theme ?? {} })
+  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {} })
   replace(DAYS, b.days)
   replace(STAGES, b.stages)
   refill(stageById, STAGES.map((st) => [st.id, st]))

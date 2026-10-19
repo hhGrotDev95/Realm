@@ -187,8 +187,27 @@ Dateien: `worker/migrations/0005_festivals.sql`, `worker/migrations/0006_seed_de
 | `npm run test:a11y` | 13 Ansichten, 0 Befunde |
 | `npm run test:live` | 16 Szenarien (neu: Plan anlegen, Festivalwechsel mit getrennten Crews) |
 
+GitHub Actions auf PR #7: `web`, `api`, `live` grün, gemergt.
+
+## P2 · Festival anlegen und Import — erledigt (Branch `claude/realm-import`)
+
+- Worker: Festival anlegen (Entwurf, Tage aus Startdatum mit Wochentagen), bearbeiten und Status setzen (Veröffentlichen nur mit Bühne und Act), Bühnen pflegen (belegte Bühnen nicht löschbar), Import mit `dryRun`, `merge`/`replace`, serverseitiger Neuvalidierung, Zeilennummern, Dubletten- und Überschneidungs-Warnungen, automatischen neuen Bühnen und stabilen IDs (`<Tag>-<Name>` oder eigene ID). Fehler blockieren den gesamten Import (422 mit Zeilenfehlern). `replace` legt vorher einen Snapshot an (Migration `0007`), der wiederherstellbar ist.
+- Parser im Browser (`src/import/parse.ts`): JSON, CSV (`,` `;` Tab, Quotes, BOM), XLSX (nachgeladen), deutsche und englische Spalten, Tag als Nummer/Datum/Wochentag/Bezeichnung, Zeiten inkl. `24:30`, `01:30`, `22 Uhr`, Excel-Zeitzellen, kombinierte Zeitfenster, fehlendes Ende → 60 Min. mit Warnung.
+- Konsole: „Neues Festival“, wiederaufnehmbarer Assistent (Grunddaten → Bühnen → Timetable → Prüfen & veröffentlichen), Tabs Import, Bühnen, Status (veröffentlichen, archivieren, reaktivieren, zurück auf Entwurf), Vorschau von Entwürfen in der App mit Banner. Admin-Lesezugriffe nutzen jetzt das Admin-Token (vorher scheiterten Meldungen/Änderungen bei Entwürfen).
+- Doku für Veranstalter: `docs/IMPORT.md`.
+
+Beim Testen gefunden und behoben: nach dem Veröffentlichen blieb der Assistent ohne markierten Tab stehen – die Konsole wechselt jetzt in die Status-Ansicht.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler |
+| `npm run test:import` | 8 Parser-Tests (CSV DE/EN, JSON, XLSX, Nachtzeiten, Zeilenfehler) |
+| `cd worker && npm test` | 24 API-Tests (neu: Einrichtung + Import inkl. Favoriten-Erhalt, Snapshot, Archiv) + Migrationstest (7 Migrationen) |
+| `npm run test:e2e` · `npm run test:a11y` | 9 Abläufe · 13 Ansichten ohne Befund |
+| `npm run test:live` | 17 Szenarien (neu: Festival per Assistent anlegen, XLSX mit Zeilenfehler, Vorschau, Veröffentlichen, Besucher sieht Nachtset am Freitag) |
+
 ## Nächste Schritte
 
-1. P2: Festival anlegen (Assistent) und Import aus JSON/CSV/XLSX mit stabilen IDs.
-2. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen).
-3. Deployment (Cloudflare-Konto nötig), danach Push.
+1. P3: Branding (Logo, Farben, Schrift) mit Vorschau und Kontrastprüfung.
+2. P4: Module ein-/ausschalten (Frontend + Backend).
+3. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen).

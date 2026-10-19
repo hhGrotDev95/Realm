@@ -370,6 +370,88 @@ try {
     assert.equal((await api('POST', '/api/admin/announcements', 'test-admin-token', { title: 'Danke fürs Kommen' }, 'vorbei')).status, 201)
   })
 
+  await test('festival setup: create draft, stages, import (dry run, errors, merge, replace, restore), publish', async () => {
+    const A = 'test-admin-token'
+    assert.equal((await api('POST', '/api/admin/festivals', lea.token, { name: 'Sommerwiese', startDate: '2027-06-04', days: 2 }, null)).status, 401)
+    assert.equal((await api('POST', '/api/admin/festivals', A, { name: 'Sommerwiese', startDate: '4.6.2027', days: 2 }, null)).status, 400)
+    const f = await api('POST', '/api/admin/festivals', A, { name: 'Sommerwiese Open Air', startDate: '2027-06-04', days: 2, location: 'Kiel' }, null)
+    assert.equal(f.status, 201)
+    assert.equal(f.data.slug, 'sommerwiese-open-air')
+    assert.equal(f.data.status, 'draft')
+    assert.equal((await api('POST', '/api/admin/festivals', A, { name: 'Sommerwiese Open Air', startDate: '2027-06-04', days: 2 }, null)).status, 409)
+    const slug = f.data.slug
+    let b = (await api('GET', `/api/festivals/${slug}`, A, undefined, null)).data
+    assert.deepEqual(
+      b.days.map((d) => [d.date, d.label]),
+      [
+        ['2027-06-04', 'Freitag'],
+        ['2027-06-05', 'Samstag'],
+      ],
+    )
+    // publishing an empty festival is refused
+    assert.equal((await api('PATCH', `/api/admin/festivals/${slug}`, A, { status: 'published' }, null)).status, 400)
+    assert.equal((await api('PUT', `/api/admin/festivals/${slug}/stages`, A, { stages: [{ name: 'Wiese' }, { name: 'Zelt', color: '#123456' }] }, null)).status, 200)
+
+    const rows = [
+      { row: 2, artist: 'Morgentau', stage: 'Wiese', day: 0, start: 1200, end: 1260 },
+      { row: 3, artist: 'Nachtfalter', stage: 'Zelt', day: 0, start: 1440, end: 1530, genre: 'Techno' },
+      { row: 4, artist: 'Morgentau', stage: 'Wiese', day: 0, start: 1200, end: 1260 },
+      { row: 5, artist: 'Überlapp', stage: 'Wiese', day: 0, start: 1230, end: 1290 },
+      { row: 6, artist: 'Neue Bühne', stage: 'Strand', day: 1, start: 1100, end: 1160 },
+    ]
+    const dry = (await api('POST', `/api/admin/festivals/${slug}/import`, A, { mode: 'merge', dryRun: true, rows }, null)).data
+    assert.equal(dry.written, false)
+    assert.deepEqual(dry.summary, { rows: 5, created: 4, updated: 0, unchanged: 0, removed: 0, stagesCreated: 1 })
+    assert.deepEqual(
+      dry.warnings.map((w) => w.row),
+      [4, 5, 6],
+    )
+    assert.match(dry.warnings[0].message, /Doppelt \(wie Zeile 2\)/)
+    assert.equal((await api('GET', `/api/festivals/${slug}`, A, undefined, null)).data.acts.length, 0)
+
+    // errors block the whole import and carry row numbers
+    const bad = await api('POST', `/api/admin/festivals/${slug}/import`, A, { mode: 'merge', rows: [...rows, { row: 7, artist: 'Falsch', stage: 'Wiese', day: 5, start: 1200, end: 1260 }, { row: 8, artist: 'Rückwärts', stage: 'Wiese', day: 0, start: 1300, end: 1200 }] }, null)
+    assert.equal(bad.status, 422)
+    assert.deepEqual(
+      bad.data.errors.map((e) => e.row),
+      [7, 8],
+    )
+    assert.equal((await api('GET', `/api/festivals/${slug}`, A, undefined, null)).data.acts.length, 0)
+
+    const ok = (await api('POST', `/api/admin/festivals/${slug}/import`, A, { mode: 'merge', rows }, null)).data
+    assert.equal(ok.written, true)
+    b = (await api('GET', `/api/festivals/${slug}`, A, undefined, null)).data
+    assert.deepEqual(
+      b.acts.map((a) => a.id).sort(),
+      ['0-morgentau', '0-nachtfalter', '0-ueberlapp', '1-neue-buehne'],
+    )
+    assert.ok(b.stages.some((st) => st.id === 'strand'))
+
+    // a visitor favourites an act; re-importing with a new time keeps the id (and the favourite)
+    await api('PATCH', '/api/admin/festivals/' + slug, A, { status: 'published' }, null)
+    const fan = (await api('POST', '/api/guests', null, { nickname: 'Fan' })).data
+    assert.deepEqual((await api('PUT', '/api/me/plan', fan.token, { acts: ['0-nachtfalter'] }, slug)).data.acts, ['0-nachtfalter'])
+    const re = (await api('POST', `/api/admin/festivals/${slug}/import`, A, { mode: 'merge', rows: [{ row: 2, artist: 'Nachtfalter', stage: 'Zelt', day: 0, start: 1470, end: 1560, genre: 'Techno' }] }, null)).data
+    assert.deepEqual(re.summary, { rows: 1, created: 0, updated: 1, unchanged: 0, removed: 0, stagesCreated: 0 })
+    assert.deepEqual((await api('GET', '/api/me', fan.token, undefined, slug)).data.plan, ['0-nachtfalter'])
+
+    // replace removes acts missing from the file – after a snapshot that can be restored
+    const rep = (await api('POST', `/api/admin/festivals/${slug}/import`, A, { mode: 'replace', rows: [{ row: 2, artist: 'Nachtfalter', stage: 'Zelt', day: 0, start: 1470, end: 1560, genre: 'Techno' }] }, null)).data
+    assert.equal(rep.summary.removed, 3)
+    assert.ok(rep.snapshotId)
+    assert.equal((await api('GET', `/api/festivals/${slug}`, null, undefined, null)).data.acts.length, 1)
+    const snaps = (await api('GET', `/api/admin/festivals/${slug}/snapshots`, A, undefined, null)).data
+    assert.equal(snaps[0].id, rep.snapshotId)
+    assert.equal((await api('POST', `/api/admin/festivals/${slug}/snapshots/${rep.snapshotId}/restore`, A, undefined, null)).data.restored, 4)
+    assert.equal((await api('GET', `/api/festivals/${slug}`, null, undefined, null)).data.acts.length, 4)
+    // stages that still have acts cannot be removed
+    assert.equal((await api('PUT', `/api/admin/festivals/${slug}/stages`, A, { stages: [{ name: 'Wiese' }] }, null)).status, 409)
+    // archive and reactivate
+    assert.equal((await api('PATCH', `/api/admin/festivals/${slug}`, A, { status: 'archived' }, null)).data.status, 'archived')
+    assert.equal((await api('PUT', '/api/me/plan', fan.token, { acts: [] }, slug)).status, 403)
+    assert.equal((await api('PATCH', `/api/admin/festivals/${slug}`, A, { status: 'published' }, null)).data.status, 'published')
+  })
+
   await test('CORS preflight is answered', async () => {
     const r = await fetch(BASE + '/api/me', { method: 'OPTIONS', headers: { Origin: 'https://realm.app', 'Access-Control-Request-Method': 'GET' } })
     assert.equal(r.headers.get('access-control-allow-origin'), 'https://realm.app')
