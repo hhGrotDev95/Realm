@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { api, ApiError, execute, online, opId, retryable, setToken, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
+import { api, ApiError, execute, online, opId, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
 import { ACTS, actById, CHAT, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
@@ -47,6 +47,7 @@ interface Persisted {
   remoteReports: RemoteReport[]
   pendingJoin: string | null
   outbox: OutboxOp[]
+  announcements: { items: Announcement[]; fetchedAt: number } | null
 }
 
 /** The crew as the UI sees it – demo friends or live members from the server. */
@@ -89,6 +90,7 @@ function initial(): Persisted {
     remoteReports: [],
     pendingJoin: null,
     outbox: [],
+    announcements: null,
   }
 }
 
@@ -337,6 +339,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [s.session?.id, s.crewRef?.id, refresh, flush])
 
+  // official announcements are public: fetched for everyone, cached for offline use
+  useEffect(() => {
+    if (!online) return
+    const load = () =>
+      api
+        .announcements()
+        .then((items) => setS((p) => ({ ...p, announcements: { items, fetchedAt: Date.now() } })))
+        .catch(() => {})
+    load()
+    const id = window.setInterval(() => document.visibilityState === 'visible' && load(), 60_000)
+    return () => window.clearInterval(id)
+  }, [])
+
   // plan sync (debounced)
   useEffect(() => {
     if (!online || !s.session) return
@@ -426,7 +441,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
       confirms: r.confirms - (r.myVote === 'still' ? 1 : 0),
       phases: ['before', 'arrival', 'during', 'departure'],
     }))
-    const updates = online ? [...remoteUpdates, ...UPDATES.filter((u) => u.source === 'official' || u.source === 'app')] : [...s.myUpdates, ...UPDATES]
+    // ages are relative to the last fetch so cached notices keep counting up offline
+    const sinceFetch = s.announcements ? Math.floor((Date.now() - s.announcements.fetchedAt) / 60000) : 0
+    const official: FestivalUpdate[] = (s.announcements?.items ?? [])
+      .map((a) => ({
+        id: a.id,
+        source: 'official' as const,
+        title: a.title,
+        body: a.body ?? undefined,
+        place: a.place ?? undefined,
+        poi: a.poi ?? undefined,
+        severity: a.severity,
+        ageMin: a.ageMin + sinceFetch,
+        validMin: a.validMin === null ? undefined : a.validMin - sinceFetch,
+        phases: ['before', 'arrival', 'during', 'departure', 'after'] as Phase[],
+      }))
+      .filter((a) => a.validMin === undefined || a.validMin > 0)
+    const updates = online ? [...official, ...remoteUpdates, ...UPDATES.filter((u) => u.source === 'app')] : [...s.myUpdates, ...UPDATES]
 
     /** Queue a write locally first; it is sent now or as soon as the network is back. */
     const enqueue = (op: OutboxOp, sentMsg?: string) => {

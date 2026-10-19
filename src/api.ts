@@ -84,6 +84,16 @@ export interface RemoteReport {
   ageMin: number
   validMin: number
 }
+export interface Announcement {
+  id: string
+  title: string
+  body: string | null
+  place: string | null
+  poi: string | null
+  severity: 'info' | 'warning' | 'critical'
+  ageMin: number
+  validMin: number | null
+}
 export type Session = { id: string; token: string; nickname: string | null; color: string }
 type CrewRef = { id: string; name: string; code: string }
 
@@ -105,6 +115,7 @@ export const api = {
   createMeetup: (crewId: string, m: { id?: string; place: string; poi?: string; actId?: string; day: number; min: number; note: string }) => call<RemoteMeetup>('POST', `/api/crews/${crewId}/meetups`, m),
   rsvp: (id: string, going: boolean) => call('PUT', `/api/meetups/${id}/rsvp`, { going }),
   reports: () => call<RemoteReport[]>('GET', '/api/reports'),
+  announcements: () => call<Announcement[]>('GET', '/api/announcements'),
   report: (r: { id?: string; title: string; place?: string; poi?: string; severity: 'info' | 'warning' }) => call<RemoteReport>('POST', '/api/reports', r),
   vote: (id: string, kind: 'still' | 'fixed') => call('PUT', `/api/reports/${id}/vote`, { kind }),
 }

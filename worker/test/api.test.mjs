@@ -14,7 +14,7 @@ const run = (args) =>
     p.on('exit', (code) => (code === 0 ? res() : rej(new Error('wrangler ' + args.join(' ') + ' failed'))))
   })
 await run(['d1', 'migrations', 'apply', 'realm', '--local', '--persist-to', persist])
-const server = spawn('npx', ['wrangler', 'dev', '--local', '--port', String(PORT), '--persist-to', persist], { stdio: 'ignore', detached: true })
+const server = spawn('npx', ['wrangler', 'dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', 'ADMIN_TOKEN:test-admin-token'], { stdio: 'ignore', detached: true })
 
 for (let i = 0; ; i++) {
   try {
@@ -203,6 +203,26 @@ try {
     const s = (await api('GET', `/api/crews/${crew.id}`, lea.token)).data
     assert.equal(s.members.length, 1)
     assert.ok(!s.messages.some((m) => m.from === ben.id))
+  })
+
+  await test('announcements: admin-only writes, public reads, expiry', async () => {
+    const draft = { title: 'Gewitterwarnung ab 22:30', body: 'Open-Air-Bühnen pausieren kurz.', place: 'Gelände', severity: 'warning', validMin: 180 }
+    assert.equal((await api('POST', '/api/admin/announcements', null, draft)).status, 401)
+    assert.equal((await api('POST', '/api/admin/announcements', lea.token, draft)).status, 401)
+    assert.equal((await api('POST', '/api/admin/announcements', 'test-admin-token', { ...draft, severity: 'panic' })).status, 400)
+    const a = await api('POST', '/api/admin/announcements', 'test-admin-token', draft)
+    assert.equal(a.status, 201)
+    assert.equal(a.data.validMin, 180)
+    const pub = await api('GET', '/api/announcements')
+    assert.equal(pub.status, 200)
+    assert.ok(pub.data.some((x) => x.id === a.data.id && x.severity === 'warning'))
+    const p = await api('PATCH', `/api/admin/announcements/${a.data.id}`, 'test-admin-token', { severity: 'critical', validMin: null })
+    assert.equal(p.data.severity, 'critical')
+    assert.equal(p.data.validMin, null)
+    assert.equal(p.data.title, draft.title)
+    assert.equal((await api('DELETE', `/api/admin/announcements/${a.data.id}`, 'test-admin-token')).status, 204)
+    assert.ok(!(await api('GET', '/api/announcements')).data.some((x) => x.id === a.data.id))
+    assert.equal((await api('DELETE', `/api/admin/announcements/${a.data.id}`, 'test-admin-token')).status, 404)
   })
 
   await test('CORS preflight is answered', async () => {

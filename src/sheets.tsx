@@ -553,7 +553,7 @@ function UpdateItem({ u, vote, voted }: { u: FestivalUpdate; vote: (id: string, 
       </div>
       <div style={{ fontWeight: 600 }}>{u.title}</div>
       {u.body && <div className="small muted">{u.body}</div>}
-      {u.validMin !== undefined && <div className="tiny faint">Läuft in {u.validMin} Min. ab, wenn niemand bestätigt</div>}
+      {u.validMin !== undefined && <div className="tiny faint">{community ? `Läuft in ${u.validMin} Min. ab, wenn niemand bestätigt` : `Gültig noch ${u.validMin} Min.`}</div>}
       {community && (
         <div className="row" style={{ gap: 8, marginTop: 4 }}>
           <button className={`btn sm ${voted === 'still' ? 'on' : 'secondary'}`} onClick={() => vote(u.id, 'still')}>

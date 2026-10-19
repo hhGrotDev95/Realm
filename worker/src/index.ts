@@ -5,6 +5,8 @@ import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v 
 export interface Env {
   DB: D1Database
   ALLOWED_ORIGINS: string
+  /** Organizer secret (`wrangler secret put ADMIN_TOKEN`); admin routes are disabled without it. */
+  ADMIN_TOKEN?: string
 }
 
 type Guest = { id: string; nickname: string | null; color: string }
@@ -342,6 +344,89 @@ app.delete('/api/meetups/:id', async (c) => {
   return c.body(null, 204)
 })
 
+/* ---------- Official announcements ---------- */
+
+type AnnouncementRow = { id: string; title: string; body: string | null; place: string | null; poi: string | null; severity: string; created_at: number; expires_at: number | null }
+const toAnnouncement = (r: AnnouncementRow, now: number) => ({
+  id: r.id,
+  title: r.title,
+  body: r.body,
+  place: r.place,
+  poi: r.poi,
+  severity: r.severity,
+  ageMin: Math.max(0, Math.floor((now - r.created_at) / MIN)),
+  validMin: r.expires_at === null ? null : Math.max(0, Math.ceil((r.expires_at - now) / MIN)),
+})
+
+app.get('/api/announcements', async (c) => {
+  const now = Date.now()
+  const rows = await c.env.DB.prepare('SELECT * FROM announcements WHERE expires_at IS NULL OR expires_at > ? ORDER BY created_at DESC LIMIT 50').bind(now).all<AnnouncementRow>()
+  c.header('Cache-Control', 'public, max-age=20')
+  return c.json(rows.results.map((r) => toAnnouncement(r, now)))
+})
+
+// Constant-time comparison via hashing both sides.
+const admin = async (c: Context<App>, next: () => Promise<void>) => {
+  const expected = c.env.ADMIN_TOKEN
+  if (!expected) throw new HttpError(403, 'Admin-Zugang ist nicht eingerichtet')
+  const given = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '') ?? ''
+  const [a, b] = await Promise.all([sha256(given), sha256(expected)])
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  if (diff !== 0) throw new HttpError(401, 'Admin-Token ungültig')
+  await next()
+}
+app.use('/api/admin/*', admin)
+
+const SEVERITY_ALL = ['info', 'warning', 'critical'] as const
+function announcementInput(b: Record<string, unknown>, partial = false) {
+  const opt = (k: string) => partial && b[k] === undefined
+  return {
+    title: opt('title') ? undefined : v.str(b.title, 'Titel', { min: 3, max: 120 }),
+    body: v.str(b.body, 'Text', { max: 1000, optional: true }) ?? (opt('body') ? undefined : null),
+    place: v.str(b.place, 'Ort', { max: 60, optional: true }) ?? (opt('place') ? undefined : null),
+    poi: v.str(b.poi, 'poi', { max: 40, optional: true }) ?? (opt('poi') ? undefined : null),
+    severity: opt('severity') ? undefined : b.severity === undefined ? 'info' : v.oneOf(b.severity, 'severity', SEVERITY_ALL),
+    validMin: b.validMin === undefined || b.validMin === null ? (opt('validMin') ? undefined : null) : v.int(b.validMin, 'validMin', 1, 7 * 24 * 60),
+  }
+}
+
+app.post('/api/admin/announcements', async (c) => {
+  const a = announcementInput(await body(c))
+  const now = Date.now()
+  const row: AnnouncementRow = { id: randomId('a'), title: a.title!, body: a.body ?? null, place: a.place ?? null, poi: a.poi ?? null, severity: a.severity!, created_at: now, expires_at: a.validMin ? now + a.validMin * MIN : null }
+  await c.env.DB.prepare('INSERT INTO announcements (id, title, body, place, poi, severity, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(row.id, row.title, row.body, row.place, row.poi, row.severity, row.created_at, row.expires_at)
+    .run()
+  return c.json(toAnnouncement(row, now), 201)
+})
+
+app.patch('/api/admin/announcements/:id', async (c) => {
+  const a = announcementInput(await body(c), true)
+  const now = Date.now()
+  const cur = await c.env.DB.prepare('SELECT * FROM announcements WHERE id = ?').bind(c.req.param('id')).first<AnnouncementRow>()
+  if (!cur) throw new HttpError(404, 'Meldung nicht gefunden')
+  const next: AnnouncementRow = {
+    ...cur,
+    title: a.title ?? cur.title,
+    body: a.body === undefined ? cur.body : a.body,
+    place: a.place === undefined ? cur.place : a.place,
+    poi: a.poi === undefined ? cur.poi : a.poi,
+    severity: a.severity ?? cur.severity,
+    expires_at: a.validMin === undefined ? cur.expires_at : a.validMin === null ? null : now + a.validMin * MIN,
+  }
+  await c.env.DB.prepare('UPDATE announcements SET title = ?, body = ?, place = ?, poi = ?, severity = ?, expires_at = ? WHERE id = ?')
+    .bind(next.title, next.body, next.place, next.poi, next.severity, next.expires_at, next.id)
+    .run()
+  return c.json(toAnnouncement(next, now))
+})
+
+app.delete('/api/admin/announcements/:id', async (c) => {
+  const res = await c.env.DB.prepare('DELETE FROM announcements WHERE id = ?').bind(c.req.param('id')).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Meldung nicht gefunden')
+  return c.body(null, 204)
+})
+
 /* ---------- Community reports ---------- */
 
 app.get('/api/reports', async (c) => {
@@ -420,11 +505,12 @@ app.put('/api/reports/:id/vote', async (c) => {
 
 export default {
   fetch: app.fetch,
-  // hourly housekeeping: drop long-expired reports and stale rate windows
+  // hourly housekeeping: drop long-expired reports/announcements and stale rate windows
   async scheduled(_: ScheduledController, env: Env) {
     const now = Date.now()
     await env.DB.batch([
       env.DB.prepare('DELETE FROM reports WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
+      env.DB.prepare('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?').bind(now - 24 * 60 * MIN),
       env.DB.prepare('DELETE FROM rate WHERE window < ?').bind(now - 2 * 60 * MIN),
     ])
   },

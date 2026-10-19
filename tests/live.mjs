@@ -14,7 +14,7 @@ const sh = (cmd, args, opts = {}) => {
   return p
 }
 await new Promise((res, rej) => sh('npx', ['wrangler', 'd1', 'migrations', 'apply', 'realm', '--local', '--persist-to', '.wrangler/e2e-state'], { cwd: 'worker' }).on('exit', (c) => (c ? rej(new Error('migrate')) : res())))
-sh('npx', ['wrangler', 'dev', '--local', '--port', '8798', '--persist-to', '.wrangler/e2e-state'], { cwd: 'worker' })
+sh('npx', ['wrangler', 'dev', '--local', '--port', '8798', '--persist-to', '.wrangler/e2e-state', '--var', 'ADMIN_TOKEN:e2e-admin'], { cwd: 'worker' })
 sh('npx', ['vite', '--port', '5199', '--strictPort'], { env: { ...process.env, VITE_API_URL: API } })
 const waitFor = async (url) => {
   for (let i = 0; i < 200; i++) {
@@ -147,6 +147,19 @@ try {
     await ben.locator('.sheet').getByText('Wasser leer: Wasserstelle Nord').waitFor({ timeout: 15000 })
     await ben.locator('.sheet').getByRole('button', { name: /Stimmt noch/ }).first().click()
     await ben.getByText('Danke – als weiterhin gültig bestätigt').waitFor()
+  })
+
+  await step('official announcement from the organizer CLI reaches the app as an alert', async () => {
+    const { execFileSync } = await import('node:child_process')
+    execFileSync('node', ['worker/scripts/announce.mjs', 'add', 'Bühne Lagoon pausiert wegen Wind', '--severity', 'warning', '--place', 'Lagoon', '--valid', '30'], {
+      env: { ...process.env, REALM_API: API, REALM_ADMIN_TOKEN: 'e2e-admin' },
+    })
+    await lea.reload()
+    const alert = lea.locator('.alert.warning', { hasText: 'Bühne Lagoon pausiert wegen Wind' })
+    await alert.waitFor({ timeout: 15000 })
+    await alert.click()
+    await lea.locator('.sheet').getByText('Gültig noch 30 Min.').waitFor()
+    await lea.keyboard.press('Escape')
   })
 
   await step('recovery code restores Ben on a new device', async () => {

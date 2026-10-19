@@ -48,6 +48,17 @@ Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt e
 | Crew | `POST /api/crews`, `POST /api/crews/join`, `GET /api/crews/:id` (Snapshot), `POST /api/crews/:id/leave`, `PUT /api/crews/:id/location`, `POST /api/crews/:id/messages`, `POST /api/crews/:id/meetups` |
 | Meetups | `PUT /api/meetups/:id/rsvp`, `DELETE /api/meetups/:id` |
 | Meldungen | `GET/POST /api/reports`, `PUT /api/reports/:id/vote` |
+| Offiziell | `GET /api/announcements` (öffentlich), `POST/PATCH/DELETE /api/admin/announcements[/:id]` (Admin-Token) |
+
+Offizielle Meldungen veröffentlicht der Veranstalter per CLI:
+
+```bash
+cd worker
+npx wrangler secret put ADMIN_TOKEN                     # einmalig; lokal: .dev.vars mit ADMIN_TOKEN=…
+REALM_API=https://… REALM_ADMIN_TOKEN=… npm run announce -- add "Gewitterwarnung ab 22:30" --severity warning --valid 180
+REALM_API=https://… npm run announce -- list
+REALM_API=https://… REALM_ADMIN_TOKEN=… npm run announce -- remove <id>
+```
 
 Datenschutz und Missbrauchsschutz:
 
@@ -58,7 +69,9 @@ Datenschutz und Missbrauchsschutz:
 - Meldungen laufen nach 60 Min. ab, „Stimmt noch“ verlängert um 30 Min., zwei „Behoben“ (oder die meldende Person) beenden sie.
 - Rate-Limits pro Gast bzw. IP; ein stündlicher Cron räumt abgelaufene Daten auf.
 
-Frontend-Sync: Crew-Snapshot und Meldungen werden alle 8 s (nur bei sichtbarem Tab) abgefragt; Plan-Änderungen werden entprellt hochgeladen.
+Frontend-Sync: Crew-Snapshot und Meldungen werden alle 8 s (nur bei sichtbarem Tab) abgefragt; Plan-Änderungen werden entprellt hochgeladen. Offizielle Meldungen werden für alle (auch ohne Profil) minütlich geladen und offline zwischengespeichert.
+
+Offline-Warteschlange: Chat, Meetups, Zusagen, Votes und Meldungen landen zuerst in einer lokal gespeicherten Outbox und werden der Reihe nach gesendet, sobald Netz da ist. Client-IDs machen Wiederholungen serverseitig idempotent.
 
 ### Deployment
 
