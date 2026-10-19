@@ -187,6 +187,18 @@ function CrewHome() {
             </span>
             <span className="tiny faint">{unread > 0 && lastMsg && fmt(lastMsg.min)}</span>
           </button>
+          <button className="list-item" onClick={() => openSheet({ kind: 'members' })}>
+            <span className="tile-icon">
+              <Users size={20} />
+            </span>
+            <span className="grow">
+              <span style={{ fontWeight: 600 }}>Mitglieder</span>
+              <span className="small faint" style={{ display: 'block' }}>
+                {crew.members.length + 1} Personen{crew.owner === 'me' ? ' · du moderierst' : ''}
+              </span>
+            </span>
+            <ChevronRight size={18} className="faint" />
+          </button>
           <button className="list-item" onClick={() => openSheet({ kind: 'shared' })}>
             <span className="tile-icon">
               <Heart size={20} />

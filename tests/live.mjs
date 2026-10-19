@@ -74,7 +74,7 @@ try {
     await ben.getByRole('button', { name: 'Beitreten' }).first().click()
     await name(ben, 'Ben')
     await ben.getByText('Zeltplatz 14', { exact: true }).waitFor()
-    await ben.getByText('2 Personen', { exact: false }).waitFor()
+    await ben.getByText(/2 Personen · Code/).waitFor()
   })
 
   await step('chat message reaches the other member (polling)', async () => {
@@ -240,7 +240,27 @@ try {
     await nav(lea, 'Home')
   })
 
-  await step('recovery code restores Ben on a new device', async () => {
+  await step('moderation: owner deletes a message, member reports one', async () => {
+    for (const p of [lea, ben]) {
+      await p.keyboard.press('Escape')
+      await p.waitForTimeout(300)
+      await nav(p, 'Crew')
+      await p.getByRole('button', { name: /^Crew-Chat/ }).click()
+    }
+    lea.once('dialog', (d) => d.accept())
+    await lea.locator('.bubble.them', { hasText: 'Inkrementell 👋' }).click()
+    await lea.getByRole('button', { name: 'Löschen', exact: true }).click()
+    await ben.locator('.bubble.removed', { hasText: 'Nachricht gelöscht' }).waitFor({ timeout: 20000 })
+    await lea.getByPlaceholder(/Nachricht/).fill('Bitte melden')
+    await lea.getByRole('button', { name: 'Senden' }).click()
+    await ben.locator('.bubble.them', { hasText: 'Bitte melden' }).click({ timeout: 20000 })
+    await ben.getByRole('button', { name: 'Melden', exact: true }).click()
+    await ben.getByText('Gemeldet – danke').waitFor()
+    await lea.keyboard.press('Escape')
+    await ben.keyboard.press('Escape')
+  })
+
+  await step('recovery code restores Ben on a new device; the owner removes him', async () => {
     await ben.keyboard.press('Escape')
     await ben.getByRole('button', { name: 'Profil & Einstellungen' }).click()
     await ben.getByText('Profil sichern').click()
@@ -256,6 +276,18 @@ try {
     await fresh.keyboard.press('Escape')
     await nav(fresh, 'Crew')
     await fresh.getByText('Zeltplatz 14', { exact: true }).waitFor({ timeout: 15000 })
+
+    // the owner removes Ben; his device notices on the next poll and cannot rejoin
+    await lea.keyboard.press('Escape')
+    await nav(lea, 'Crew')
+    await lea.getByRole('button', { name: /^Mitglieder/ }).click()
+    lea.once('dialog', (d) => d.accept())
+    await lea.getByRole('button', { name: 'Ben entfernen' }).click()
+    await lea.getByText('Mitglied entfernt').waitFor()
+    await fresh.getByText('Du bist nicht mehr Mitglied dieser Crew').waitFor({ timeout: 20000 })
+    await fresh.getByPlaceholder('ABCD-EFGH').fill(code)
+    await fresh.getByRole('button', { name: 'Beitreten' }).last().click()
+    await fresh.getByText('Du wurdest aus dieser Crew entfernt').waitFor()
   })
 
   if (process.env.SHOTS) {

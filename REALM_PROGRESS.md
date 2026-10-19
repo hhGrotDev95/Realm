@@ -3,7 +3,8 @@
 Stand: 19.10.2026
 
 - Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
-- Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`
+- Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`, gemergt als PR #5
+- Loop (fortlaufende Verbesserungen, je eine pro Runde): ab Aufgabe 7
 
 # Runde 1
 
@@ -127,8 +128,37 @@ Dateien: `tests/a11y.mjs`, `package.json`, `.github/workflows/ci.yml`, `src/styl
 | `npm run test:a11y` | 12 Ansichten, 0 Befunde |
 | `npm run test:live` (2 Nutzer + Veranstalter, echte API, lokale D1) | 13 Szenarien bestanden |
 
+GitHub Actions auf PR #5 (Head `fd9d7be`): `web` (inkl. a11y), `api`, `live` grün.
+
+# Loop
+
+## 7 · Moderation im Crew-Chat — erledigt (Branch `claude/realm-moderation`)
+
+- Migration `0004_moderation.sql`: `message_flags`, `crew_bans`, Soft-Delete (`deleted`, `updated_at`) für Nachrichten.
+- Eigene Nachrichten löschen; die Gründerin/der Gründer der Crew löscht beliebige Nachrichten und entfernt Mitglieder (`DELETE /api/crews/:id/messages/:msgId`, `DELETE /api/crews/:id/members/:guestId`).
+- Fremde Nachrichten melden (`POST …/messages/:msgId/flag`, einmal pro Person, nicht die eigene, Rate-Limit); ab 2 Meldungen ausgeblendet – nur die verfassende Person sieht ihren Text noch, mit Hinweis.
+- Entfernte Mitglieder verlieren sofort den Zugriff (404), ihr Gerät meldet „Du bist nicht mehr Mitglied dieser Crew“, und der Einladungscode funktioniert für sie nicht mehr (403).
+- Löschungen und Ausblendungen kommen auch über den inkrementellen `?since=`-Abruf an (`updated_at`), nicht erst beim Vollabgleich.
+- UI: Tippen auf eine Nachricht zeigt „In Meetup umwandeln“, „Löschen“ (eigene bzw. als Gründer:in) und „Melden“; neues Sheet „Mitglieder“ mit Gründer:in-Kennzeichnung und „Entfernen“. Im Demo-Modus funktionieren Löschen und Melden lokal.
+
+Dateien: `worker/migrations/0004_moderation.sql`, `worker/src/index.ts`, `worker/test/api.test.mjs`, `src/api.ts`, `src/data.ts`, `src/store.tsx`, `src/sheets.tsx` (`Chat`, `Members`), `src/screens/Crew.tsx`, `src/styles.css`, `tests/*.mjs`.
+
+Nachweis:
+- API-Test „moderation: delete own, flag others, owner deletes and removes“ (Rechte, Idempotenz, Ausblenden bei 2, inkrementelle Zustellung, Autor:in sieht eigenen Text, Rauswurf + Sperre).
+- Smoke-Test (Demo): melden → ausgeblendet, eigene löschen → „Nachricht gelöscht“.
+- Live-E2E „moderation: owner deletes a message, member reports one“ und „… the owner removes him“ (Rauswurf erreicht das Gerät, erneuter Beitritt abgelehnt).
+- a11y: neue Ansichten „Crew-Chat · Nachrichtenaktionen“ und „Mitglieder“ ohne Befund.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler |
+| `cd worker && npm test` | 20 API-Tests bestanden |
+| `npm run test:e2e` | 9 Abläufe bestanden |
+| `npm run test:a11y` | 13 Ansichten, 0 Befunde |
+| `npm run test:live` | 14 Szenarien bestanden |
+
 ## Nächste Schritte
 
-1. Deployment auf Cloudflare (braucht Konto/Freigabe): `wrangler d1 create`, Migrationen, `ADMIN_TOKEN` setzen, Web-App mit `VITE_API_URL` bauen.
-2. Web-Push für Meetups, Planänderungen und offizielle Warnungen (VAPID-Schlüssel nötig).
-3. Moderation im Crew-Chat (Nachricht melden, Mitglied entfernen) und Rollen in der Konsole.
+1. Bundle unter 500 kB bringen (Build warnt inzwischen): Karte, Wrapped und Sheets nachladen.
+2. Deployment auf Cloudflare (braucht Konto/Freigabe).
+3. Web-Push für Meetups, Planänderungen und offizielle Warnungen (VAPID-Schlüssel nötig).

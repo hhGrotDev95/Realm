@@ -135,6 +135,49 @@ try {
     await api('DELETE', `/api/meetups/${mt.id}`, lea.token)
   })
 
+  await test('moderation: delete own, flag others, owner deletes and removes', async () => {
+    const eve = (await api('POST', '/api/guests', null, { nickname: 'Eve' })).data
+    await api('POST', '/api/crews/join', eve.token, { code: crew.code })
+    const spam = (await api('POST', `/api/crews/${crew.id}/messages`, eve.token, { text: 'Spam!' })).data
+    const own = (await api('POST', `/api/crews/${crew.id}/messages`, ben.token, { text: 'Tippfehler' })).data
+    const since = own.at - 1
+
+    // authors delete their own messages, not others'
+    assert.equal((await api('DELETE', `/api/crews/${crew.id}/messages/${spam.id}`, ben.token)).status, 403)
+    assert.equal((await api('DELETE', `/api/crews/${crew.id}/messages/${own.id}`, ben.token)).status, 204)
+    assert.equal((await api('DELETE', `/api/crews/${crew.id}/messages/${own.id}`, ben.token)).status, 404)
+
+    // flags: not your own, idempotent per person, hidden at two
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, eve.token)).status, 400)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, ben.token)).data.hidden, false)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, ben.token)).data.flags, 1)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, lea.token)).data.hidden, true)
+
+    // incremental polls carry the deletion and the hide
+    const inc = (await api('GET', `/api/crews/${crew.id}?since=${since}`, lea.token)).data.messages
+    const d = inc.find((m) => m.id === own.id)
+    assert.equal(d.deleted, true)
+    assert.equal(d.text, null)
+    const h = inc.find((m) => m.id === spam.id)
+    assert.equal(h.hidden, true)
+    assert.equal(h.text, null)
+    assert.equal(h.flaggedByMe, true)
+    // the author still sees their hidden text
+    assert.equal((await api('GET', `/api/crews/${crew.id}`, eve.token)).data.messages.find((m) => m.id === spam.id).text, 'Spam!')
+
+    // only the owner removes members; removed members cannot rejoin or read
+    const state = (await api('GET', `/api/crews/${crew.id}`, lea.token)).data
+    assert.equal(state.owner, lea.id)
+    assert.equal((await api('DELETE', `/api/crews/${crew.id}/members/${eve.id}`, ben.token)).status, 403)
+    assert.equal((await api('DELETE', `/api/crews/${crew.id}/members/${lea.id}`, lea.token)).status, 400)
+    assert.equal((await api('DELETE', `/api/crews/${crew.id}/members/${eve.id}`, lea.token)).status, 204)
+    assert.equal((await api('GET', `/api/crews/${crew.id}`, eve.token)).status, 404)
+    assert.equal((await api('POST', '/api/crews/join', eve.token, { code: crew.code })).status, 403)
+    // owner deletes someone else's message
+    const m2 = (await api('POST', `/api/crews/${crew.id}/messages`, ben.token, { text: 'Bitte löschen' })).data
+    assert.equal((await api('DELETE', `/api/crews/${crew.id}/messages/${m2.id}`, lea.token)).status, 204)
+  })
+
   await test('meetups with RSVPs; only the creator can cancel', async () => {
     const m = await api('POST', `/api/crews/${crew.id}/meetups`, lea.token, { place: 'Archive Entrance', poi: 'stage-archive', actId: '1-maduk', day: 1, min: 1210, note: 'Zusammen rüber' })
     assert.equal(m.status, 201)

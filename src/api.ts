@@ -61,11 +61,15 @@ export interface RemoteMeetup {
 export interface RemoteMessage {
   id: string
   from: string
-  text: string
+  text: string | null
   at: number
+  deleted?: boolean
+  hidden?: boolean
+  flaggedByMe?: boolean
 }
 export interface CrewState {
   crew: { id: string; name: string; code: string }
+  owner: string
   me: string
   serverTime: number
   members: RemoteMember[]
@@ -112,6 +116,9 @@ export const api = {
   leaveCrew: (id: string) => call<void>('POST', `/api/crews/${id}/leave`),
   crew: (id: string, since?: number) => call<CrewState>('GET', `/api/crews/${id}${since ? `?since=${since}` : ''}`),
   setLocation: (id: string, share: boolean, location: string | null) => call('PUT', `/api/crews/${id}/location`, { share, location }),
+  deleteMessage: (crewId: string, id: string) => call<void>('DELETE', `/api/crews/${crewId}/messages/${id}`),
+  flagMessage: (crewId: string, id: string) => call<{ hidden: boolean }>('POST', `/api/crews/${crewId}/messages/${id}/flag`),
+  removeMember: (crewId: string, guestId: string) => call<void>('DELETE', `/api/crews/${crewId}/members/${guestId}`),
   sendMessage: (crewId: string, text: string, id?: string) => call<RemoteMessage>('POST', `/api/crews/${crewId}/messages`, { id, text }),
   createMeetup: (crewId: string, m: { id?: string; place: string; poi?: string; actId?: string; day: number; min: number; note: string }) => call<RemoteMeetup>('POST', `/api/crews/${crewId}/meetups`, m),
   rsvp: (id: string, going: boolean) => call('PUT', `/api/meetups/${id}/rsvp`, { going }),

@@ -13,6 +13,7 @@ type Guest = { id: string; nickname: string | null; color: string }
 type App = { Bindings: Env; Variables: { guest: Guest } }
 
 const MIN = 60_000
+const FLAGS_TO_HIDE = 2
 const REPORT_TTL = 60 * MIN
 const STILL_EXTENDS = 30 * MIN
 const FIXED_TO_RETIRE = 2
@@ -198,6 +199,8 @@ app.post('/api/crews/join', async (c) => {
   const code = normalizeCode(v.str((await body(c)).code, 'Code', { max: 20 })!)
   const crew = await c.env.DB.prepare('SELECT id, name, code FROM crews WHERE code = ?').bind(code).first<{ id: string; name: string; code: string }>()
   if (!crew) throw new HttpError(404, 'Einladung nicht gefunden')
+  const banned = await c.env.DB.prepare('SELECT 1 FROM crew_bans WHERE crew_id = ? AND guest_id = ?').bind(crew.id, g.id).first()
+  if (banned) throw new HttpError(403, 'Du wurdest aus dieser Crew entfernt')
   const count = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM crew_members WHERE crew_id = ?').bind(crew.id).first<{ n: number }>()
   if ((count?.n ?? 0) >= 50) throw new HttpError(409, 'Crew ist voll (max. 50)')
   await c.env.DB.prepare('INSERT OR IGNORE INTO crew_members (crew_id, guest_id, joined_at) VALUES (?, ?, ?)').bind(crew.id, g.id, Date.now()).run()
@@ -217,13 +220,22 @@ app.get('/api/crews/:id', async (c) => {
   const since = Number(c.req.query('since') ?? 0) || 0
   const db = c.env.DB
   const [crew, members, plans, steps, messages, meetups, rsvps] = await db.batch([
-    db.prepare('SELECT id, name, code FROM crews WHERE id = ?').bind(crewId),
+    db.prepare('SELECT id, name, code, created_by AS owner FROM crews WHERE id = ?').bind(crewId),
     db.prepare(
       'SELECT g.id, g.nickname, g.color, m.share_location, CASE WHEN m.share_location = 1 THEN m.location END AS location, CASE WHEN m.share_location = 1 THEN m.location_at END AS location_at FROM crew_members m JOIN guests g ON g.id = m.guest_id WHERE m.crew_id = ? ORDER BY m.joined_at',
     ).bind(crewId),
     db.prepare('SELECT p.guest_id, p.act_id FROM plans p JOIN crew_members m ON m.guest_id = p.guest_id WHERE m.crew_id = ?').bind(crewId),
     db.prepare('SELECT s.guest_id, s.day, s.total, s.synced_at FROM steps s JOIN crew_members m ON m.guest_id = s.guest_id WHERE m.crew_id = ?').bind(crewId),
-    db.prepare('SELECT * FROM (SELECT id, guest_id, text, created_at FROM messages WHERE crew_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT 200) ORDER BY created_at').bind(crewId, since),
+    db.prepare(
+      `SELECT * FROM (
+         SELECT m.id, m.guest_id, m.text, m.created_at, m.deleted,
+           (SELECT COUNT(*) FROM message_flags f WHERE f.message_id = m.id) AS flags,
+           EXISTS (SELECT 1 FROM message_flags f WHERE f.message_id = m.id AND f.guest_id = ?3) AS flagged_by_me
+         FROM messages m
+         WHERE m.crew_id = ?1 AND (m.created_at > ?2 OR m.updated_at > ?2)
+         ORDER BY m.created_at DESC LIMIT 200
+       ) ORDER BY created_at`,
+    ).bind(crewId, since, g.id),
     db.prepare('SELECT id, created_by, place, poi, act_id, day, min, note, created_at FROM meetups WHERE crew_id = ? ORDER BY day, min').bind(crewId),
     db.prepare('SELECT r.meetup_id, r.guest_id, r.going FROM rsvps r JOIN meetups mt ON mt.id = r.meetup_id WHERE mt.crew_id = ?').bind(crewId),
   ])
@@ -233,7 +245,8 @@ app.get('/api/crews/:id', async (c) => {
   const stepsBy: Record<string, { day: number; total: number; syncedAt: number }[]> = {}
   for (const s of steps.results as R[]) (stepsBy[s.guest_id as string] ??= []).push({ day: s.day as number, total: s.total as number, syncedAt: s.synced_at as number })
   return c.json({
-    crew: crew.results[0],
+    crew: { ...(crew.results[0] as R), owner: undefined },
+    owner: (crew.results[0] as R).owner,
     me: g.id,
     serverTime: Date.now(),
     members: (members.results as R[]).map((m) => ({
@@ -246,7 +259,12 @@ app.get('/api/crews/:id', async (c) => {
       plan: planBy[m.id as string] ?? [],
       steps: stepsBy[m.id as string] ?? [],
     })),
-    messages: (messages.results as R[]).map((m) => ({ id: m.id, from: m.guest_id, text: m.text, at: m.created_at })),
+    messages: (messages.results as R[]).map((m) => {
+      const deleted = !!m.deleted
+      // hidden messages stay readable for their author, so they know what happened
+      const hidden = !deleted && (m.flags as number) >= FLAGS_TO_HIDE
+      return { id: m.id, from: m.guest_id, text: deleted || (hidden && m.guest_id !== g.id) ? null : m.text, at: m.created_at, deleted, hidden, flaggedByMe: !!m.flagged_by_me }
+    }),
     meetups: (meetups.results as R[]).map((m) => ({
       id: m.id,
       createdBy: m.created_by,
@@ -291,6 +309,55 @@ app.post('/api/crews/:id/messages', async (c) => {
     return c.json(prev, 200)
   }
   return c.json(msg, 201)
+})
+
+async function messageFor(c: Context<App>) {
+  const crewId = c.req.param('id')!
+  const g = c.get('guest')
+  await membership(c.env.DB, crewId, g.id)
+  const m = await c.env.DB.prepare('SELECT m.id, m.guest_id, m.deleted, c.created_by AS owner FROM messages m JOIN crews c ON c.id = m.crew_id WHERE m.id = ? AND m.crew_id = ?')
+    .bind(c.req.param('msgId')!, crewId)
+    .first<{ id: string; guest_id: string; deleted: number; owner: string }>()
+  if (!m || m.deleted) throw new HttpError(404, 'Nachricht nicht gefunden')
+  return { m, g }
+}
+
+// Authors delete their own messages; the crew owner can delete any.
+app.delete('/api/crews/:id/messages/:msgId', async (c) => {
+  const { m, g } = await messageFor(c)
+  if (m.guest_id !== g.id && m.owner !== g.id) throw new HttpError(403, 'Nur eigene Nachrichten können gelöscht werden')
+  await c.env.DB.prepare("UPDATE messages SET deleted = 1, text = '', updated_at = ? WHERE id = ?").bind(Date.now(), m.id).run()
+  return c.body(null, 204)
+})
+
+app.post('/api/crews/:id/messages/:msgId/flag', async (c) => {
+  const { m, g } = await messageFor(c)
+  if (m.guest_id === g.id) throw new HttpError(400, 'Eigene Nachrichten kannst du löschen statt melden')
+  await rateLimit(c.env.DB, 'flag:' + g.id, 30, 60 * MIN)
+  const now = Date.now()
+  await c.env.DB.batch([
+    c.env.DB.prepare('INSERT OR IGNORE INTO message_flags (message_id, guest_id, created_at) VALUES (?, ?, ?)').bind(m.id, g.id, now),
+    c.env.DB.prepare('UPDATE messages SET updated_at = ? WHERE id = ?').bind(now, m.id),
+  ])
+  const n = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM message_flags WHERE message_id = ?').bind(m.id).first<{ n: number }>()
+  return c.json({ id: m.id, flags: n?.n ?? 0, hidden: (n?.n ?? 0) >= FLAGS_TO_HIDE })
+})
+
+// The owner removes a member; the removal also bans them from rejoining with the code.
+app.delete('/api/crews/:id/members/:guestId', async (c) => {
+  const crewId = c.req.param('id')
+  const target = c.req.param('guestId')
+  const g = c.get('guest')
+  await membership(c.env.DB, crewId, g.id)
+  const crew = await c.env.DB.prepare('SELECT created_by FROM crews WHERE id = ?').bind(crewId).first<{ created_by: string }>()
+  if (crew?.created_by !== g.id) throw new HttpError(403, 'Nur wer die Crew gegründet hat, kann Mitglieder entfernen')
+  if (target === g.id) throw new HttpError(400, 'Verlasse die Crew stattdessen')
+  const res = await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM crew_members WHERE crew_id = ? AND guest_id = ?').bind(crewId, target),
+    c.env.DB.prepare('INSERT OR IGNORE INTO crew_bans (crew_id, guest_id, created_at) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM guests WHERE id = ?)').bind(crewId, target, Date.now(), target),
+  ])
+  if (!res[0].meta.changes) throw new HttpError(404, 'Mitglied nicht gefunden')
+  return c.body(null, 204)
 })
 
 app.post('/api/crews/:id/meetups', async (c) => {
