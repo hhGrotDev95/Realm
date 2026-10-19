@@ -149,6 +149,42 @@ try {
     await ben.getByText('Danke – als weiterhin gültig bestätigt').waitFor()
   })
 
+  await step('sync is incremental and backs off while the network is down', async () => {
+    const crewCalls = []
+    const onReq = (r) => /\/api\/crews\/c_/.test(r.url()) && r.method() === 'GET' && crewCalls.push({ url: r.url(), t: Date.now() })
+    lea.on('request', onReq)
+    await lea.waitForTimeout(17000)
+    if (!crewCalls.some((c) => c.url.includes('since='))) throw new Error('expected incremental polls with ?since=')
+    const online = crewCalls.length
+    crewCalls.length = 0
+    await lea.context().setOffline(true)
+    await lea.waitForTimeout(40000)
+    const offline = crewCalls.length
+    await lea.context().setOffline(false)
+    lea.off('request', onReq)
+    // 8 s polling would try ~5 times in 40 s; with backoff (8 → 16 → 32 s) it is at most 3
+    if (offline > 3) throw new Error(`no backoff: ${offline} crew requests while offline`)
+    console.log(`  (${online} polls in 17 s online, ${offline} attempts in 40 s offline)`)
+    await lea.locator('.bubble').first().count()
+  })
+
+  await step('new messages arrive incrementally without a reload', async () => {
+    for (const p of [lea, ben]) {
+      await p.keyboard.press('Escape')
+      await p.keyboard.press('Escape')
+      await p.waitForTimeout(400)
+      await nav(p, 'Crew')
+    }
+    await lea.getByRole('button', { name: /^Crew-Chat/ }).click()
+    await ben.getByRole('button', { name: /^Crew-Chat/ }).click()
+    await ben.getByPlaceholder(/Nachricht/).fill('Inkrementell 👋')
+    await ben.getByRole('button', { name: 'Senden' }).click()
+    await lea.locator('.bubble.them', { hasText: 'Inkrementell 👋' }).waitFor({ timeout: 20000 })
+    if ((await lea.locator('.bubble', { hasText: 'Treffen am Archive?' }).count()) !== 1) throw new Error('older messages lost or duplicated after incremental merge')
+    await lea.keyboard.press('Escape')
+    await ben.keyboard.press('Escape')
+  })
+
   await step('official announcement from the organizer CLI reaches the app as an alert', async () => {
     const { execFileSync } = await import('node:child_process')
     execFileSync('node', ['worker/scripts/announce.mjs', 'add', 'Bühne Lagoon pausiert wegen Wind', '--severity', 'warning', '--place', 'Lagoon', '--valid', '30'], {

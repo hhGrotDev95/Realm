@@ -117,6 +117,9 @@ function load(): Persisted {
   return state
 }
 
+const POLL_MS = 8000
+const MAX_BACKOFF_MS = 120_000
+
 const nearestStage = (): StageId => STAGES.reduce((a, b) => (Math.hypot(a.x - ME.x, a.y - ME.y) < Math.hypot(b.x - ME.x, b.y - ME.y) ? a : b)).id
 
 function minuteOfDay(ts: number) {
@@ -231,11 +234,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const fail = useCallback((e: unknown) => toast(e instanceof ApiError ? e.message : 'Etwas ist schiefgelaufen'), [toast])
 
   /** Maps a server crew snapshot onto the local view model ('me' stands for the current guest). */
-  const applyCrew = useCallback((cs: CrewState) => {
+  const applyCrew = useCallback((cs: CrewState, incremental = false) => {
     const me = (id: string) => (id === cs.me ? 'me' : id)
     setS((p) => {
       // queued writes stay visible until the server has them
-      const known = new Set([...cs.messages.map((m) => m.id), ...cs.meetups.map((m) => m.id)])
+      const known = new Set([...cs.messages.map((m) => m.id), ...(incremental ? p.chat.filter((m) => !m.pending).map((m) => m.id) : []), ...cs.meetups.map((m) => m.id)])
       const queued = p.outbox.filter((o) => !known.has(o.id))
       const rsvps = new Map(queued.flatMap((o) => (o.kind === 'rsvp' ? [[o.meetupId, o.going] as const] : [])))
       return {
@@ -243,7 +246,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         crewRef: cs.crew,
         remote: { me: cs.me, members: cs.members },
         chat: [
-          ...cs.messages.map((m) => ({ id: m.id, from: me(m.from), text: m.text, min: minuteOfDay(m.at) })),
+          // incremental polls only carry new messages: keep the ones we already have
+          ...(incremental && p.crewRef?.id === cs.crew.id ? p.chat.filter((m) => !m.pending && !cs.messages.some((n) => n.id === m.id)) : []),
+          ...cs.messages.map((m) => ({ id: m.id, from: me(m.from), text: m.text, min: minuteOfDay(m.at), at: m.at })),
           ...queued.flatMap((o) => (o.kind === 'message' && o.crewId === cs.crew.id ? [{ id: o.id, from: 'me', text: o.text, min: minuteOfDay(o.at), pending: true }] : [])),
         ],
         meetups: [
@@ -259,15 +264,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  const refresh = useCallback(async () => {
-    if (!online || !sRef.current.session) return
+  // chat cursor: after the first full snapshot only newer messages are fetched; every 15th poll reconciles fully
+  const cursor = useRef({ crewId: '', at: 0, polls: 0 })
+
+  /** One sync round. Returns false when the network or server failed (caller backs off). */
+  const refresh = useCallback(async (): Promise<boolean> => {
+    if (!online || !sRef.current.session) return true
+    const crewId = sRef.current.crewRef?.id
+    if (cursor.current.crewId !== (crewId ?? '')) cursor.current = { crewId: crewId ?? '', at: 0, polls: 0 }
+    const c = cursor.current
+    const incremental = c.at > 0 && c.polls % 15 !== 0
     try {
-      const [cs, reports] = await Promise.all([sRef.current.crewRef ? api.crew(sRef.current.crewRef.id) : null, api.reports()])
-      if (cs) applyCrew(cs)
+      const [cs, reports] = await Promise.all([crewId ? api.crew(crewId, incremental ? c.at - 1 : undefined) : null, api.reports()])
+      if (cs) {
+        applyCrew(cs, incremental)
+        c.at = Math.max(incremental ? c.at : 0, ...cs.messages.map((m) => m.at))
+        c.polls++
+      }
       setS((p) => ({ ...p, remoteReports: reports, votes: { ...p.votes, ...Object.fromEntries(reports.filter((r) => r.myVote).map((r) => [r.id, r.myVote!])) } }))
+      return true
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setS((p) => ({ ...p, session: null, crewRef: null, remote: null }))
       if (e instanceof ApiError && e.status === 404) setS((p) => ({ ...p, crewRef: null, remote: null }))
+      return !retryable(e)
     }
   }, [applyCrew])
 
@@ -326,16 +345,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.session?.id])
 
-  // polling while visible: crew every 8 s (reports ride along)
+  // polling while visible: every 8 s, backing off exponentially (up to 2 min) while requests fail
   useEffect(() => {
     if (!online || !s.session) return
-    flush().then(refresh)
-    const id = window.setInterval(() => document.visibilityState === 'visible' && flush().then(refresh), 8000)
-    const onVis = () => document.visibilityState === 'visible' && refresh()
-    document.addEventListener('visibilitychange', onVis)
+    let timer = 0
+    let delay = POLL_MS
+    let stopped = false
+    const tick = async () => {
+      if (stopped) return
+      if (document.visibilityState === 'visible') {
+        await flush()
+        delay = (await refresh()) ? POLL_MS : Math.min(delay * 2, MAX_BACKOFF_MS)
+      }
+      if (!stopped) timer = window.setTimeout(tick, delay)
+    }
+    const wake = () => {
+      // coming back (tab visible or network up) syncs immediately and resets the backoff
+      if (document.visibilityState !== 'visible') return
+      window.clearTimeout(timer)
+      delay = POLL_MS
+      tick()
+    }
+    tick()
+    document.addEventListener('visibilitychange', wake)
+    window.addEventListener('online', wake)
     return () => {
-      window.clearInterval(id)
-      document.removeEventListener('visibilitychange', onVis)
+      stopped = true
+      window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('online', wake)
     }
   }, [s.session?.id, s.crewRef?.id, refresh, flush])
 

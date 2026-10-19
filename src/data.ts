@@ -257,6 +257,7 @@ export interface ChatMsg {
   text: string
   min: number // minute of day
   pending?: boolean // queued offline, not yet on the server
+  at?: number // server timestamp (live mode)
 }
 
 export const CHAT: ChatMsg[] = [

@@ -109,7 +109,7 @@ export const api = {
   createCrew: (name: string) => call<CrewRef>('POST', '/api/crews', { name }),
   joinCrew: (code: string) => call<CrewRef>('POST', '/api/crews/join', { code }),
   leaveCrew: (id: string) => call<void>('POST', `/api/crews/${id}/leave`),
-  crew: (id: string) => call<CrewState>('GET', `/api/crews/${id}`),
+  crew: (id: string, since?: number) => call<CrewState>('GET', `/api/crews/${id}${since ? `?since=${since}` : ''}`),
   setLocation: (id: string, share: boolean, location: string | null) => call('PUT', `/api/crews/${id}/location`, { share, location }),
   sendMessage: (crewId: string, text: string, id?: string) => call<RemoteMessage>('POST', `/api/crews/${crewId}/messages`, { id, text }),
   createMeetup: (crewId: string, m: { id?: string; place: string; poi?: string; actId?: string; day: number; min: number; note: string }) => call<RemoteMeetup>('POST', `/api/crews/${crewId}/meetups`, m),
