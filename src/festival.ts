@@ -1,6 +1,13 @@
 // Which festival this app shows, and loading its data from the API (with an offline copy).
 import { adminApi, api, online, setFestival } from './api'
-import { loadFestivalBundle, type FestivalBundle } from './data'
+import { FESTIVAL, loadFestivalBundle as loadBundle, type FestivalBundle } from './data'
+import { applyTheme } from './theme/apply'
+
+/** Loads the data and applies the festival's branding in one go. */
+const loadFestivalBundle = (b: FestivalBundle) => {
+  loadBundle(b)
+  applyTheme(FESTIVAL.theme)
+}
 
 export const DEFAULT_FESTIVAL = (import.meta.env.VITE_FESTIVAL as string | undefined) || 'realm-open-air'
 const PICK_KEY = 'realm.festival'

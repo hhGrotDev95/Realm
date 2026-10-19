@@ -206,8 +206,27 @@ Beim Testen gefunden und behoben: nach dem Veröffentlichen blieb der Assistent 
 | `npm run test:e2e` · `npm run test:a11y` | 9 Abläufe · 13 Ansichten ohne Befund |
 | `npm run test:live` | 17 Szenarien (neu: Festival per Assistent anlegen, XLSX mit Zeilenfehler, Vorschau, Veröffentlichen, Besucher sieht Nachtset am Freitag) |
 
+GitHub Actions auf PR #8: `web`, `api`, `live` grün, gemergt.
+
+## P3 · Branding — erledigt (Branch `claude/realm-branding`)
+
+- `src/theme/contrast.ts`: WCAG-Kontrast, automatische Textfarbe auf der Markenfarbe, abgeleitete CSS-Variablen; dieselbe Datei prüft in Konsole und Worker.
+- Worker: `PUT /api/admin/festivals/:slug/theme` – Farbe muss alle Kontrastprüfungen bestehen (Text auf Buttons 4,5:1, Farbe als Text auf dem Hintergrund 4,5:1, auf Karten 3:1), Schrift aus fester Liste, Logo nur als PNG/WebP/JPEG/SVG-Data-URL bis ca. 150 kB (keine externen URLs).
+- App: Farbe, Schrift und Logo werden beim Laden des Festivals gesetzt; Hero-Verlauf, Hover, Toast und Wrapped folgen der Markenfarbe statt fester Violett-Werte. Ohne Logo zeigt die App-Leiste den Anfangsbuchstaben des Festivals.
+- Konsole: Tab „Branding“ mit Voreinstellungen, Farbwähler, Hex-Feld, Kontrastliste, Schriftwahl, Logo-Upload (Rasterbilder auf 256 px verkleinert) und Live-Vorschau.
+
+Dateien: `src/theme/contrast.ts`, `src/theme/apply.ts`, `src/admin/Branding.tsx`, `src/admin/Admin.tsx`, `src/api.ts`, `src/festival.ts`, `src/data.ts`, `src/App.tsx`, `src/styles.css`, `src/screens/Wrapped.tsx`, `worker/src/index.ts`, `worker/test/api.test.mjs`, `tests/theme.test.mts`, `tests/live.mjs`, `package.json`, `README.md`.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler |
+| `npm run test:import` | 8 Parser- + 9 Kontrast-Prüfungen |
+| `cd worker && npm test` | 25 API-Tests (neu: Branding-Validierung) + Migrationstest |
+| `npm run test:e2e` · `npm run test:a11y` | 9 Abläufe · 13 Ansichten ohne Befund |
+| `npm run test:live` | 17 Szenarien; der Festival-Ablauf prüft jetzt auch: unlesbare Farbe nicht speicherbar, Farbe/Schrift/Logo erreichen die Besucher-App |
+
 ## Nächste Schritte
 
-1. P3: Branding (Logo, Farben, Schrift) mit Vorschau und Kontrastprüfung.
-2. P4: Module ein-/ausschalten (Frontend + Backend).
+1. P4: Module ein-/ausschalten (Frontend + Backend).
+2. P5: FAQ + FAQ-Bot aus freigegebenen Antworten.
 3. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen).

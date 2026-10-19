@@ -53,6 +53,10 @@ Realm ist eine Festivalplattform: Jedes Festival ist ein isolierter Mandant mit 
 
 In der Konsole (`/#admin`) legt **„Neues Festival“** einen Entwurf an. Der Assistent führt durch Grunddaten, Bühnen, Timetable-Import und Prüfen/Veröffentlichen und merkt sich den Schritt (Abbrechen und später weitermachen). Entwürfe lassen sich über **„Vorschau öffnen“** in der App ansehen, bevor sie veröffentlicht werden. Import aus JSON, CSV und Excel mit deutschen und englischen Spalten: siehe [docs/IMPORT.md](docs/IMPORT.md).
 
+### Branding
+
+Pro Festival in der Konsole unter **Branding**: Markenfarbe (Voreinstellungen, Farbwähler oder Hex), Schrift für Überschriften (fünf kuratierte Google Fonts) und Logo (PNG/JPEG/WebP werden auf 256 px verkleinert, SVG bis 140 kB). Eine Live-Vorschau zeigt App-Leiste, Karte, Buttons und Labels. Die Kontrastprüfung (WCAG 2.1: 4,5:1 für Text, 3:1 für Bedienelemente) läuft in Konsole **und** Worker mit derselben Logik (`src/theme/contrast.ts`); unlesbare Farben lassen sich nicht speichern. Die Textfarbe auf Buttons wird automatisch gewählt.
+
 ## Backend (`worker/`)
 
 Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt eine pseudonyme ID und ein Bearer-Token (gespeichert wird nur der SHA-256-Hash).
@@ -60,7 +64,7 @@ Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt e
 | Bereich | Endpunkte |
 | --- | --- |
 | Festivals | `GET /api/festivals` (veröffentlichte), `GET /api/festivals/:slug` (Festivaldokument), `GET /api/admin/festivals` (alle, Admin) |
-| Einrichtung (Admin) | `POST /api/admin/festivals`, `PATCH /api/admin/festivals/:slug` (Name, Ort, Status), `PUT …/:slug/stages`, `POST …/:slug/import` (`mode`, `dryRun`, `rows`), `GET …/:slug/snapshots`, `POST …/:slug/snapshots/:id/restore` |
+| Einrichtung (Admin) | `PUT /api/admin/festivals/:slug/theme` (Farbe, Schrift, Logo), `POST /api/admin/festivals`, `PATCH /api/admin/festivals/:slug` (Name, Ort, Status), `PUT …/:slug/stages`, `POST …/:slug/import` (`mode`, `dryRun`, `rows`), `GET …/:slug/snapshots`, `POST …/:slug/snapshots/:id/restore` |
 | Profil | `POST /api/guests`, `GET/PATCH/DELETE /api/me`, `POST /api/me/recovery`, `POST /api/restore`, `PUT /api/me/plan`, `PUT/DELETE /api/me/steps` |
 | Crew | `POST /api/crews`, `POST /api/crews/join`, `GET /api/crews/:id` (Snapshot), `POST /api/crews/:id/leave`, `PUT /api/crews/:id/location`, `POST /api/crews/:id/messages`, `POST /api/crews/:id/meetups` |
 | Moderation | `DELETE /api/crews/:id/messages/:msgId` (eigene / Gründer:in), `POST /api/crews/:id/messages/:msgId/flag` (ab 2 Meldungen ausgeblendet), `DELETE /api/crews/:id/members/:guestId` (Gründer:in, sperrt Wiederbeitritt) |
@@ -105,7 +109,7 @@ npm run deploy                        # ALLOWED_ORIGINS in wrangler.toml auf die
 
 ## Tests
 
-- `npm run test:import` – Unit-Tests des Import-Parsers (CSV DE/EN, JSON, XLSX, Nachtzeiten, Zeilenfehler)
+- `npm run test:import` – Unit-Tests des Import-Parsers (CSV DE/EN, JSON, XLSX, Nachtzeiten, Zeilenfehler) und der Kontrastberechnung
 - `npm run test:e2e` – Smoke-Test der Demo-App
 - `cd worker && npm test` – API-Integrationstests gegen `wrangler dev` mit lokaler D1 (inkl. Mandantentrennung, Entwurf/Archiv) und ein Migrationstest, der Altdaten durch alle Migrationen führt
 - `npm run test:live` – zwei Browser-Nutzer gegen die echte API (Crew gründen, per Link beitreten, Chat, Meetup-Zusage, geteilte Pläne, Meldung bestätigen, Wiederherstellung auf neuem Gerät)

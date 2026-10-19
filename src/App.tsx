@@ -32,9 +32,13 @@ export function AppBar({ floating }: { floating?: boolean }) {
         : PHASES.find((p) => p.id === phase)!.hint
   return (
     <header className={`appbar ${floating ? 'floating' : ''}`}>
-      <div className="logo" aria-hidden>
-        R
-      </div>
+      {FESTIVAL.theme.logo ? (
+        <img className="logo logo-img" src={FESTIVAL.theme.logo} alt="" />
+      ) : (
+        <div className="logo" aria-hidden>
+          {FESTIVAL.name.charAt(0).toUpperCase()}
+        </div>
+      )}
       <div className="title">
         <h1 className="appbar-h">{FESTIVAL.name}</h1>
         <span>{sub}</span>

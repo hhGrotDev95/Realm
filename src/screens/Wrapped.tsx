@@ -102,7 +102,7 @@ export function Wrapped() {
       ),
     },
     {
-      bg: 'linear-gradient(160deg,#a58cff,#ff6b5a)',
+      bg: 'linear-gradient(160deg, var(--brand), #ff6b5a)',
       body: (
         <>
           <h3 style={{ fontSize: 40 }}>Bis nächstes Jahr.</h3>

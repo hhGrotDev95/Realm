@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
+import { checkBrand, HEX } from '../../src/theme/contrast'
 import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v } from './util'
 
 export interface Env {
@@ -673,6 +674,30 @@ app.put('/api/admin/festivals/:slug/stages', async (c) => {
     touch(c.env.DB, f.id),
   ])
   return c.json({ stages })
+})
+
+const FONT_KEYS = ['bricolage', 'space', 'unbounded', 'fraunces', 'archivo'] as const
+const LOGO_MAX = 200_000 // characters of the data: URL (~150 kB image)
+
+/** Branding: brand colour (must pass the same WCAG checks as the console), display font, logo. */
+app.put('/api/admin/festivals/:slug/theme', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  const theme: Record<string, string> = {}
+  if (b.brand !== undefined && b.brand !== null) {
+    if (typeof b.brand !== 'string' || !HEX.test(b.brand)) throw new HttpError(400, 'Markenfarbe als #RRGGBB angeben')
+    const check = checkBrand(b.brand)
+    if (!check.ok) throw new HttpError(400, `Kontrast zu gering: ${check.checks.filter((x) => !x.ok).map((x) => `${x.label} ${x.ratio}:1 (min. ${x.min}:1)`).join(', ')}`)
+    theme.brand = b.brand.toLowerCase()
+  }
+  if (b.font !== undefined && b.font !== null) theme.font = v.oneOf(b.font, 'Schrift', FONT_KEYS)
+  if (b.logo !== undefined && b.logo !== null) {
+    if (typeof b.logo !== 'string' || !/^data:image\/(png|webp|jpeg|svg\+xml);base64,[A-Za-z0-9+/=]+$/.test(b.logo)) throw new HttpError(400, 'Logo muss ein PNG, WebP, JPEG oder SVG sein')
+    if (b.logo.length > LOGO_MAX) throw new HttpError(400, 'Logo ist zu groß (max. ca. 150 kB)')
+    theme.logo = b.logo
+  }
+  await c.env.DB.prepare('UPDATE festivals SET theme = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(theme), Date.now(), f.id).run()
+  return c.json(theme)
 })
 
 type ImportRow = { row: number; id?: string; day: number; stage: string; artist: string; start: number; end: number; genre?: string; bio?: string }
