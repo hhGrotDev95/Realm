@@ -1,4 +1,5 @@
 // Thin client for the Realm API (worker/). Without VITE_API_URL the app runs in demo mode.
+import type { TimetableChange } from './data'
 
 export const API_URL: string | undefined = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || undefined
 export const online = !!API_URL
@@ -116,6 +117,7 @@ export const api = {
   rsvp: (id: string, going: boolean) => call('PUT', `/api/meetups/${id}/rsvp`, { going }),
   reports: () => call<RemoteReport[]>('GET', '/api/reports'),
   announcements: () => call<Announcement[]>('GET', '/api/announcements'),
+  timetableChanges: () => call<TimetableChange[]>('GET', '/api/timetable/changes'),
   report: (r: { id?: string; title: string; place?: string; poi?: string; severity: 'info' | 'warning' }) => call<RemoteReport>('POST', '/api/reports', r),
   vote: (id: string, kind: 'still' | 'fixed') => call('PUT', `/api/reports/${id}/vote`, { kind }),
 }

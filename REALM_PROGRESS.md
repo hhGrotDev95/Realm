@@ -28,7 +28,7 @@ Nachweis:
 
 ## 2 · Offizielle Meldungen — erledigt
 
-- Migration `0002_announcements.sql`; `GET /api/announcements` öffentlich (ohne Profil, 20 s cachebar).
+- Migration `0002_announcements.sql`; `GET /api/announcements` öffentlich (ohne Profil).
 - `POST/PATCH/DELETE /api/admin/announcements` mit `ADMIN_TOKEN`-Secret (Vergleich in konstanter Zeit); ohne Secret sind die Routen gesperrt (`403`).
 - Veranstalter-CLI `worker/scripts/announce.mjs` (`npm run announce -- add|list|remove`).
 - Die App lädt Meldungen minütlich für alle, speichert sie offline, zählt das Alter offline weiter und blendet abgelaufene aus; Warnungen und Kritisches erscheinen als Hinweis oben auf Home. Demo-Meldungen nur noch ohne Backend.

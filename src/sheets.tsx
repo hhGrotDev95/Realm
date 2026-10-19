@@ -74,6 +74,19 @@ function ActSheet({ id }: { id: string }) {
           </div>
         </div>
       </div>
+      {a.change && (
+        <div className={`alert ${a.change.cancelled ? 'critical' : 'warning'}`} style={{ marginBottom: 16 }}>
+          <TriangleAlert className="a-ic" size={20} />
+          <span className="grow">
+            <strong>
+              {a.change.cancelled
+                ? 'Dieser Auftritt wurde abgesagt'
+                : [a.change.moved && `Neue Zeit: ${fmt(a.start)}–${fmt(a.end)} (statt ${fmt(a.change.was.start)})`, a.change.restaged && `Neue Bühne: ${stageById[a.stage].name}`].filter(Boolean).join(' · ')}
+            </strong>
+            <span className="small muted">Offiziell{a.change.note ? ` · ${a.change.note}` : ''}</span>
+          </span>
+        </div>
+      )}
       <div className="sheet-actions">
         <button className={`btn ${inPlan ? 'on' : 'primary'}`} onClick={() => toggleFav(id)}>
           {inPlan ? (

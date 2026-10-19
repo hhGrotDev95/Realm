@@ -428,3 +428,6 @@ textarea.field { height: 88px; padding: 12px 14px; resize: none; }
 }
 .net-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
 .net-pill .dot.sync { background: var(--ok); animation: pulse 1.4s infinite; }
+.act.cancelled .name { text-decoration: line-through; color: var(--text-3); }
+.tl-act.cancelled { opacity: 0.45; }
+.tl-act.cancelled b { text-decoration: line-through; }

@@ -43,6 +43,8 @@ export interface Act {
   genre: string
   bio: string
   popularity: number // 0..1 community tendency base
+  /** set when the organizer changed the published slot */
+  change?: { cancelled: boolean; moved: boolean; restaged: boolean; note: string | null; was: { start: number; end: number; stage: StageId } }
 }
 
 const T = (h: number, m = 0) => (h < 10 ? h + 24 : h) * 60 + m
@@ -311,3 +313,41 @@ export function realClock(date = new Date()): { phase: Phase; day: number; min: 
 
 /** Countdown shown in the "before" phase of the demo. */
 export const DEMO_MS_TO_START = ((9 * 24 + 14) * 60 + 22) * 60_000
+
+export interface TimetableChange {
+  actId: string
+  start: number | null
+  end: number | null
+  stage: StageId | null
+  cancelled: boolean
+  note: string | null
+}
+
+/** Demo stand-in for the organizer's timetable changes (matches the demo notice "Arcturus +15 Min."). */
+export const DEMO_CHANGES: TimetableChange[] = [{ actId: '1-arcturus', start: 22 * 60 + 30, end: 24 * 60, stage: null, cancelled: false, note: 'Technischer Umbau' }]
+
+const ORIGINAL = new Map(ACTS.map((a) => [a.id, { start: a.start, end: a.end, stage: a.stage }]))
+let applied = ''
+
+/**
+ * Applies organizer changes to the shared ACTS objects in place, so every screen
+ * (lists, timeline, conflicts, map sheets) sees the same, current timetable.
+ * Idempotent; passing an empty list restores the published timetable.
+ */
+export function applyTimetableChanges(changes: TimetableChange[]) {
+  const key = JSON.stringify(changes)
+  if (key === applied) return
+  applied = key
+  const byId = new Map(changes.map((c) => [c.actId, c]))
+  for (const a of ACTS) {
+    const was = ORIGINAL.get(a.id)!
+    const c = byId.get(a.id)
+    a.start = c?.start ?? was.start
+    a.end = c?.end ?? was.end
+    a.stage = c?.stage ?? was.stage
+    a.change = c
+      ? { cancelled: c.cancelled, moved: c.start !== null && c.start !== was.start, restaged: c.stage !== null && c.stage !== was.stage, note: c.note, was }
+      : undefined
+  }
+  ACTS.sort((x, y) => x.day - y.day || x.start - y.start)
+}

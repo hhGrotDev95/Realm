@@ -198,6 +198,17 @@ try {
     await lea.keyboard.press('Escape')
   })
 
+  await step('organizer cancels an act: plan alert and struck-through row', async () => {
+    const res = await fetch(`${API}/api/admin/timetable/1-maduk`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer e2e-admin' }, body: JSON.stringify({ cancelled: true, note: 'Krankheit' }) })
+    if (!res.ok) throw new Error('admin PUT failed ' + res.status)
+    await lea.reload()
+    await lea.locator('.alert.critical', { hasText: 'Maduk: abgesagt' }).waitFor({ timeout: 15000 })
+    await nav(lea, 'Line-up')
+    await lea.locator('.act.cancelled', { hasText: 'Maduk' }).getByText('Abgesagt').waitFor()
+    await fetch(`${API}/api/admin/timetable/1-maduk`, { method: 'DELETE', headers: { Authorization: 'Bearer e2e-admin' } })
+    await nav(lea, 'Home')
+  })
+
   await step('recovery code restores Ben on a new device', async () => {
     await ben.keyboard.press('Escape')
     await ben.getByRole('button', { name: 'Profil & Einstellungen' }).click()

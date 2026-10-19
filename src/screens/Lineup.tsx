@@ -220,13 +220,14 @@ export function ActRow({ a, showDay }: { a: Act; showDay?: boolean }) {
   const st = status(a, now)
   const friends = crew.friendsFor(a.id)
   return (
-    <motion.div layout="position" className={`act ${st}`} role="button" tabIndex={0} onClick={() => openSheet({ kind: 'act', id: a.id })} onKeyDown={(e) => e.key === 'Enter' && openSheet({ kind: 'act', id: a.id })} style={{ cursor: 'pointer' }}>
+    <motion.div layout="position" className={`act ${st} ${a.change?.cancelled ? 'cancelled' : ''}`} role="button" tabIndex={0} onClick={() => openSheet({ kind: 'act', id: a.id })} onKeyDown={(e) => e.key === 'Enter' && openSheet({ kind: 'act', id: a.id })} style={{ cursor: 'pointer' }}>
       <div className="time">
         {fmt(a.start)}
         <small>{showDay ? DAYS[a.day].short : st === 'live' ? 'live' : fmt(a.end)}</small>
       </div>
       <div style={{ minWidth: 0 }}>
         <div className="name ellipsis">{a.artist}</div>
+        {a.change && <ChangeTag a={a} />}
         <div className="sub">
           <StageDot id={a.stage} />
           <span className="ellipsis">{stageById[a.stage].name}</span>
@@ -239,6 +240,19 @@ export function ActRow({ a, showDay }: { a: Act; showDay?: boolean }) {
       </div>
       <FavButton id={a.id} />
     </motion.div>
+  )
+}
+
+/** Short, colour-coded hint when the organizer changed a slot. */
+export function ChangeTag({ a }: { a: Act }) {
+  const c = a.change!
+  if (c.cancelled) return <span className="tag crit" style={{ marginTop: 3 }}>Abgesagt</span>
+  return (
+    <span className="tag warn" style={{ marginTop: 3 }}>
+      {c.moved ? `Neu ${fmt(a.start)} statt ${fmt(c.was.start)}` : ''}
+      {c.moved && c.restaged ? ' · ' : ''}
+      {c.restaged ? `jetzt ${stageById[a.stage].name}` : ''}
+    </span>
   )
 }
 
@@ -274,7 +288,7 @@ function Timeline({ acts, day, onOpen }: { acts: Act[]; day: number; onOpen: (id
             {acts
               .filter((a) => a.stage === s.id)
               .map((a) => (
-                <button key={a.id} className={`tl-act ${plan.includes(a.id) ? 'on' : ''}`} style={{ top: 18, left: (a.start - start) * PX, width: (a.end - a.start) * PX - 4, borderColor: s.color }} onClick={() => onOpen(a.id)}>
+                <button key={a.id} className={`tl-act ${plan.includes(a.id) ? 'on' : ''} ${a.change?.cancelled ? 'cancelled' : ''}`} style={{ top: 18, left: (a.start - start) * PX, width: (a.end - a.start) * PX - 4, borderColor: s.color }} onClick={() => onOpen(a.id)}>
                   <b>{a.artist}</b>
                   <span>
                     {fmt(a.start)}–{fmt(a.end)}
