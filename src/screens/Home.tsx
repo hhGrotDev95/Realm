@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Users, ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
+import { CalendarClock, Users, ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { ACTS, actById, DAYS, fmt, stageById, walkMinutes, ME } from '../data'
 import { conflictClusters, isMeetupActive, useApp } from '../store'
@@ -248,11 +248,38 @@ function AttendPrompt({ i }: { i: number }) {
   )
 }
 
+/** Changes to acts in your plan that still lie ahead – the one thing worth interrupting for. */
+function PlanChanges({ i }: { i: number }) {
+  const { plan, now, openSheet } = useApp()
+  const changed = plan
+    .map((id) => actById[id])
+    .filter((a) => a?.change && status(a, now) !== 'past')
+    .sort((a, b) => a.day - b.day || a.start - b.start)
+  if (!changed.length) return null
+  const a = changed[0]
+  const c = a.change!
+  return (
+    <motion.button {...stagger(i)} className={`alert ${c.cancelled ? 'critical' : 'warning'}`} onClick={() => openSheet({ kind: 'act', id: a.id })}>
+      <CalendarClock className="a-ic" size={20} />
+      <span className="grow">
+        <strong>
+          {a.artist}: {c.cancelled ? 'abgesagt' : [c.moved && `jetzt ${fmt(a.start)}`, c.restaged && `auf ${stageById[a.stage].name}`].filter(Boolean).join(', ')}
+        </strong>
+        <span className="small muted">
+          Änderung in deinem Plan{changed.length > 1 ? ` · +${changed.length - 1} weitere` : ''}
+        </span>
+      </span>
+      <ChevronRight size={18} className="faint" />
+    </motion.button>
+  )
+}
+
 function During() {
   const { urgent } = useRelevantUpdates()
   return (
     <>
       <Urgent />
+      <PlanChanges i={0} />
       <NowNextHero />
       <MeetupModule i={2} />
       <UpdatesModule i={3} exclude={urgent?.id} />
@@ -294,6 +321,7 @@ function Before() {
   return (
     <>
       <Countdown />
+      <PlanChanges i={1} />
       <motion.section {...stagger(1)}>
         <button className="tile" onClick={() => setTab('lineup')}>
           <span className="tile-icon" style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>

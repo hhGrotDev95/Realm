@@ -1,4 +1,5 @@
 // Thin client for the Realm API (worker/). Without VITE_API_URL the app runs in demo mode.
+import type { TimetableChange } from './data'
 
 export const API_URL: string | undefined = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || undefined
 export const online = !!API_URL
@@ -116,6 +117,7 @@ export const api = {
   rsvp: (id: string, going: boolean) => call('PUT', `/api/meetups/${id}/rsvp`, { going }),
   reports: () => call<RemoteReport[]>('GET', '/api/reports'),
   announcements: () => call<Announcement[]>('GET', '/api/announcements'),
+  timetableChanges: () => call<TimetableChange[]>('GET', '/api/timetable/changes'),
   report: (r: { id?: string; title: string; place?: string; poi?: string; severity: 'info' | 'warning' }) => call<RemoteReport>('POST', '/api/reports', r),
   vote: (id: string, kind: 'still' | 'fixed') => call('PUT', `/api/reports/${id}/vote`, { kind }),
 }
@@ -147,3 +149,31 @@ export function execute(op: OutboxOp): Promise<unknown> {
 
 const rand = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('')
 export const opId = (prefix: string) => `${prefix}_${rand()}`
+
+/** Organizer endpoints; the admin token is passed explicitly and never stored with the guest session. */
+export const adminApi = (adminToken: string) => {
+  const req = async <T,>(method: string, path: string, body?: unknown): Promise<T> => {
+    if (!API_URL) throw new ApiError(0, 'Kein Server konfiguriert')
+    let res: Response
+    try {
+      res = await fetch(API_URL + path, {
+        method,
+        headers: { Authorization: 'Bearer ' + adminToken, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      })
+    } catch {
+      throw new ApiError(0, 'Keine Verbindung zum Server')
+    }
+    if (res.status === 204) return undefined as T
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error ?? 'Fehler ' + res.status)
+    return data as T
+  }
+  return {
+    check: () => req<{ ok: true }>('GET', '/api/admin/session'),
+    announce: (a: { title: string; body?: string; place?: string; severity: Announcement['severity']; validMin?: number }) => req<Announcement>('POST', '/api/admin/announcements', a),
+    removeAnnouncement: (id: string) => req<void>('DELETE', `/api/admin/announcements/${id}`),
+    setChange: (actId: string, c: { start?: number; end?: number; stage?: string; cancelled?: boolean; note?: string }) => req<TimetableChange>('PUT', `/api/admin/timetable/${actId}`, c),
+    revertChange: (actId: string) => req<void>('DELETE', `/api/admin/timetable/${actId}`),
+  }
+}

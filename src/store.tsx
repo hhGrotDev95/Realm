@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, execute, online, opId, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
-import { ACTS, actById, CHAT, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
+import { ACTS, actById, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
   id: string
@@ -48,6 +48,7 @@ interface Persisted {
   pendingJoin: string | null
   outbox: OutboxOp[]
   announcements: { items: Announcement[]; fetchedAt: number } | null
+  timetableChanges: TimetableChange[] | null
 }
 
 /** The crew as the UI sees it – demo friends or live members from the server. */
@@ -91,6 +92,7 @@ function initial(): Persisted {
     pendingJoin: null,
     outbox: [],
     announcements: null,
+    timetableChanges: null,
   }
 }
 
@@ -380,11 +382,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // official announcements are public: fetched for everyone, cached for offline use
   useEffect(() => {
     if (!online) return
-    const load = () =>
+    const load = () => {
       api
         .announcements()
         .then((items) => setS((p) => ({ ...p, announcements: { items, fetchedAt: Date.now() } })))
         .catch(() => {})
+      api
+        .timetableChanges()
+        .then((timetableChanges) => setS((p) => ({ ...p, timetableChanges })))
+        .catch(() => {})
+    }
     load()
     const id = window.setInterval(() => document.visibilityState === 'visible' && load(), 60_000)
     return () => window.clearInterval(id)
@@ -418,6 +425,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const openSheet = useCallback((sh: SheetState) => setStack((st) => (sh ? [...st, sh] : st)), [])
   const closeSheet = useCallback(() => setStack((st) => st.slice(0, -1)), [])
+
+  // the timetable everyone sees: published slots plus the organizer's changes (cached offline)
+  applyTimetableChanges(online ? (s.timetableChanges ?? []) : DEMO_CHANGES)
 
   const value = useMemo<Ctx>(() => {
     const real = s.clockMode === 'real' ? realClock(new Date(tick)) : null
@@ -695,7 +705,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
 /** Groups overlapping planned acts per day into conflict clusters. */
 export function conflictClusters(plan: string[], day: number, resolved: Record<string, string>) {
-  const acts = plan.map((id) => actById[id]).filter((a) => a && a.day === day).sort((a, b) => a.start - b.start)
+  const acts = plan.map((id) => actById[id]).filter((a) => a && a.day === day && !a.change?.cancelled).sort((a, b) => a.start - b.start)
   const clusters: (typeof ACTS)[] = []
   let cur: typeof ACTS = []
   let curEnd = -1

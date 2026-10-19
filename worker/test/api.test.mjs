@@ -207,6 +207,8 @@ try {
 
   await test('announcements: admin-only writes, public reads, expiry', async () => {
     const draft = { title: 'Gewitterwarnung ab 22:30', body: 'Open-Air-Bühnen pausieren kurz.', place: 'Gelände', severity: 'warning', validMin: 180 }
+    assert.equal((await api('GET', '/api/admin/session', 'wrong')).status, 401)
+    assert.equal((await api('GET', '/api/admin/session', 'test-admin-token')).status, 200)
     assert.equal((await api('POST', '/api/admin/announcements', null, draft)).status, 401)
     assert.equal((await api('POST', '/api/admin/announcements', lea.token, draft)).status, 401)
     assert.equal((await api('POST', '/api/admin/announcements', 'test-admin-token', { ...draft, severity: 'panic' })).status, 400)
@@ -223,6 +225,33 @@ try {
     assert.equal((await api('DELETE', `/api/admin/announcements/${a.data.id}`, 'test-admin-token')).status, 204)
     assert.ok(!(await api('GET', '/api/announcements')).data.some((x) => x.id === a.data.id))
     assert.equal((await api('DELETE', `/api/admin/announcements/${a.data.id}`, 'test-admin-token')).status, 404)
+  })
+
+  await test('timetable changes: admin-only, validated, public, revertible', async () => {
+    const A = 'test-admin-token'
+    assert.equal((await api('PUT', '/api/admin/timetable/1-arcturus', lea.token, { start: 1350, end: 1440 })).status, 401)
+    assert.equal((await api('PUT', '/api/admin/timetable/1-arcturus', A, { start: 1350 })).status, 400)
+    assert.equal((await api('PUT', '/api/admin/timetable/1-arcturus', A, { start: 1440, end: 1350 })).status, 400)
+    assert.equal((await api('PUT', '/api/admin/timetable/1-arcturus', A, { stage: 'mars' })).status, 400)
+    assert.equal((await api('PUT', '/api/admin/timetable/1-arcturus', A, {})).status, 400)
+    assert.equal((await api('PUT', '/api/admin/timetable/..%2Fetc', A, { cancelled: true })).status, 400)
+    const d = await api('PUT', '/api/admin/timetable/1-arcturus', A, { start: 1350, end: 1440, note: 'Technik' })
+    assert.equal(d.status, 200)
+    await api('PUT', '/api/admin/timetable/2-kairo', A, { cancelled: true })
+    let list = (await api('GET', '/api/timetable/changes')).data
+    assert.deepEqual(
+      list.map((x) => x.actId).sort(),
+      ['1-arcturus', '2-kairo'],
+    )
+    assert.equal(list.find((x) => x.actId === '2-kairo').cancelled, true)
+    // upsert replaces the previous change
+    await api('PUT', '/api/admin/timetable/1-arcturus', A, { stage: 'archive' })
+    list = (await api('GET', '/api/timetable/changes')).data
+    const a = list.find((x) => x.actId === '1-arcturus')
+    assert.equal(a.start, null)
+    assert.equal(a.stage, 'archive')
+    assert.equal((await api('DELETE', '/api/admin/timetable/2-kairo', A)).status, 204)
+    assert.equal((await api('DELETE', '/api/admin/timetable/2-kairo', A)).status, 404)
   })
 
   await test('CORS preflight is answered', async () => {

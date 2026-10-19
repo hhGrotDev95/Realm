@@ -19,7 +19,7 @@ export function Sheets() {
   const s = sheet ?? shown
   const full = s?.kind === 'chat' || s?.kind === 'shared' || s?.kind === 'updates'
   return (
-    <Sheet open={open} onClose={closeSheet} full={full}>
+    <Sheet open={open} onClose={closeSheet} full={full} label={sheetLabel(s)}>
       <AnimatePresence mode="wait" initial={false}>
         <motion.div key={JSON.stringify(s)} initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.18 }}>
           {s?.kind === 'act' && <ActSheet id={s.id} />}
@@ -40,6 +40,41 @@ export function Sheets() {
       </AnimatePresence>
     </Sheet>
   )
+}
+
+function sheetLabel(s: SheetState): string {
+  switch (s?.kind) {
+    case 'act':
+      return actById[s.id]?.artist ?? 'Act'
+    case 'poi':
+      return POIS.find((p) => p.id === s.id)?.name ?? 'Ort'
+    case 'resolver':
+      return 'Überschneidung entscheiden'
+    case 'meetup':
+      return 'Meetup'
+    case 'newMeetup':
+      return 'Neues Meetup'
+    case 'profile':
+      return 'Profil & Einstellungen'
+    case 'identity':
+      return 'Name wählen'
+    case 'updates':
+      return 'Updates'
+    case 'report':
+      return 'Problem melden'
+    case 'secure':
+      return 'Profil sichern'
+    case 'restore':
+      return 'Profil wiederherstellen'
+    case 'chat':
+      return 'Crew-Chat'
+    case 'shared':
+      return 'Gemeinsame Acts'
+    case 'steps':
+      return 'Step-Challenge'
+    default:
+      return 'Dialog'
+  }
 }
 
 function goRoute(poi: string, app: ReturnType<typeof useApp>) {
@@ -74,6 +109,19 @@ function ActSheet({ id }: { id: string }) {
           </div>
         </div>
       </div>
+      {a.change && (
+        <div className={`alert ${a.change.cancelled ? 'critical' : 'warning'}`} style={{ marginBottom: 16 }}>
+          <TriangleAlert className="a-ic" size={20} />
+          <span className="grow">
+            <strong>
+              {a.change.cancelled
+                ? 'Dieser Auftritt wurde abgesagt'
+                : [a.change.moved && `Neue Zeit: ${fmt(a.start)}–${fmt(a.end)} (statt ${fmt(a.change.was.start)})`, a.change.restaged && `Neue Bühne: ${stageById[a.stage].name}`].filter(Boolean).join(' · ')}
+            </strong>
+            <span className="small muted">Offiziell{a.change.note ? ` · ${a.change.note}` : ''}</span>
+          </span>
+        </div>
+      )}
       <div className="sheet-actions">
         <button className={`btn ${inPlan ? 'on' : 'primary'}`} onClick={() => toggleFav(id)}>
           {inPlan ? (

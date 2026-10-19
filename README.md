@@ -50,7 +50,9 @@ Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt e
 | Meldungen | `GET/POST /api/reports`, `PUT /api/reports/:id/vote` |
 | Offiziell | `GET /api/announcements` (öffentlich), `POST/PATCH/DELETE /api/admin/announcements[/:id]` (Admin-Token) |
 
-Offizielle Meldungen veröffentlicht der Veranstalter per CLI:
+Veranstalter-Konsole im Browser: `/#admin` (Anmeldung mit dem Admin-Token, gespeichert nur für den Tab). Dort lassen sich Meldungen veröffentlichen/entfernen und Acts verschieben, umziehen oder absagen; Änderungen erscheinen innerhalb einer Minute in der App. Timetable-Änderungen: `GET /api/timetable/changes`, `PUT/DELETE /api/admin/timetable/:actId`.
+
+Alternativ per CLI:
 
 ```bash
 cd worker

@@ -31,6 +31,12 @@ try {
     await page.getByRole('button', { name: 'Weiter' }).click()
     await page.getByText('Du bist dabei').waitFor()
   })
+  await step('timetable change is shown on Home and in the line-up', async () => {
+    await page.locator('.alert', { hasText: 'Arcturus: jetzt 22:30' }).waitFor()
+    await page.locator('nav').getByText('Line-up').click()
+    await page.locator('.act', { hasText: 'Arcturus' }).getByText('Neu 22:30 statt 22:15').waitFor()
+    await page.locator('nav').getByText('Home').click()
+  })
   await step('line-up resolves a conflict', async () => {
     await page.locator('nav').getByText('Line-up').click()
     await page.locator('.conflict').first().click()

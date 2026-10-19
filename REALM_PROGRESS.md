@@ -1,6 +1,11 @@
 # Realm – Fortschritt
 
-Stand: 19.10.2026 · Branch `claude/realm-next`
+Stand: 19.10.2026
+
+- Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
+- Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`
+
+# Runde 1
 
 ## Auswahl der Aufgaben
 
@@ -28,7 +33,7 @@ Nachweis:
 
 ## 2 · Offizielle Meldungen — erledigt
 
-- Migration `0002_announcements.sql`; `GET /api/announcements` öffentlich (ohne Profil, 20 s cachebar).
+- Migration `0002_announcements.sql`; `GET /api/announcements` öffentlich (ohne Profil).
 - `POST/PATCH/DELETE /api/admin/announcements` mit `ADMIN_TOKEN`-Secret (Vergleich in konstanter Zeit); ohne Secret sind die Routen gesperrt (`403`).
 - Veranstalter-CLI `worker/scripts/announce.mjs` (`npm run announce -- add|list|remove`).
 - Die App lädt Meldungen minütlich für alle, speichert sie offline, zählt das Alter offline weiter und blendet abgelaufene aus; Warnungen und Kritisches erscheinen als Hinweis oben auf Home. Demo-Meldungen nur noch ohne Backend.
@@ -50,7 +55,7 @@ Nachweis:
 - Live-E2E „sync is incremental and backs off while the network is down“ – Abrufe enthalten `since=`; offline höchstens 3 Versuche in 40 s (gemessen: 2) statt ~5.
 - Live-E2E „new messages arrive incrementally without a reload“ – Nachricht erscheint ohne Reload, ältere bleiben genau einmal erhalten.
 
-## Prüfläufe
+## Prüfläufe Runde 1
 
 | Prüfung | Ergebnis |
 | --- | --- |
@@ -58,9 +63,72 @@ Nachweis:
 | `cd worker && npm test` | 18 API-Tests bestanden |
 | `npm run build && npm run test:e2e` (Demo-Modus) | 8 Abläufe bestanden |
 | `npm run test:live` (2 Nutzer, echte API, lokale D1) | 11 Szenarien bestanden |
+| GitHub Actions auf PR #4 (Head `c270628`) | `web`, `api`, `live` grün |
+
+# Runde 2
+
+## Auswahl der Aufgaben
+
+| # | Aufgabe | Warum jetzt |
+| --- | --- | --- |
+| 4 | Timetable-Änderungen live | Verschiebungen und Absagen sind auf Festivals Alltag; der Plan der Besucher war davon bisher nicht betroffen. |
+| 5 | Veranstalter-Konsole im Browser | Meldungen und Änderungen ließen sich nur per CLI pflegen – im Festivalbetrieb unrealistisch. |
+| 6 | Barrierefreiheits-Audit | Nie systematisch geprüft; Kontrast im Freien bei Nacht und Screenreader-Nutzung sind Kernanforderungen. |
+
+Weiterhin blockiert: Deployment und Web-Push (Cloudflare-Konto bzw. VAPID-Schlüssel), native Funktionen.
+
+## 4 · Timetable-Änderungen live — erledigt
+
+- Migration `0003_timetable_changes.sql`; `GET /api/timetable/changes` öffentlich, `PUT/DELETE /api/admin/timetable/:actId` mit Admin-Token; Validierung von Act-ID, Zeitpaar (Ende nach Beginn), Bühne und „mindestens eine Änderung“.
+- Die App wendet Änderungen auf den gemeinsamen Timetable an (alle Screens sehen dieselbe Version, offline gecacht). Verschobene Acts zeigen „Neu 22:30 statt 22:15“, abgesagte werden durchgestrichen und fallen aus Konflikten und Jetzt/Als-Nächstes heraus.
+- Betrifft eine Änderung einen Act im eigenen Plan, erscheint auf Home ein Hinweis (Absage rot, Verschiebung gelb); das Act-Sheet nennt alte und neue Zeit und den Grund.
+- Der Demo-Modus nutzt denselben Mechanismus (Arcturus +15 Min.); die frühere doppelte Demo-Meldung dazu ist entfernt.
+- Entfernt: `Cache-Control: max-age=20` auf öffentlichen Lesezugriffen – Worker-Antworten werden ohnehin nicht am Edge gecacht, der Header verzögerte nur Änderungen (im Test reproduziert).
+
+Dateien: `worker/migrations/0003_timetable_changes.sql`, `worker/src/index.ts`, `src/data.ts` (`applyTimetableChanges`, `DEMO_CHANGES`), `src/api.ts`, `src/store.tsx`, `src/time.ts`, `src/screens/Lineup.tsx` (`ChangeTag`), `src/screens/Home.tsx` (`PlanChanges`), `src/sheets.tsx`, `src/styles.css`.
+
+Nachweis:
+- API-Test „timetable changes: admin-only, validated, public, revertible“.
+- Smoke-Test „timetable change is shown on Home and in the line-up“ (Demo).
+- Live-E2E „organizer cancels an act: plan alert and struck-through row“.
+
+## 5 · Veranstalter-Konsole — erledigt
+
+- `/#admin`, nachgeladen nur dort (eigener Chunk). Anmeldung mit Admin-Token, geprüft über `GET /api/admin/session`, nur im `sessionStorage` des Tabs gehalten.
+- Meldungen: Titel, Text, Ort, Stufe (Info/Warnung/Kritisch), Gültigkeit; Liste aktiver Meldungen mit Entfernen.
+- Timetable: Tagesauswahl, Act wählen, Zeit direkt oder per ±5/15/30 Min. verschieben, Bühne wechseln, absagen, Hinweis; Validierung (Format, Ende nach Beginn, „Keine Änderung“) und Zurücksetzen.
+- Ohne Backend zeigt die Konsole „Kein Server konfiguriert“ statt toter Knöpfe.
+
+Dateien: `src/admin/Admin.tsx`, `src/main.tsx`, `src/api.ts` (`adminApi`), `src/styles.css`, `worker/src/index.ts`, `README.md`.
+
+Nachweis:
+- API-Test-Erweiterung: `GET /api/admin/session` → 401 mit falschem, 200 mit richtigem Token.
+- Live-E2E „organizer console: login, announcement, timetable change reach the app“ – falsches Token wird abgelehnt; Meldung und Verschiebung (+30 Min.) erscheinen bei Lea; Zurücksetzen funktioniert.
+
+## 6 · Barrierefreiheit — erledigt
+
+- Neuer Test `npm run test:a11y` (axe-core, WCAG 2.1 A/AA + Best Practices) über 12 Ansichten: Home, Act-Sheet, Line-up (Liste, Filter, Timeline), Konflikt-Resolver, Karte, Ort-Sheet, Crew, Chat, Profil, Konsole. Läuft jetzt auch in CI.
+- Erster Lauf: 13 schwerwiegende Befunde. Behoben an der Ursache:
+  - Kontrast: `--text-3` von `#7d7c8a` auf `#9493a1` (≥ 4,5 : 1 auf allen Flächen, nachgerechnet).
+  - Dialoge ohne Namen: jedes Sheet hat ein `aria-label`.
+  - Verschachtelte Bedienelemente: Act-Zeile und Herz sind jetzt Geschwister-Buttons statt Button-im-Button.
+  - Seitenüberschrift (`h1` in App-Bar und Konsole) und Landmark (`main`) für die Karte.
+- Zweiter Lauf: 0 Befunde in allen 12 Ansichten (auch keine moderaten).
+
+Dateien: `tests/a11y.mjs`, `package.json`, `.github/workflows/ci.yml`, `src/styles.css`, `src/ui.tsx`, `src/sheets.tsx`, `src/screens/Lineup.tsx`, `src/screens/MapScreen.tsx`, `src/App.tsx`, `src/admin/Admin.tsx`.
+
+## Prüfläufe Runde 2
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| `npm run typecheck` (Web) · `cd worker && npm run typecheck` | ohne Fehler |
+| `cd worker && npm test` | 19 API-Tests bestanden |
+| `npm run build && npm run test:e2e` (Demo-Modus) | 9 Abläufe bestanden |
+| `npm run test:a11y` | 12 Ansichten, 0 Befunde |
+| `npm run test:live` (2 Nutzer + Veranstalter, echte API, lokale D1) | 13 Szenarien bestanden |
 
 ## Nächste Schritte
 
 1. Deployment auf Cloudflare (braucht Konto/Freigabe): `wrangler d1 create`, Migrationen, `ADMIN_TOKEN` setzen, Web-App mit `VITE_API_URL` bauen.
-2. Web-Push für Meetups und offizielle Warnungen (VAPID-Schlüssel nötig).
-3. Admin-Oberfläche im Browser statt CLI; Timetable aus dem Backend.
+2. Web-Push für Meetups, Planänderungen und offizielle Warnungen (VAPID-Schlüssel nötig).
+3. Moderation im Crew-Chat (Nachricht melden, Mitglied entfernen) und Rollen in der Konsole.

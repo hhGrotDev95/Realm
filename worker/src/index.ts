@@ -361,7 +361,6 @@ const toAnnouncement = (r: AnnouncementRow, now: number) => ({
 app.get('/api/announcements', async (c) => {
   const now = Date.now()
   const rows = await c.env.DB.prepare('SELECT * FROM announcements WHERE expires_at IS NULL OR expires_at > ? ORDER BY created_at DESC LIMIT 50').bind(now).all<AnnouncementRow>()
-  c.header('Cache-Control', 'public, max-age=20')
   return c.json(rows.results.map((r) => toAnnouncement(r, now)))
 })
 
@@ -377,6 +376,7 @@ const admin = async (c: Context<App>, next: () => Promise<void>) => {
   await next()
 }
 app.use('/api/admin/*', admin)
+app.get('/api/admin/session', (c) => c.json({ ok: true }))
 
 const SEVERITY_ALL = ['info', 'warning', 'critical'] as const
 function announcementInput(b: Record<string, unknown>, partial = false) {
@@ -424,6 +424,45 @@ app.patch('/api/admin/announcements/:id', async (c) => {
 app.delete('/api/admin/announcements/:id', async (c) => {
   const res = await c.env.DB.prepare('DELETE FROM announcements WHERE id = ?').bind(c.req.param('id')).run()
   if (!res.meta.changes) throw new HttpError(404, 'Meldung nicht gefunden')
+  return c.body(null, 204)
+})
+
+/* ---------- Timetable changes ---------- */
+
+type ChangeRow = { act_id: string; start_min: number | null; end_min: number | null; stage: string | null; cancelled: number; note: string | null; updated_at: number }
+const toChange = (r: ChangeRow) => ({ actId: r.act_id, start: r.start_min, end: r.end_min, stage: r.stage, cancelled: !!r.cancelled, note: r.note, updatedAt: r.updated_at })
+const STAGES = ['generator', 'archive', 'lagoon', 'forest', 'observatory'] as const
+
+app.get('/api/timetable/changes', async (c) => {
+  const rows = await c.env.DB.prepare('SELECT * FROM timetable_changes ORDER BY updated_at DESC').all<ChangeRow>()
+  return c.json(rows.results.map(toChange))
+})
+
+app.put('/api/admin/timetable/:actId', async (c) => {
+  const actId = c.req.param('actId')
+  if (!/^[0-2]-[a-z0-9-]{1,60}$/.test(actId)) throw new HttpError(400, 'actId ist ungültig')
+  const b = await body(c)
+  const time = (x: unknown, name: string) => (x === undefined || x === null ? null : v.int(x, name, 0, 30 * 60))
+  const start = time(b.start, 'start')
+  const end = time(b.end, 'end')
+  if ((start === null) !== (end === null)) throw new HttpError(400, 'start und end gehören zusammen')
+  if (start !== null && end! <= start) throw new HttpError(400, 'end muss nach start liegen')
+  const stage = b.stage === undefined || b.stage === null ? null : v.oneOf(b.stage, 'stage', STAGES)
+  const cancelled = b.cancelled === undefined ? false : v.bool(b.cancelled, 'cancelled')
+  const note = v.str(b.note, 'Hinweis', { max: 140, optional: true }) ?? null
+  if (start === null && stage === null && !cancelled) throw new HttpError(400, 'Keine Änderung angegeben')
+  const row: ChangeRow = { act_id: actId, start_min: start, end_min: end, stage, cancelled: cancelled ? 1 : 0, note, updated_at: Date.now() }
+  await c.env.DB.prepare(
+    'INSERT INTO timetable_changes (act_id, start_min, end_min, stage, cancelled, note, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(act_id) DO UPDATE SET start_min = excluded.start_min, end_min = excluded.end_min, stage = excluded.stage, cancelled = excluded.cancelled, note = excluded.note, updated_at = excluded.updated_at',
+  )
+    .bind(row.act_id, row.start_min, row.end_min, row.stage, row.cancelled, row.note, row.updated_at)
+    .run()
+  return c.json(toChange(row))
+})
+
+app.delete('/api/admin/timetable/:actId', async (c) => {
+  const res = await c.env.DB.prepare('DELETE FROM timetable_changes WHERE act_id = ?').bind(c.req.param('actId')).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Keine Änderung für diesen Act')
   return c.body(null, 204)
 })
 

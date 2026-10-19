@@ -43,6 +43,8 @@ export interface Act {
   genre: string
   bio: string
   popularity: number // 0..1 community tendency base
+  /** set when the organizer changed the published slot */
+  change?: { cancelled: boolean; moved: boolean; restaged: boolean; note: string | null; was: { start: number; end: number; stage: StageId } }
 }
 
 const T = (h: number, m = 0) => (h < 10 ? h + 24 : h) * 60 + m
@@ -243,7 +245,6 @@ export const UPDATES: FestivalUpdate[] = [
   { id: 'u1', source: 'official', severity: 'warning', title: 'Gewitterwarnung ab 22:30', body: 'Bei Blitzschlag werden die Open-Air-Bühnen kurz pausiert. Folge den Hinweisen des Personals.', place: 'Gesamtes Gelände', ageMin: 9, validMin: 180, phases: ['during'] },
   { id: 'u2', source: 'confirmed', severity: 'info', title: 'Wasserstelle Lagoon leer', place: 'Lagoon', poi: 'w2', ageMin: 14, validMin: 46, confirms: 12, phases: ['during'] },
   { id: 'u3', source: 'unconfirmed', severity: 'info', title: 'Nord-Eingang ca. 25 Min. Wartezeit', place: 'Eingang Nord', poi: 'en1', ageMin: 7, validMin: 23, confirms: 2, phases: ['during', 'arrival'] },
-  { id: 'u4', source: 'official', severity: 'info', title: 'Arcturus startet 15 Minuten später', body: 'Neue Startzeit: 22:30 Uhr auf der Generator Stage.', place: 'Generator', ageMin: 32, phases: ['during'] },
   { id: 'u5', source: 'app', severity: 'info', title: 'Offline-Modus aktiv', body: 'Timetable, Karte und dein Plan funktionieren auch ohne Netz.', ageMin: 120, phases: ['before', 'arrival', 'during'] },
   { id: 'u6', source: 'official', severity: 'info', title: 'Shuttle-Takt erhöht auf 10 Minuten', place: 'Shuttle-Terminal', poi: 'sh1', ageMin: 40, phases: ['arrival', 'departure'] },
   { id: 'u7', source: 'official', severity: 'info', title: 'Timetable ist final', body: 'Zwei Änderungen seit deinem letzten Besuch: Somna und Fjordlight haben getauscht.', ageMin: 60 * 26, phases: ['before'] },
@@ -311,3 +312,41 @@ export function realClock(date = new Date()): { phase: Phase; day: number; min: 
 
 /** Countdown shown in the "before" phase of the demo. */
 export const DEMO_MS_TO_START = ((9 * 24 + 14) * 60 + 22) * 60_000
+
+export interface TimetableChange {
+  actId: string
+  start: number | null
+  end: number | null
+  stage: StageId | null
+  cancelled: boolean
+  note: string | null
+}
+
+/** Demo stand-in for the organizer's timetable changes (matches the demo notice "Arcturus +15 Min."). */
+export const DEMO_CHANGES: TimetableChange[] = [{ actId: '1-arcturus', start: 22 * 60 + 30, end: 24 * 60, stage: null, cancelled: false, note: 'Technischer Umbau' }]
+
+const ORIGINAL = new Map(ACTS.map((a) => [a.id, { start: a.start, end: a.end, stage: a.stage }]))
+let applied = ''
+
+/**
+ * Applies organizer changes to the shared ACTS objects in place, so every screen
+ * (lists, timeline, conflicts, map sheets) sees the same, current timetable.
+ * Idempotent; passing an empty list restores the published timetable.
+ */
+export function applyTimetableChanges(changes: TimetableChange[]) {
+  const key = JSON.stringify(changes)
+  if (key === applied) return
+  applied = key
+  const byId = new Map(changes.map((c) => [c.actId, c]))
+  for (const a of ACTS) {
+    const was = ORIGINAL.get(a.id)!
+    const c = byId.get(a.id)
+    a.start = c?.start ?? was.start
+    a.end = c?.end ?? was.end
+    a.stage = c?.stage ?? was.stage
+    a.change = c
+      ? { cancelled: c.cancelled, moved: c.start !== null && c.start !== was.start, restaged: c.stage !== null && c.stage !== was.stage, note: c.note, was }
+      : undefined
+  }
+  ACTS.sort((x, y) => x.day - y.day || x.start - y.start)
+}
