@@ -1,4 +1,5 @@
 import type { Theme } from './theme/apply'
+import { isEnabled, type ModuleKey, type ModuleState } from './modules'
 // Realm — demo dataset for "Realm Open Air 2027".
 // Times are minutes after midnight of the festival day (values > 1440 = after midnight).
 
@@ -303,7 +304,11 @@ export const FESTIVAL = {
   location: 'Lüneburger Heide' as string | null,
   status: 'published' as 'draft' | 'published' | 'archived',
   theme: {} as Theme,
+  modules: {} as ModuleState,
 }
+
+/** Is an optional module available at this festival? (all on in the demo) */
+export const on = (key: ModuleKey) => isEnabled(FESTIVAL.modules, key)
 
 /** Doors open on day 0 at 10:00 local time. */
 const festivalStart = () => {
@@ -390,7 +395,7 @@ const refill = <T,>(map: Record<string, T>, entries: [string, T][]) => {
  * lookup maps are updated in place so every module keeps working with the same references.
  */
 export function loadFestivalBundle(b: FestivalBundle) {
-  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {} })
+  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {}, modules: b.festival.modules ?? {} })
   replace(DAYS, b.days)
   replace(STAGES, b.stages)
   refill(stageById, STAGES.map((st) => [st.id, st]))

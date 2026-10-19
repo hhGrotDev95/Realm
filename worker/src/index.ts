@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
+import { isEnabled, MODULE_KEYS, moduleConflicts, MODULES, type ModuleKey, type ModuleState } from '../../src/modules'
 import { checkBrand, HEX } from '../../src/theme/contrast'
 import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v } from './util'
 
@@ -11,7 +12,7 @@ export interface Env {
 }
 
 type Guest = { id: string; nickname: string | null; color: string }
-type Festival = { id: string; slug: string; status: 'draft' | 'published' | 'archived'; stages: string[] }
+type Festival = { id: string; slug: string; status: 'draft' | 'published' | 'archived'; stages: string[]; modules: ModuleState }
 type App = { Bindings: Env; Variables: { guest: Guest; festival: Festival; isAdmin: boolean } }
 
 const MIN = 60_000
@@ -98,10 +99,10 @@ async function isAdminRequest(c: Context<App>) {
 }
 
 async function loadFestival(db: D1Database, slug: string): Promise<Festival | null> {
-  const f = await db.prepare('SELECT id, slug, status FROM festivals WHERE slug = ?').bind(slug).first<Omit<Festival, 'stages'>>()
+  const f = await db.prepare('SELECT id, slug, status, modules FROM festivals WHERE slug = ?').bind(slug).first<Omit<Festival, 'stages' | 'modules'> & { modules: string }>()
   if (!f) return null
   const stages = await db.prepare('SELECT id FROM stages WHERE festival_id = ?').bind(f.id).all<{ id: string }>()
-  return { ...f, stages: stages.results.map((s) => s.id) }
+  return { ...f, modules: JSON.parse(f.modules || '{}') as ModuleState, stages: stages.results.map((s) => s.id) }
 }
 
 /**
@@ -116,7 +117,19 @@ const tenant = async (c: Context<App>, next: () => Promise<void>) => {
   if (!f || (f.status === 'draft' && !admin)) throw new HttpError(404, 'Festival nicht gefunden')
   if (f.status === 'archived' && c.req.method !== 'GET' && !admin) throw new HttpError(403, 'Festival ist archiviert und schreibgeschützt')
   c.set('festival', f)
+  // switched-off modules do not exist for this festival – not even for clients that ignore the UI
+  const mod = moduleFor(c.req.path)
+  if (mod && !isEnabled(f.modules, mod)) throw new HttpError(403, `„${MODULES[mod].label}“ ist bei diesem Festival nicht aktiviert`)
   await next()
+}
+
+function moduleFor(path: string): ModuleKey | null {
+  if (/^\/api\/crews\/[^/]+\/messages/.test(path)) return 'chat'
+  if (/^\/api\/crews\/[^/]+\/location$/.test(path)) return 'location'
+  if (path.startsWith('/api/crews') || path.startsWith('/api/meetups')) return 'crew'
+  if (path.startsWith('/api/me/steps')) return 'steps'
+  if (path.startsWith('/api/reports')) return 'reports'
+  return null
 }
 
 async function actExists(c: Context<App>, actId: string) {
@@ -324,6 +337,10 @@ app.get('/api/crews/:id', async (c) => {
     db.prepare('SELECT r.meetup_id, r.guest_id, r.going FROM rsvps r JOIN meetups mt ON mt.id = r.meetup_id WHERE mt.crew_id = ?').bind(crewId),
   ])
   type R = Record<string, unknown>
+  const mods = c.get('festival').modules
+  const chatOn = isEnabled(mods, 'chat')
+  const locationOn = isEnabled(mods, 'location')
+  const stepsOn = isEnabled(mods, 'steps')
   const planBy: Record<string, string[]> = {}
   for (const p of plans.results as R[]) (planBy[p.guest_id as string] ??= []).push(p.act_id as string)
   const stepsBy: Record<string, { day: number; total: number; syncedAt: number }[]> = {}
@@ -337,13 +354,13 @@ app.get('/api/crews/:id', async (c) => {
       id: m.id,
       nickname: m.nickname,
       color: m.color,
-      sharing: !!m.share_location,
-      location: m.location ?? null,
-      locationAt: m.location_at ?? null,
+      sharing: locationOn && !!m.share_location,
+      location: locationOn ? (m.location ?? null) : null,
+      locationAt: locationOn ? (m.location_at ?? null) : null,
       plan: planBy[m.id as string] ?? [],
-      steps: stepsBy[m.id as string] ?? [],
+      steps: stepsOn ? (stepsBy[m.id as string] ?? []) : [],
     })),
-    messages: (messages.results as R[]).map((m) => {
+    messages: (chatOn ? (messages.results as R[]) : []).map((m) => {
       const deleted = !!m.deleted
       // hidden messages stay readable for their author, so they know what happened
       const hidden = !deleted && (m.flags as number) >= FLAGS_TO_HIDE
@@ -674,6 +691,23 @@ app.put('/api/admin/festivals/:slug/stages', async (c) => {
     touch(c.env.DB, f.id),
   ])
   return c.json({ stages })
+})
+
+/** Turns optional modules on or off; dependencies must be consistent. */
+app.put('/api/admin/festivals/:slug/modules', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  const state: ModuleState = {}
+  for (const [k, val] of Object.entries(b)) {
+    if (!MODULE_KEYS.includes(k as ModuleKey)) throw new HttpError(400, `Unbekanntes Modul „${k}“`)
+    state[k as ModuleKey] = v.bool(val, k)
+  }
+  const conflicts = moduleConflicts(state)
+  if (conflicts.length) throw new HttpError(400, conflicts.join('; '))
+  // only switched-off modules are stored; everything else is on by default
+  const stored = Object.fromEntries(Object.entries(state).filter(([, on]) => on === false))
+  await c.env.DB.prepare('UPDATE festivals SET modules = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(stored), Date.now(), f.id).run()
+  return c.json(stored)
 })
 
 const FONT_KEYS = ['bricolage', 'space', 'unbounded', 'fraunces', 'archivo'] as const

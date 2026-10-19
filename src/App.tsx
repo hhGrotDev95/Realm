@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect } from 'react'
 import { House, ListMusic, Map as MapIcon, Users } from 'lucide-react'
-import { DAYS, FESTIVAL, PHASES, fmt } from './data'
+import { DAYS, FESTIVAL, on, PHASES, fmt } from './data'
 import { Crew } from './screens/Crew'
 import { Home } from './screens/Home'
 import { Lineup } from './screens/Lineup'
@@ -96,7 +96,7 @@ export default function App() {
         </AnimatePresence>
 
         <nav className="nav" aria-label="Hauptnavigation">
-          {TABS.map((t) => {
+          {TABS.filter((t) => t.id !== 'crew' || on('crew')).map((t) => {
             const on = tab === t.id
             return (
               <button key={t.id} className={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => setTab(t.id)}>
