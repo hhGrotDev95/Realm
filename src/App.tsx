@@ -47,7 +47,7 @@ export function AppBar({ floating }: { floating?: boolean }) {
 }
 
 export default function App() {
-  const { tab, setTab, toastMsg, meetups, declined, now, phase, sheet, closeSheet } = useApp()
+  const { tab, setTab, toastMsg, meetups, declined, now, phase, sheet, closeSheet, outbox, netOnline, online } = useApp()
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === 'Escape' && closeSheet()
     window.addEventListener('keydown', h)
@@ -76,6 +76,15 @@ export default function App() {
             {tab === 'map' && <MapScreen />}
             {tab === 'crew' && <Crew />}
           </motion.div>
+
+        <AnimatePresence>
+          {online && (!netOnline || outbox.length > 0) && (
+            <motion.div className="net-pill" role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}>
+              <span className={`dot ${netOnline ? 'sync' : ''}`} />
+              {netOnline ? `${outbox.length} ${outbox.length === 1 ? 'Änderung wird' : 'Änderungen werden'} gesendet …` : outbox.length ? `Offline · ${outbox.length} ${outbox.length === 1 ? 'Änderung wartet' : 'Änderungen warten'}` : 'Offline · Plan, Karte und Timetable funktionieren weiter'}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <nav className="nav" aria-label="Hauptnavigation">
           {TABS.map((t) => {

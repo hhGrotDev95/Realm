@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { api, ApiError, online, setToken, type CrewState, type RemoteReport, type Session } from './api'
+import { api, ApiError, execute, online, opId, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
 import { ACTS, actById, CHAT, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
@@ -46,6 +46,8 @@ interface Persisted {
   remote: { me: string; members: CrewState['members'] } | null
   remoteReports: RemoteReport[]
   pendingJoin: string | null
+  outbox: OutboxOp[]
+  announcements: { items: Announcement[]; fetchedAt: number } | null
 }
 
 /** The crew as the UI sees it – demo friends or live members from the server. */
@@ -87,6 +89,8 @@ function initial(): Persisted {
     remote: null,
     remoteReports: [],
     pendingJoin: null,
+    outbox: [],
+    announcements: null,
   }
 }
 
@@ -112,6 +116,9 @@ function load(): Persisted {
   if (state.session) setToken(state.session.token)
   return state
 }
+
+const POLL_MS = 8000
+const MAX_BACKOFF_MS = 120_000
 
 const nearestStage = (): StageId => STAGES.reduce((a, b) => (Math.hypot(a.x - ME.x, a.y - ME.y) < Math.hypot(b.x - ME.x, b.y - ME.y) ? a : b)).id
 
@@ -178,6 +185,7 @@ interface Ctx extends Persisted {
   restore: (code: string) => Promise<boolean>
   deleteProfile: () => Promise<void>
   inviteLink: () => string | null
+  netOnline: boolean
 }
 
 const C = createContext<Ctx>(null!)
@@ -226,32 +234,106 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const fail = useCallback((e: unknown) => toast(e instanceof ApiError ? e.message : 'Etwas ist schiefgelaufen'), [toast])
 
   /** Maps a server crew snapshot onto the local view model ('me' stands for the current guest). */
-  const applyCrew = useCallback((cs: CrewState) => {
+  const applyCrew = useCallback((cs: CrewState, incremental = false) => {
     const me = (id: string) => (id === cs.me ? 'me' : id)
-    setS((p) => ({
-      ...p,
-      crewRef: cs.crew,
-      remote: { me: cs.me, members: cs.members },
-      chat: cs.messages.map((m) => ({ id: m.id, from: me(m.from), text: m.text, min: minuteOfDay(m.at) })),
-      meetups: cs.meetups.map((m) => ({ id: m.id, title: m.note || 'Meetup', place: m.place, poi: m.poi ?? undefined, actId: m.actId ?? undefined, day: m.day, min: m.min, note: m.note, going: m.going.map(me), createdBy: me(m.createdBy) })),
-      declined: cs.meetups.filter((m) => m.declined.includes(cs.me)).map((m) => m.id),
-    }))
+    setS((p) => {
+      // queued writes stay visible until the server has them
+      const known = new Set([...cs.messages.map((m) => m.id), ...(incremental ? p.chat.filter((m) => !m.pending).map((m) => m.id) : []), ...cs.meetups.map((m) => m.id)])
+      const queued = p.outbox.filter((o) => !known.has(o.id))
+      const rsvps = new Map(queued.flatMap((o) => (o.kind === 'rsvp' ? [[o.meetupId, o.going] as const] : [])))
+      return {
+        ...p,
+        crewRef: cs.crew,
+        remote: { me: cs.me, members: cs.members },
+        chat: [
+          // incremental polls only carry new messages: keep the ones we already have
+          ...(incremental && p.crewRef?.id === cs.crew.id ? p.chat.filter((m) => !m.pending && !cs.messages.some((n) => n.id === m.id)) : []),
+          ...cs.messages.map((m) => ({ id: m.id, from: me(m.from), text: m.text, min: minuteOfDay(m.at), at: m.at })),
+          ...queued.flatMap((o) => (o.kind === 'message' && o.crewId === cs.crew.id ? [{ id: o.id, from: 'me', text: o.text, min: minuteOfDay(o.at), pending: true }] : [])),
+        ],
+        meetups: [
+          ...cs.meetups.map((m) => {
+            const going = m.going.map(me).filter((g) => g !== 'me' || rsvps.get(m.id) !== false)
+            if (rsvps.get(m.id) && !going.includes('me')) going.push('me')
+            return { id: m.id, title: m.note || 'Meetup', place: m.place, poi: m.poi ?? undefined, actId: m.actId ?? undefined, day: m.day, min: m.min, note: m.note, going, createdBy: me(m.createdBy) }
+          }),
+          ...queued.flatMap((o) => (o.kind === 'meetup' && o.crewId === cs.crew.id ? [{ id: o.id, title: o.data.note || 'Meetup', ...o.data, going: ['me'], createdBy: 'me' }] : [])),
+        ],
+        declined: cs.meetups.filter((m) => (rsvps.has(m.id) ? rsvps.get(m.id) === false : m.declined.includes(cs.me))).map((m) => m.id),
+      }
+    })
   }, [])
 
-  const refresh = useCallback(async () => {
-    if (!online || !sRef.current.session) return
+  // chat cursor: after the first full snapshot only newer messages are fetched; every 15th poll reconciles fully
+  const cursor = useRef({ crewId: '', at: 0, polls: 0 })
+
+  /** One sync round. Returns false when the network or server failed (caller backs off). */
+  const refresh = useCallback(async (): Promise<boolean> => {
+    if (!online || !sRef.current.session) return true
+    const crewId = sRef.current.crewRef?.id
+    if (cursor.current.crewId !== (crewId ?? '')) cursor.current = { crewId: crewId ?? '', at: 0, polls: 0 }
+    const c = cursor.current
+    const incremental = c.at > 0 && c.polls % 15 !== 0
     try {
-      const [cs, reports] = await Promise.all([sRef.current.crewRef ? api.crew(sRef.current.crewRef.id) : null, api.reports()])
-      if (cs) applyCrew(cs)
+      const [cs, reports] = await Promise.all([crewId ? api.crew(crewId, incremental ? c.at - 1 : undefined) : null, api.reports()])
+      if (cs) {
+        applyCrew(cs, incremental)
+        c.at = Math.max(incremental ? c.at : 0, ...cs.messages.map((m) => m.at))
+        c.polls++
+      }
       setS((p) => ({ ...p, remoteReports: reports, votes: { ...p.votes, ...Object.fromEntries(reports.filter((r) => r.myVote).map((r) => [r.id, r.myVote!])) } }))
+      return true
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setS((p) => ({ ...p, session: null, crewRef: null, remote: null }))
       if (e instanceof ApiError && e.status === 404) setS((p) => ({ ...p, crewRef: null, remote: null }))
+      return !retryable(e)
     }
   }, [applyCrew])
 
   const sRef = useRef(s)
   sRef.current = s
+
+  const [netOnline, setNetOnline] = useState(() => navigator.onLine)
+  const flushing = useRef(false)
+
+  /** Sends queued writes in order; stops at the first one that should be retried later. */
+  const flush = useCallback(async () => {
+    if (!online || flushing.current || !sRef.current.session) return
+    flushing.current = true
+    let sent = 0
+    try {
+      for (const op of sRef.current.outbox) {
+        try {
+          await execute(op)
+          sent++
+        } catch (e) {
+          if (retryable(e)) break
+          sent++
+          toast(e instanceof ApiError ? `Nicht gesendet: ${e.message}` : 'Nicht gesendet')
+        }
+        const done = op.id
+        setS((p) => ({ ...p, outbox: p.outbox.filter((o) => o.id !== done) }))
+        sRef.current = { ...sRef.current, outbox: sRef.current.outbox.filter((o) => o.id !== done) }
+      }
+    } finally {
+      flushing.current = false
+    }
+    if (sent) await refresh()
+  }, [toast]) // refresh is stable enough via its own deps; see below
+
+  useEffect(() => {
+    const up = () => {
+      setNetOnline(true)
+      flush()
+    }
+    const down = () => setNetOnline(false)
+    window.addEventListener('online', up)
+    window.addEventListener('offline', down)
+    return () => {
+      window.removeEventListener('online', up)
+      window.removeEventListener('offline', down)
+    }
+  }, [flush])
 
   // verify the session once and pick up crews joined on another device
   useEffect(() => {
@@ -263,18 +345,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.session?.id])
 
-  // polling while visible: crew every 8 s (reports ride along)
+  // polling while visible: every 8 s, backing off exponentially (up to 2 min) while requests fail
   useEffect(() => {
     if (!online || !s.session) return
-    refresh()
-    const id = window.setInterval(() => document.visibilityState === 'visible' && refresh(), 8000)
-    const onVis = () => document.visibilityState === 'visible' && refresh()
-    document.addEventListener('visibilitychange', onVis)
-    return () => {
-      window.clearInterval(id)
-      document.removeEventListener('visibilitychange', onVis)
+    let timer = 0
+    let delay = POLL_MS
+    let stopped = false
+    const tick = async () => {
+      if (stopped) return
+      if (document.visibilityState === 'visible') {
+        await flush()
+        delay = (await refresh()) ? POLL_MS : Math.min(delay * 2, MAX_BACKOFF_MS)
+      }
+      if (!stopped) timer = window.setTimeout(tick, delay)
     }
-  }, [s.session?.id, s.crewRef?.id, refresh])
+    const wake = () => {
+      // coming back (tab visible or network up) syncs immediately and resets the backoff
+      if (document.visibilityState !== 'visible') return
+      window.clearTimeout(timer)
+      delay = POLL_MS
+      tick()
+    }
+    tick()
+    document.addEventListener('visibilitychange', wake)
+    window.addEventListener('online', wake)
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+      document.removeEventListener('visibilitychange', wake)
+      window.removeEventListener('online', wake)
+    }
+  }, [s.session?.id, s.crewRef?.id, refresh, flush])
+
+  // official announcements are public: fetched for everyone, cached for offline use
+  useEffect(() => {
+    if (!online) return
+    const load = () =>
+      api
+        .announcements()
+        .then((items) => setS((p) => ({ ...p, announcements: { items, fetchedAt: Date.now() } })))
+        .catch(() => {})
+    load()
+    const id = window.setInterval(() => document.visibilityState === 'visible' && load(), 60_000)
+    return () => window.clearInterval(id)
+  }, [])
 
   // plan sync (debounced)
   useEffect(() => {
@@ -365,15 +479,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
       confirms: r.confirms - (r.myVote === 'still' ? 1 : 0),
       phases: ['before', 'arrival', 'during', 'departure'],
     }))
-    const updates = online ? [...remoteUpdates, ...UPDATES.filter((u) => u.source === 'official' || u.source === 'app')] : [...s.myUpdates, ...UPDATES]
+    // ages are relative to the last fetch so cached notices keep counting up offline
+    const sinceFetch = s.announcements ? Math.floor((Date.now() - s.announcements.fetchedAt) / 60000) : 0
+    const official: FestivalUpdate[] = (s.announcements?.items ?? [])
+      .map((a) => ({
+        id: a.id,
+        source: 'official' as const,
+        title: a.title,
+        body: a.body ?? undefined,
+        place: a.place ?? undefined,
+        poi: a.poi ?? undefined,
+        severity: a.severity,
+        ageMin: a.ageMin + sinceFetch,
+        validMin: a.validMin === null ? undefined : a.validMin - sinceFetch,
+        phases: ['before', 'arrival', 'during', 'departure', 'after'] as Phase[],
+      }))
+      .filter((a) => a.validMin === undefined || a.validMin > 0)
+    const updates = online ? [...official, ...remoteUpdates, ...UPDATES.filter((u) => u.source === 'app')] : [...s.myUpdates, ...UPDATES]
 
-    const remote = <T,>(p: Promise<T>) => p.then(refresh, fail)
+    /** Queue a write locally first; it is sent now or as soon as the network is back. */
+    const enqueue = (op: OutboxOp, sentMsg?: string) => {
+      setS((p) => ({ ...p, outbox: [...p.outbox, op] }))
+      sRef.current = { ...sRef.current, outbox: [...sRef.current.outbox, op] }
+      if (!navigator.onLine) toast('Offline – wird gesendet, sobald du wieder Netz hast')
+      else if (sentMsg) toast(sentMsg)
+      void flush()
+    }
 
     return {
       ...s,
       phase,
       msToStart,
       online,
+      netOnline,
       crew,
       updates,
       inviteLink: () => (s.crewRef ? `${location.origin}/?join=${s.crewRef.code}` : null),
@@ -502,7 +640,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addMeetup: (m) => {
         if (online) {
           if (!crewId) return toast('Gründe zuerst eine Crew oder tritt einer bei')
-          return void remote(api.createMeetup(crewId, { place: m.place, poi: m.poi, actId: m.actId, day: m.day, min: m.min, note: m.note }).then(() => toast('Meetup erstellt – deine Crew sieht es sofort')))
+          const op: OutboxOp = { id: opId('mt'), kind: 'meetup', crewId, data: { place: m.place, poi: m.poi, actId: m.actId, day: m.day, min: m.min, note: m.note } }
+          setS((p) => ({ ...p, meetups: [...p.meetups, { ...m, id: op.id, going: ['me'], createdBy: 'me' }] }))
+          return enqueue(op, 'Meetup erstellt – deine Crew sieht es gleich')
         }
         const id = 'm' + rid()
         setS((p) => ({ ...p, meetups: [...p.meetups, { ...m, id, going: ['me'], createdBy: 'me' }] }))
@@ -510,7 +650,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       rsvp: (id, going) =>
         requireIdentity('Damit deine Crew sieht, wer kommt.', () => {
-          if (online) void remote(api.rsvp(id, going))
+          if (online) enqueue({ id: opId('rs'), kind: 'rsvp', meetupId: id, going })
           setS((p) => ({
             ...p,
             meetups: p.meetups.map((m) => (m.id === id ? { ...m, going: going ? [...new Set([...m.going, 'me'])] : m.going.filter((x) => x !== 'me') } : m)),
@@ -520,14 +660,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }),
       vote: (id, v) =>
         requireIdentity('Bestätigungen helfen allen – dafür brauchst du nur einen Namen.', () => {
-          if (online && s.remoteReports.some((r) => r.id === id)) void remote(api.vote(id, v))
+          if (online && s.remoteReports.some((r) => r.id === id)) enqueue({ id: opId('vo'), kind: 'vote', reportId: id, vote: v })
           setS((p) => ({ ...p, votes: { ...p.votes, [id]: v } }))
           toast(v === 'still' ? 'Danke – als weiterhin gültig bestätigt' : 'Danke – als behoben gemeldet')
         }),
       report: (u) => {
         if (online) {
-          void remote(api.report({ title: u.title, place: u.place, poi: u.poi, severity: u.severity === 'critical' ? 'warning' : u.severity }).then(() => toast('Meldung veröffentlicht · läuft in 60 Min. ab')))
-          return
+          return enqueue({ id: opId('r'), kind: 'report', data: { title: u.title, place: u.place, poi: u.poi, severity: u.severity === 'critical' ? 'warning' : u.severity } }, 'Meldung veröffentlicht · läuft in 60 Min. ab')
         }
         const nu: FestivalUpdate = { ...u, id: 'r' + rid(), ageMin: 0, source: 'unconfirmed', phases: ['before', 'arrival', 'during', 'departure'], validMin: 60, confirms: 1 }
         setS((p) => ({ ...p, myUpdates: [nu, ...p.myUpdates] }))
@@ -536,9 +675,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sendChat: (text) => {
         if (online) {
           if (!crewId) return toast('Gründe zuerst eine Crew oder tritt einer bei')
-          setS((p) => ({ ...p, chat: [...p.chat, { id: 'tmp' + rid(), from: 'me', text, min: minuteOfDay(Date.now()) }] }))
-          void remote(api.sendMessage(crewId, text))
-          return
+          const op: OutboxOp = { id: opId('m'), kind: 'message', crewId, text, at: Date.now() }
+          setS((p) => ({ ...p, chat: [...p.chat, { id: op.id, from: 'me', text, min: minuteOfDay(op.at), pending: true }] }))
+          return enqueue(op)
         }
         setS((p) => ({ ...p, chat: [...p.chat, { id: 'c' + rid(), from: 'me', text, min: now.min }] }))
       },
@@ -549,7 +688,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setTabRaw('home')
       },
     }
-  }, [s, tick, tab, stack, toastMsg, focusPoi, scrollTopSignal, openSheet, closeSheet, setTab, toast, fail, refresh, ensureSession])
+  }, [s, tick, tab, stack, toastMsg, focusPoi, scrollTopSignal, openSheet, closeSheet, setTab, toast, fail, refresh, ensureSession, flush, netOnline])
 
   return <C.Provider value={value}>{children}</C.Provider>
 }
