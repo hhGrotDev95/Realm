@@ -63,6 +63,13 @@ try {
     await page.getByText('Ansehen').click()
     await page.locator('.wrapped').waitFor()
   })
+  await step('real-time clock shows the actual countdown', async () => {
+    await page.locator('.wrapped [aria-label="Schließen"]').click()
+    await page.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    await page.locator('.sheet').getByText('Echtzeit').click()
+    const days = Math.ceil((new Date(2027, 6, 15, 10).getTime() - Date.now()) / 86_400_000)
+    if (days > 0) await page.getByText(`Noch ${days} Tage`).waitFor()
+  })
   if (errors.length) throw new Error('Page errors:\n' + errors.join('\n'))
   console.log('All smoke tests passed')
 } catch (e) {

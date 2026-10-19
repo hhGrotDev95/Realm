@@ -263,18 +263,21 @@ function During() {
 }
 
 function Countdown() {
+  const { msToStart } = useApp()
+  const total = Math.max(0, Math.floor(msToStart / 60_000))
+  const parts = [
+    [Math.floor(total / 1440), 'Tage'],
+    [Math.floor((total % 1440) / 60), 'Std.'],
+    [total % 60, 'Min.'],
+  ] as const
   return (
     <motion.div {...stagger(0)} className="hero">
       <span className="label next">Realm Open Air 2027</span>
       <div className="row" style={{ gap: 18, margin: '14px 0 6px', alignItems: 'flex-end' }}>
-        {[
-          ['09', 'Tage'],
-          ['14', 'Std.'],
-          ['22', 'Min.'],
-        ].map(([n, l]) => (
+        {parts.map(([n, l]) => (
           <div key={l}>
-            <div className="h-display" style={{ fontSize: 52 }}>
-              {n}
+            <div className="h-display" style={{ fontSize: 52, fontVariantNumeric: 'tabular-nums' }}>
+              {String(n).padStart(2, '0')}
             </div>
             <div className="tiny muted">{l}</div>
           </div>
