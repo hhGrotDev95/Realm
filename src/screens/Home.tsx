@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { CalendarClock, Users, ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { dateRange, FESTIVAL, ACTS, actById, DAYS, fmt, stageById, walkMinutes, ME } from '../data'
+import { on, dateRange, FESTIVAL, ACTS, actById, DAYS, fmt, stageById, walkMinutes, ME } from '../data'
 import { conflictClusters, isMeetupActive, useApp } from '../store'
 import { nowNext, planFor, status, untilLabel } from '../time'
 import { AvatarStack, SourceTag, StageDot, ago, stagger } from '../ui'
@@ -281,10 +281,10 @@ function During() {
       <Urgent />
       <PlanChanges i={0} />
       <NowNextHero />
-      <MeetupModule i={2} />
+      {on('crew') && <MeetupModule i={2} />}
       <UpdatesModule i={3} exclude={urgent?.id} />
       <AttendPrompt i={4} />
-      <CrewPeek i={5} />
+      {on('crew') && <CrewPeek i={5} />}
     </>
   )
 }
@@ -354,6 +354,7 @@ function Before() {
         </motion.section>
       )}
       <UpdatesModule i={3} />
+      {on('crew') && (
       <motion.section {...stagger(4)} className="card">
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <span className="tile-icon">
@@ -381,6 +382,7 @@ function Before() {
           <Share2 size={17} /> Einladungslink teilen
         </button>
       </motion.section>
+      )}
     </>
   )
 }
@@ -476,6 +478,7 @@ function After() {
   const seen = Object.values(attended).filter(Boolean).length
   return (
     <>
+      {on('wrapped') && (
       <motion.button
         {...stagger(0)}
         onClick={() => openSheet({ kind: 'wrapped' })}
@@ -494,6 +497,7 @@ function After() {
           Ansehen <ArrowRight size={17} />
         </span>
       </motion.button>
+      )}
       <motion.section {...stagger(1)}>
         <div className="section-h">
           <h2>Deine Timeline</h2>

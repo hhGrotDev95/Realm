@@ -217,6 +217,7 @@ export const adminApi = (adminToken: string) => {
     updateFestival: (slug: string, f: { name?: string; location?: string; status?: 'draft' | 'published' | 'archived' }) => req<{ slug: string; name: string; status: string }>('PATCH', `/api/admin/festivals/${slug}`, f),
     setStages: (slug: string, stages: { id?: string; name: string; color?: string; vibe?: string }[]) => req<{ stages: { id: string; name: string; color: string }[] }>('PUT', `/api/admin/festivals/${slug}/stages`, { stages }),
     importTimetable: (slug: string, body: { mode: 'merge' | 'replace'; dryRun: boolean; rows: unknown[] }) => req<ImportResult>('POST', `/api/admin/festivals/${slug}/import`, body),
+    setModules: (slug: string, modules: Record<string, boolean>) => req<Record<string, boolean>>('PUT', `/api/admin/festivals/${slug}/modules`, modules),
     setTheme: (slug: string, theme: { brand?: string; font?: string; logo?: string }) => req<Record<string, string>>('PUT', `/api/admin/festivals/${slug}/theme`, theme),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
     restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),

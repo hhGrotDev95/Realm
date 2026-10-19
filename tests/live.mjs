@@ -354,6 +354,20 @@ try {
     const display = await visitor.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--display'))
     if (!display.includes('Space Grotesk')) throw new Error('font not applied: ' + display)
     await visitor.locator('.appbar img.logo-img').waitFor()
+
+    // modules: switching off "Crew & Freunde" removes the crew tab for visitors and the API refuses it
+    await org.getByRole('tab', { name: 'Module' }).click()
+    await org.getByRole('switch', { name: 'Crew & Freunde' }).click()
+    if ((await org.getByRole('switch', { name: 'Crew-Chat' }).getAttribute('aria-checked')) !== 'false') throw new Error('dependent module stayed on')
+    await org.getByRole('button', { name: 'Module speichern' }).click()
+    await org.getByText('Module gespeichert').waitFor()
+    await visitor.reload()
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    if (await visitor.locator('nav').getByText('Crew').count()) throw new Error('crew tab still visible')
+    await visitor.locator('nav').getByText('Map').waitFor()
+    const guest = await (await fetch(`${API}/api/guests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nickname: 'Test' }) })).json()
+    const refused = await fetch(`${API}/api/crews`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + guest.token, 'X-Festival': 'testwiese-festival' }, body: JSON.stringify({ name: 'X' }) })
+    if (refused.status !== 403) throw new Error('crew API not refused: ' + refused.status)
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

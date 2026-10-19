@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { CalendarPlus, ChevronRight, Footprints, Heart, LogOut, MapPin, MessageCircle, Navigation, Share2, UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
-import { ACTS, fmt, stageById, ME, walkMinutes, type StageId } from '../data'
+import { on, ACTS, fmt, stageById, ME, walkMinutes, type StageId } from '../data'
 import { isMeetupActive, useApp } from '../store'
 import { status } from '../time'
 import { AvatarStack, StageDot, Switch, stagger } from '../ui'
@@ -175,7 +175,7 @@ function CrewHome() {
         </motion.section>
 
         <motion.section {...stagger(4)} className="list">
-          <button className="list-item" onClick={() => openSheet({ kind: 'chat' })}>
+          {on('chat') && <button className="list-item" onClick={() => openSheet({ kind: 'chat' })}>
             <span className="tile-icon">
               <MessageCircle size={20} />
             </span>
@@ -186,7 +186,7 @@ function CrewHome() {
               </span>
             </span>
             <span className="tiny faint">{unread > 0 && lastMsg && fmt(lastMsg.min)}</span>
-          </button>
+          </button>}
           <button className="list-item" onClick={() => openSheet({ kind: 'members' })}>
             <span className="tile-icon">
               <Users size={20} />
@@ -211,7 +211,7 @@ function CrewHome() {
             </span>
             <ChevronRight size={18} className="faint" />
           </button>
-          <button className="list-item" onClick={() => openSheet({ kind: 'steps' })}>
+          {on('steps') && <button className="list-item" onClick={() => openSheet({ kind: 'steps' })}>
             <span className="tile-icon">
               <Footprints size={20} />
             </span>
@@ -222,7 +222,8 @@ function CrewHome() {
               </span>
             </span>
             <ChevronRight size={18} className="faint" />
-          </button>
+          </button>}
+          {on('location') && (
           <div className="list-item">
             <span className="tile-icon" style={shareLocation ? { background: 'var(--ok-soft)', color: 'var(--ok)' } : undefined}>
               <MapPin size={20} />
@@ -235,6 +236,7 @@ function CrewHome() {
             </span>
             <Switch on={shareLocation} onChange={(v) => set('shareLocation', v)} label="Standort teilen" />
           </div>
+          )}
           {crew.live && (
             <button className="list-item small" style={{ color: 'var(--text-3)' }} onClick={() => confirm(`„${crew.name}“ wirklich verlassen?`) && leaveCrew()}>
               <LogOut size={18} /> Crew verlassen

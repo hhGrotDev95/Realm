@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, execute, online, opId, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
 import { DEFAULT_FESTIVAL } from './festival'
-import { ACTS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
+import { on, ACTS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
   id: string
@@ -294,7 +294,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const c = cursor.current
     const incremental = c.at > 0 && c.polls % 15 !== 0
     try {
-      const [cs, reports] = await Promise.all([crewId ? api.crew(crewId, incremental ? c.at - 1 : undefined) : null, api.reports()])
+      const [cs, reports] = await Promise.all([crewId && on('crew') ? api.crew(crewId, incremental ? c.at - 1 : undefined) : null, on('reports') ? api.reports() : []])
       if (cs) {
         applyCrew(cs, incremental)
         c.at = Math.max(incremental ? c.at : 0, ...cs.messages.map((m) => m.at))
@@ -427,12 +427,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // coarse location sync: only the nearest stage area, only while sharing
   useEffect(() => {
     if (!online || !s.session || !s.crewRef) return
-    api.setLocation(s.crewRef.id, s.shareLocation, s.shareLocation ? nearestStage() : null).catch(() => {})
+    if (on('location')) api.setLocation(s.crewRef.id, s.shareLocation, s.shareLocation ? nearestStage() : null).catch(() => {})
   }, [s.shareLocation, s.crewRef?.id, s.session?.id])
 
   // leaving the step challenge deletes the synced totals
   useEffect(() => {
-    if (online && s.session && !s.stepsOptIn) api.deleteSteps().catch(() => {})
+    if (online && s.session && !s.stepsOptIn && on('steps')) api.deleteSteps().catch(() => {})
   }, [s.stepsOptIn, s.session?.id])
 
   const ensureSession = useCallback(async (nickname: string | null, color: string) => {
@@ -462,7 +462,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     const crewId = s.crewRef?.id
     const live = online && !!s.remote
-    const crew: CrewView = live
+    const crew: CrewView = !on('crew')
+      ? { live: false, owner: null, name: '', code: null, members: [], byId: {}, friendsFor: () => [], stepsSyncedMin: null }
+      : live
       ? (() => {
           const members: Friend[] = s.remote!.members
             .filter((m) => m.id !== s.remote!.me)

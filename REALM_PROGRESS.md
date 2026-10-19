@@ -225,8 +225,27 @@ Dateien: `src/theme/contrast.ts`, `src/theme/apply.ts`, `src/admin/Branding.tsx`
 | `npm run test:e2e` · `npm run test:a11y` | 9 Abläufe · 13 Ansichten ohne Befund |
 | `npm run test:live` | 17 Szenarien; der Festival-Ablauf prüft jetzt auch: unlesbare Farbe nicht speicherbar, Farbe/Schrift/Logo erreichen die Besucher-App |
 
+GitHub Actions auf PR #9: `web`, `api`, `live` grün, gemergt.
+
+## P4 · Module — erledigt (Branch `claude/realm-modules`)
+
+- `src/modules.ts`: zentrale Liste (Crew & Freunde, Crew-Chat, Standort, Step-Challenge, Community-Meldungen, Rückblick) mit Abhängigkeiten; standardmäßig alles an, gespeichert werden nur ausgeschaltete Module.
+- Worker: `PUT /api/admin/festivals/:slug/modules` (unbekannte Module und widersprüchliche Abhängigkeiten → 400); die Mandanten-Middleware weist Routen ausgeschalteter Module mit 403 ab (Crews, Meetups, Chat, Standort, Schritte, Meldungen); der Crew-Snapshot liefert ohne Chat/Standort/Schritte keine entsprechenden Daten.
+- App: Crew-Tab, Meetup- und Crew-Module auf Home, „Crew einladen“, „Vor diesem Set treffen“, „Hier treffen“, „Problem melden“, Abstimmen bei Meldungen, Freunde- und Meldungs-Ebene der Karte, Chat-/Standort-/Schritte-Zeilen und der Rückblick erscheinen nur bei aktivem Modul; Polling fragt ausgeschaltete Module nicht ab.
+- Konsole: Tab „Module“ mit Schaltern; Abschalten nimmt abhängige Module mit, Einschalten ihre Voraussetzungen.
+
+Beim Testen gefunden und behoben: Die gemeinsame `Switch`-Komponente war ein `<button>` ohne `type` und schickte in Formularen das Formular schon beim Umschalten ab.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler |
+| `npm run test:import` | 8 Parser- + 9 Kontrast- + 7 Modul-Prüfungen |
+| `cd worker && npm test` | 26 API-Tests (neu: Module, Abhängigkeiten, Auswirkung auf Snapshot) + Migrationstest |
+| `npm run test:e2e` · `npm run test:a11y` | 9 Abläufe · 13 Ansichten ohne Befund |
+| `npm run test:live` | 17 Szenarien; der Festival-Ablauf schaltet jetzt „Crew & Freunde“ ab: Crew-Tab verschwindet beim Besucher, API lehnt ab |
+
 ## Nächste Schritte
 
-1. P4: Module ein-/ausschalten (Frontend + Backend).
-2. P5: FAQ + FAQ-Bot aus freigegebenen Antworten.
-3. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen).
+1. P5: FAQ verwalten + FAQ-Bot, der nur aus freigegebenen Antworten mit Quelle antwortet.
+2. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen).
+3. P6: Karteneditor (eigener Geländeplan, Marker mit relativen Koordinaten).

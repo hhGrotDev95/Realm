@@ -3,7 +3,7 @@ import { Flag, Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Co
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { switchFestival } from './festival'
 import { api } from './api'
-import { FESTIVAL, ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
+import { on, FESTIVAL, ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
 import { CAT_ICON } from './screens/MapScreen'
 import { ActRow } from './screens/Lineup'
 import { useApp, type SheetState } from './store'
@@ -181,7 +181,7 @@ function ActSheet({ id }: { id: string }) {
             Noch niemand – sei die erste Person.
           </p>
         )}
-        {st !== 'past' && (
+        {st !== 'past' && on('crew') && (
           <button
             className="btn ghost sm"
             style={{ marginTop: 10, paddingLeft: 0 }}
@@ -253,12 +253,16 @@ function PoiSheet({ id }: { id: string }) {
         <button className="btn primary" onClick={() => goRoute(p.id, app)}>
           <Navigation size={17} /> Route
         </button>
-        <button className="btn secondary" onClick={() => requireIdentity('Damit deine Crew weiß, wer einlädt.', () => openSheet({ kind: 'newMeetup', poi: p.id, place: p.name }))}>
-          <Users size={17} /> Hier treffen
-        </button>
-        <button className="btn ghost" onClick={() => openSheet({ kind: 'report', poi: p.id })}>
-          <TriangleAlert size={17} /> Problem melden
-        </button>
+        {on('crew') && (
+          <button className="btn secondary" onClick={() => requireIdentity('Damit deine Crew weiß, wer einlädt.', () => openSheet({ kind: 'newMeetup', poi: p.id, place: p.name }))}>
+            <Users size={17} /> Hier treffen
+          </button>
+        )}
+        {on('reports') && (
+          <button className="btn ghost" onClick={() => openSheet({ kind: 'report', poi: p.id })}>
+            <TriangleAlert size={17} /> Problem melden
+          </button>
+        )}
       </div>
       {stageActs.length > 0 && (
         <section style={{ marginBottom: 18 }}>
@@ -593,7 +597,7 @@ function NewMeetup({ actId, poi, place: initialPlace, note: initialNote }: { act
 
 /* ---------------- Updates ---------------- */
 function UpdateItem({ u, vote, voted }: { u: FestivalUpdate; vote: (id: string, v: 'still' | 'fixed') => void; voted?: 'still' | 'fixed' }) {
-  const community = u.source === 'confirmed' || u.source === 'unconfirmed'
+  const community = (u.source === 'confirmed' || u.source === 'unconfirmed') && on('reports')
   return (
     <div className="list-item" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 6 }}>
       <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
@@ -633,9 +637,9 @@ function Updates() {
           <h2>Updates</h2>
           <div className="small muted">Jede Meldung mit Quelle, Alter und Gültigkeit.</div>
         </div>
-        <button className="btn secondary sm" onClick={() => openSheet({ kind: 'report' })}>
+        {on('reports') && <button className="btn secondary sm" onClick={() => openSheet({ kind: 'report' })}>
           <Plus size={16} /> Melden
-        </button>
+        </button>}
       </div>
       <div className="chips" style={{ marginBottom: 8 }}>
         {(

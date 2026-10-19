@@ -470,6 +470,34 @@ try {
     assert.deepEqual(t, { brand: '#4fd1c5', font: 'space', logo: png })
   })
 
+  await test('modules: switched-off features are refused by the API, dependencies enforced', async () => {
+    const A = 'test-admin-token'
+    const N = 'nordlicht'
+    const put = (body) => api('PUT', '/api/admin/festivals/nordlicht/modules', A, body, null)
+    const nils = (await api('POST', '/api/guests', null, { nickname: 'Nils' })).data
+    const nc = (await api('POST', '/api/crews', nils.token, { name: 'Kai' }, N)).data
+    await api('POST', `/api/crews/${nc.id}/messages`, nils.token, { text: 'vorher' }, N)
+    assert.equal((await put({ teleport: false })).status, 400)
+    const conflict = await put({ crew: false, chat: true })
+    assert.equal(conflict.status, 400)
+    assert.match(conflict.data.error, /braucht „Crew & Freunde“/)
+    // chat off: posting is refused and the snapshot carries no messages
+    assert.deepEqual((await put({ chat: false })).data, { chat: false })
+    assert.equal((await api('POST', `/api/crews/${nc.id}/messages`, nils.token, { text: 'nachher' }, N)).status, 403)
+    assert.deepEqual((await api('GET', `/api/crews/${nc.id}`, nils.token, undefined, N)).data.messages, [])
+    assert.equal((await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data.festival.modules.chat, false)
+    // crew off: everything crew-related is refused (chat/location/steps follow)
+    await put({ crew: false, chat: false, location: false, steps: false, reports: false })
+    assert.equal((await api('POST', '/api/crews', nils.token, { name: 'Neu' }, N)).status, 403)
+    assert.equal((await api('PUT', '/api/me/steps', nils.token, { day: 0, total: 5 }, N)).status, 403)
+    assert.equal((await api('GET', '/api/reports', nils.token, undefined, N)).status, 403)
+    // the other festival is unaffected
+    assert.equal((await api('GET', '/api/reports', nils.token)).status, 200)
+    // back on: the old message is still there
+    await put({})
+    assert.equal((await api('GET', `/api/crews/${nc.id}`, nils.token, undefined, N)).data.messages[0].text, 'vorher')
+  })
+
   await test('CORS preflight is answered', async () => {
     const r = await fetch(BASE + '/api/me', { method: 'OPTIONS', headers: { Origin: 'https://realm.app', 'Access-Control-Request-Method': 'GET' } })
     assert.equal(r.headers.get('access-control-allow-origin'), 'https://realm.app')
