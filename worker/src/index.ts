@@ -31,6 +31,16 @@ app.onError((err, c) => {
 })
 app.notFound((c) => c.json({ error: 'Nicht gefunden' }, 404))
 
+/**
+ * Clients may send their own id so a retried request (offline queue) is stored once.
+ * A replay by the same guest returns the existing row; someone else's id is a conflict.
+ */
+function clientId(raw: unknown, prefix: string) {
+  if (raw === undefined) return randomId(prefix)
+  if (typeof raw !== 'string' || !new RegExp(`^${prefix}_[A-Za-z0-9_-]{10,40}$`).test(raw)) throw new HttpError(400, 'id ist ungültig')
+  return raw
+}
+
 const body = async (c: Context) => {
   try {
     const b = await c.req.json()
@@ -269,9 +279,15 @@ app.post('/api/crews/:id/messages', async (c) => {
   requireName(g)
   await membership(c.env.DB, crewId, g.id)
   await rateLimit(c.env.DB, 'msg:' + g.id, 30, MIN)
-  const text = v.str((await body(c)).text, 'Nachricht', { max: 500 })!
-  const msg = { id: randomId('m'), from: g.id, text, at: Date.now() }
-  await c.env.DB.prepare('INSERT INTO messages (id, crew_id, guest_id, text, created_at) VALUES (?, ?, ?, ?, ?)').bind(msg.id, crewId, g.id, text, msg.at).run()
+  const b = await body(c)
+  const text = v.str(b.text, 'Nachricht', { max: 500 })!
+  const msg = { id: clientId(b.id, 'm'), from: g.id, text, at: Date.now() }
+  const res = await c.env.DB.prepare('INSERT OR IGNORE INTO messages (id, crew_id, guest_id, text, created_at) VALUES (?, ?, ?, ?, ?)').bind(msg.id, crewId, g.id, text, msg.at).run()
+  if (!res.meta.changes) {
+    const prev = await c.env.DB.prepare('SELECT id, guest_id AS "from", text, created_at AS at FROM messages WHERE id = ? AND guest_id = ? AND crew_id = ?').bind(msg.id, g.id, crewId).first()
+    if (!prev) throw new HttpError(409, 'id ist bereits vergeben')
+    return c.json(prev, 200)
+  }
   return c.json(msg, 201)
 })
 
@@ -283,13 +299,18 @@ app.post('/api/crews/:id/meetups', async (c) => {
   await rateLimit(c.env.DB, 'meetup:' + g.id, 20, 60 * MIN)
   const b = await body(c)
   const m = {
-    id: randomId('mt'),
+    id: clientId(b.id, 'mt'),
     place: v.str(b.place, 'Treffpunkt', { max: 60 })!,
     poi: v.str(b.poi, 'poi', { max: 40, optional: true }) ?? null,
     actId: v.str(b.actId, 'actId', { max: 60, optional: true }) ?? null,
     day: v.int(b.day, 'day', 0, 3),
     min: v.int(b.min, 'min', 0, 30 * 60),
     note: v.str(b.note, 'Notiz', { max: 140, optional: true }) ?? '',
+  }
+  const existing = await c.env.DB.prepare('SELECT crew_id, created_by FROM meetups WHERE id = ?').bind(m.id).first<{ crew_id: string; created_by: string }>()
+  if (existing) {
+    if (existing.created_by !== g.id || existing.crew_id !== crewId) throw new HttpError(409, 'id ist bereits vergeben')
+    return c.json({ ...m, createdBy: g.id, going: [g.id], declined: [] }, 200)
   }
   await c.env.DB.batch([
     c.env.DB.prepare('INSERT INTO meetups (id, crew_id, created_by, place, poi, act_id, day, min, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(m.id, crewId, g.id, m.place, m.poi, m.actId, m.day, m.min, m.note, Date.now()),
@@ -362,13 +383,18 @@ app.post('/api/reports', async (c) => {
   const b = await body(c)
   const now = Date.now()
   const r = {
-    id: randomId('r'),
+    id: clientId(b.id, 'r'),
     title: v.str(b.title, 'Titel', { min: 3, max: 120 })!,
     place: v.str(b.place, 'Ort', { max: 60, optional: true }) ?? null,
     poi: v.str(b.poi, 'poi', { max: 40, optional: true }) ?? null,
     severity: b.severity === undefined ? 'info' : v.oneOf(b.severity, 'severity', SEVERITIES),
   }
-  await c.env.DB.prepare('INSERT INTO reports (id, guest_id, title, place, poi, severity, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(r.id, g.id, r.title, r.place, r.poi, r.severity, now, now + REPORT_TTL).run()
+  const res = await c.env.DB.prepare('INSERT OR IGNORE INTO reports (id, guest_id, title, place, poi, severity, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(r.id, g.id, r.title, r.place, r.poi, r.severity, now, now + REPORT_TTL).run()
+  if (!res.meta.changes) {
+    const prev = await c.env.DB.prepare('SELECT 1 FROM reports WHERE id = ? AND guest_id = ?').bind(r.id, g.id).first()
+    if (!prev) throw new HttpError(409, 'id ist bereits vergeben')
+    return c.json({ ...r, source: 'unconfirmed', confirms: 1, mine: true, myVote: null, ageMin: 0, validMin: REPORT_TTL / MIN }, 200)
+  }
   return c.json({ ...r, source: 'unconfirmed', confirms: 1, mine: true, myVote: null, ageMin: 0, validMin: REPORT_TTL / MIN }, 201)
 })
 

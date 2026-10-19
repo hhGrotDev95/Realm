@@ -959,9 +959,10 @@ function Chat() {
                   {(crew.byId[m.from]?.name ?? 'Gast')} · {fmt(m.min)}
                 </span>
               )}
-              <button className={`bubble ${me ? 'me' : 'them'}`} style={{ textAlign: 'left' }} onClick={() => setActive(active === m.id ? null : m.id)}>
+              <button className={`bubble ${me ? 'me' : 'them'} ${m.pending ? 'pending' : ''}`} style={{ textAlign: 'left' }} onClick={() => setActive(active === m.id ? null : m.id)}>
                 {m.text}
               </button>
+              {m.pending && <span className="tiny faint" style={{ marginTop: 2 }}>Wird gesendet …</span>}
               <AnimatePresence>
                 {active === m.id && (
                   <motion.button

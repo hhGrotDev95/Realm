@@ -101,10 +101,38 @@ export const api = {
   leaveCrew: (id: string) => call<void>('POST', `/api/crews/${id}/leave`),
   crew: (id: string) => call<CrewState>('GET', `/api/crews/${id}`),
   setLocation: (id: string, share: boolean, location: string | null) => call('PUT', `/api/crews/${id}/location`, { share, location }),
-  sendMessage: (id: string, text: string) => call<RemoteMessage>('POST', `/api/crews/${id}/messages`, { text }),
-  createMeetup: (id: string, m: { place: string; poi?: string; actId?: string; day: number; min: number; note: string }) => call<RemoteMeetup>('POST', `/api/crews/${id}/meetups`, m),
+  sendMessage: (crewId: string, text: string, id?: string) => call<RemoteMessage>('POST', `/api/crews/${crewId}/messages`, { id, text }),
+  createMeetup: (crewId: string, m: { id?: string; place: string; poi?: string; actId?: string; day: number; min: number; note: string }) => call<RemoteMeetup>('POST', `/api/crews/${crewId}/meetups`, m),
   rsvp: (id: string, going: boolean) => call('PUT', `/api/meetups/${id}/rsvp`, { going }),
   reports: () => call<RemoteReport[]>('GET', '/api/reports'),
-  report: (r: { title: string; place?: string; poi?: string; severity: 'info' | 'warning' }) => call<RemoteReport>('POST', '/api/reports', r),
+  report: (r: { id?: string; title: string; place?: string; poi?: string; severity: 'info' | 'warning' }) => call<RemoteReport>('POST', '/api/reports', r),
   vote: (id: string, kind: 'still' | 'fixed') => call('PUT', `/api/reports/${id}/vote`, { kind }),
 }
+
+/** Network trouble (or an overloaded server) is worth retrying; validation errors are not. */
+export const retryable = (e: unknown) => e instanceof ApiError && (e.status === 0 || e.status === 429 || e.status >= 500)
+
+export type OutboxOp =
+  | { id: string; kind: 'message'; crewId: string; text: string; at: number }
+  | { id: string; kind: 'meetup'; crewId: string; data: { place: string; poi?: string; actId?: string; day: number; min: number; note: string } }
+  | { id: string; kind: 'rsvp'; meetupId: string; going: boolean }
+  | { id: string; kind: 'vote'; reportId: string; vote: 'still' | 'fixed' }
+  | { id: string; kind: 'report'; data: { title: string; place?: string; poi?: string; severity: 'info' | 'warning' } }
+
+export function execute(op: OutboxOp): Promise<unknown> {
+  switch (op.kind) {
+    case 'message':
+      return api.sendMessage(op.crewId, op.text, op.id)
+    case 'meetup':
+      return api.createMeetup(op.crewId, { ...op.data, id: op.id })
+    case 'rsvp':
+      return api.rsvp(op.meetupId, op.going)
+    case 'vote':
+      return api.vote(op.reportId, op.vote)
+    case 'report':
+      return api.report({ ...op.data, id: op.id })
+  }
+}
+
+const rand = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('')
+export const opId = (prefix: string) => `${prefix}_${rand()}`

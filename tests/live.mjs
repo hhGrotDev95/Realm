@@ -33,7 +33,11 @@ const errors = []
 const user = async () => {
   const ctx = await browser.newContext({ viewport: { width: 400, height: 860 } })
   // pin the app clock to "Friday 19:52" so the scenario does not depend on today's date
-  await ctx.addInitScript(() => localStorage.getItem('realm.v2') || localStorage.setItem('realm.v2', JSON.stringify({ clockMode: 'demo', phase: 'during' })))
+  await ctx.addInitScript(() => {
+    try {
+      localStorage.getItem('realm.v2') || localStorage.setItem('realm.v2', JSON.stringify({ clockMode: 'demo', phase: 'during' }))
+    } catch {} // browser error pages (offline reload) have no storage
+  })
   const page = await ctx.newPage()
   page.on('pageerror', (e) => errors.push(e.message))
   return page
@@ -74,13 +78,36 @@ try {
   })
 
   await step('chat message reaches the other member (polling)', async () => {
-    await ben.getByText('Crew-Chat').click()
+    await ben.getByRole('button', { name: /^Crew-Chat/ }).click()
     await ben.getByPlaceholder(/Nachricht/).fill('Treffen am Archive?')
     await ben.getByRole('button', { name: 'Senden' }).click()
     await lea.reload()
     await nav(lea, 'Crew')
-    await lea.getByText('Crew-Chat').click()
+    await lea.getByRole('button', { name: /^Crew-Chat/ }).click()
     await lea.locator('.bubble.them', { hasText: 'Treffen am Archive?' }).waitFor({ timeout: 15000 })
+    await lea.keyboard.press('Escape')
+    await ben.keyboard.press('Escape')
+  })
+
+  await step('offline: message is queued, shown as pending and delivered after reconnect', async () => {
+    await ben.context().setOffline(true)
+    await ben.getByRole('button', { name: /^Crew-Chat/ }).click()
+    await ben.getByPlaceholder(/Nachricht/).fill('Funkloch!')
+    await ben.getByRole('button', { name: 'Senden' }).click()
+    await ben.getByText('Wird gesendet …').waitFor()
+    await ben.getByText(/Offline · 1 Änderung wartet/).waitFor()
+    await ben.reload().catch(() => {}) // a reload while offline must not lose the queue (served from the SW cache or skipped)
+    await ben.context().setOffline(false)
+    if (!ben.url().startsWith(WEB)) await ben.goto(WEB)
+    await ben.reload()
+    await nav(ben, 'Crew')
+    await ben.getByRole('button', { name: /^Crew-Chat/ }).click()
+    await ben.locator('.bubble.me:not(.pending)', { hasText: 'Funkloch!' }).waitFor({ timeout: 20000 })
+    await lea.reload()
+    await nav(lea, 'Crew')
+    await lea.getByRole('button', { name: /^Crew-Chat/ }).click()
+    await lea.locator('.bubble.them', { hasText: 'Funkloch!' }).waitFor({ timeout: 20000 })
+    if ((await lea.locator('.bubble', { hasText: 'Funkloch!' }).count()) !== 1) throw new Error('duplicate message after retry')
     await lea.keyboard.press('Escape')
     await ben.keyboard.press('Escape')
   })

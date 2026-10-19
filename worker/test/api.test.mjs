@@ -119,6 +119,22 @@ try {
     )
   })
 
+  await test('client ids make retries idempotent', async () => {
+    const id = 'm_retry0000001'
+    const a = await api('POST', `/api/crews/${crew.id}/messages`, ben.token, { id, text: 'Doppelt?' })
+    const b = await api('POST', `/api/crews/${crew.id}/messages`, ben.token, { id, text: 'Doppelt?' })
+    assert.equal(a.status, 201)
+    assert.equal(b.status, 200)
+    const msgs = (await api('GET', `/api/crews/${crew.id}`, lea.token)).data.messages.filter((m) => m.id === id)
+    assert.equal(msgs.length, 1)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages`, lea.token, { id, text: 'Kapern' })).status, 409)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages`, lea.token, { id: 'x', text: 'kaputt' })).status, 400)
+    const mt = { id: 'mt_retry000001', place: 'Bar', day: 1, min: 1200 }
+    assert.equal((await api('POST', `/api/crews/${crew.id}/meetups`, lea.token, mt)).status, 201)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/meetups`, lea.token, mt)).status, 200)
+    await api('DELETE', `/api/meetups/${mt.id}`, lea.token)
+  })
+
   await test('meetups with RSVPs; only the creator can cancel', async () => {
     const m = await api('POST', `/api/crews/${crew.id}/meetups`, lea.token, { place: 'Archive Entrance', poi: 'stage-archive', actId: '1-maduk', day: 1, min: 1210, note: 'Zusammen rüber' })
     assert.equal(m.status, 201)

@@ -256,6 +256,7 @@ export interface ChatMsg {
   from: string // friend id or 'me'
   text: string
   min: number // minute of day
+  pending?: boolean // queued offline, not yet on the server
 }
 
 export const CHAT: ChatMsg[] = [
