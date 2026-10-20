@@ -9,20 +9,25 @@ export const MODULES = {
   wrapped: { label: 'Festival-Rückblick', hint: '„Wrapped“ nach dem Festival', requires: [] },
   faq: { label: 'FAQ & Infos', hint: 'Antworten zu Einlass, Tickets, Camping, Essen …', requires: [] },
   faqbot: { label: 'FAQ-Bot', hint: 'Beantwortet Fragen nur aus freigegebenen FAQ – mit Quelle', requires: ['faq'] },
-} as const satisfies Record<string, { label: string; hint: string; requires: readonly string[] }>
+  festivalchat: { label: 'Festival-Chat', hint: 'Öffentlicher Chat für alle Besucher – braucht Moderation, daher erst nach Einschalten aktiv', requires: [], off: true },
+} as const satisfies Record<string, { label: string; hint: string; requires: readonly string[]; off?: boolean }>
 
 export type ModuleKey = keyof typeof MODULES
 export type ModuleState = Partial<Record<ModuleKey, boolean>>
 export const MODULE_KEYS = Object.keys(MODULES) as ModuleKey[]
 
-/** Everything is on unless the festival switched it off; a module is off when anything it needs is off. */
+/** What the festival chose for a module; without a choice it is on, except modules marked `off` (opt-in). */
+export const defaultOn = (key: ModuleKey) => !('off' in MODULES[key] && MODULES[key].off)
+const chosen = (state: ModuleState | undefined, key: ModuleKey) => state?.[key] ?? defaultOn(key)
+
+/** A module is on when chosen and when everything it needs is on. */
 export function isEnabled(state: ModuleState | undefined, key: ModuleKey): boolean {
-  if (state?.[key] === false) return false
+  if (!chosen(state, key)) return false
   return (MODULES[key].requires as readonly ModuleKey[]).every((r) => isEnabled(state, r))
 }
 
 /** Checks a requested configuration: an enabled module whose requirement is disabled is a conflict. */
 export function moduleConflicts(state: ModuleState): string[] {
-  return MODULE_KEYS.filter((k) => state[k] !== false)
-    .flatMap((k) => (MODULES[k].requires as readonly ModuleKey[]).filter((r) => state[r] === false).map((r) => `„${MODULES[k].label}“ braucht „${MODULES[r].label}“`))
+  return MODULE_KEYS.filter((k) => chosen(state, k))
+    .flatMap((k) => (MODULES[k].requires as readonly ModuleKey[]).filter((r) => !chosen(state, r)).map((r) => `„${MODULES[k].label}“ braucht „${MODULES[r].label}“`))
 }

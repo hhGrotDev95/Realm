@@ -3,6 +3,7 @@ import { Flag, Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Co
 import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { switchFestival } from './festival'
 const FaqSheet = lazy(() => import('./FaqSheet').then((m) => ({ default: m.FaqSheet })))
+const FestivalChat = lazy(() => import('./FestivalChat').then((m) => ({ default: m.FestivalChat })))
 import { api } from './api'
 import { on, FESTIVAL, ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
 import { CAT_ICON } from './screens/mapIcons'
@@ -22,7 +23,7 @@ export function Sheets() {
   }, [sheet])
   const open = !!sheet && sheet.kind !== 'wrapped'
   const s = sheet ?? shown
-  const full = s?.kind === 'chat' || s?.kind === 'shared' || s?.kind === 'updates' || s?.kind === 'faq'
+  const full = s?.kind === 'chat' || s?.kind === 'shared' || s?.kind === 'updates' || s?.kind === 'faq' || s?.kind === 'festivalChat'
   return (
     <Sheet open={open} onClose={closeSheet} full={full} label={sheetLabel(s)}>
       <AnimatePresence mode="wait" initial={false}>
@@ -49,6 +50,13 @@ export function Sheets() {
             </LazyBoundary>
           )}
           {s?.kind === 'steps' && <Steps />}
+          {s?.kind === 'festivalChat' && (
+            <LazyBoundary>
+              <Suspense fallback={<p className="muted small">{t('Lade …')}</p>}>
+                <FestivalChat />
+              </Suspense>
+            </LazyBoundary>
+          )}
         </motion.div>
       </AnimatePresence>
     </Sheet>
@@ -89,6 +97,8 @@ function sheetLabel(s: SheetState): string {
       return t('Infos & FAQ')
     case 'steps':
       return t('Step-Challenge')
+    case 'festivalChat':
+      return t('Festival-Chat')
     default:
       return t('Dialog')
   }
@@ -762,7 +772,7 @@ function Identity({ reason }: { reason: string }) {
         </motion.span>
       </div>
       <h2 className="h-display" style={{ fontSize: 26, textAlign: 'center' }}>
-        {t('Wie soll deine Crew dich nennen?')}
+        {t('Wie sollen dich andere nennen?')}
       </h2>
       <p className="small muted" style={{ textAlign: 'center', margin: '8px 0 20px' }}>
         {reason}

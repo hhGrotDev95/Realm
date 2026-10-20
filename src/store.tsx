@@ -157,6 +157,7 @@ export type SheetState =
   | { kind: 'members' }
   | { kind: 'faq'; q?: string }
   | { kind: 'steps' }
+  | { kind: 'festivalChat' }
   | null
 
 interface Ctx extends Persisted {

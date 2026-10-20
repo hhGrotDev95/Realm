@@ -1,5 +1,5 @@
 import { m as motion } from 'framer-motion'
-import { CalendarPlus, ChevronRight, Footprints, Heart, LogOut, MapPin, MessageCircle, Navigation, Share2, UserPlus, Users } from 'lucide-react'
+import { CalendarPlus, ChevronRight, Megaphone, Footprints, Heart, LogOut, MapPin, MessageCircle, Navigation, Share2, UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
 import { on, ACTS, fmt, POIS, stageById, ME, walkMinutes, type PoiCat, type StageId } from '../data'
 import { fairMeetingPoint } from '../meet'
@@ -191,6 +191,20 @@ function CrewHome() {
             </span>
             <span className="tiny faint">{unread > 0 && lastMsg && fmt(lastMsg.min)}</span>
           </button>}
+          {on('festivalchat') && (
+            <button className="list-item" onClick={() => openSheet({ kind: 'festivalChat' })}>
+              <span className="tile-icon">
+                <Megaphone size={20} />
+              </span>
+              <span className="grow">
+                <span style={{ fontWeight: 600 }}>{t('Festival-Chat')}</span>
+                <span className="small faint" style={{ display: 'block' }}>
+                  {t('Für alle auf dem Festival · moderiert')}
+                </span>
+              </span>
+              <ChevronRight size={18} className="faint" />
+            </button>
+          )}
           <button className="list-item" onClick={() => openSheet({ kind: 'members' })}>
             <span className="tile-icon">
               <Users size={20} />
