@@ -265,6 +265,16 @@ export interface ImportResult {
   warnings: { row: number; message: string }[]
 }
 
+export type AdminLogin = { token: string; mfa: 'verify' | 'setup'; name: string; role: 'platform' | 'organizer' }
+export type AdminMe = { id: string; name: string; email: string | null; role: 'platform' | 'organizer'; totp: boolean; mfa: boolean; personal: boolean; festivals: string[] }
+
+/** Organizer sign-in (audit F01): password, then the authenticator code; invitations create accounts. */
+export const authApi = {
+  login: (email: string, password: string) => adminApi('').raw<AdminLogin>('POST', '/api/auth/login', { email, password }),
+  totp: (token: string, code: string) => adminApi(token).raw<{ ok: true }>('POST', '/api/auth/totp', { code }),
+  accept: (invite: string, name: string, password: string) => adminApi('').raw<AdminLogin>('POST', '/api/auth/accept', { token: invite, name, password }),
+}
+
 /** Organizer endpoints; the admin token is passed explicitly and never stored with the guest session. */
 export const adminApi = (adminToken: string) => {
   const req = async <T,>(method: string, path: string, body?: unknown): Promise<T> => {
@@ -273,7 +283,7 @@ export const adminApi = (adminToken: string) => {
     try {
       res = await fetch(API_URL + path, {
         method,
-        headers: { ...festivalHeader(), Authorization: 'Bearer ' + adminToken, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+        headers: { ...festivalHeader(), ...(adminToken ? { Authorization: 'Bearer ' + adminToken } : {}), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body),
         // imports and images take longer than app requests
         signal: AbortSignal.timeout(4 * REQUEST_TIMEOUT_MS),
@@ -285,7 +295,18 @@ export const adminApi = (adminToken: string) => {
     return readJson<T>(res)
   }
   return {
+    raw: req,
     check: () => req<{ ok: true }>('GET', '/api/admin/session'),
+    me: () => req<AdminMe>('GET', '/api/admin/me'),
+    logout: () => req<void>('POST', '/api/admin/logout'),
+    totpSetup: () => req<{ secret: string; uri: string }>('POST', '/api/admin/totp/setup'),
+    totpEnable: (code: string) => req<{ ok: true }>('POST', '/api/admin/totp/enable', { code }),
+    sessions: () => req<{ id: string; createdAt: number; lastSeen: number; expiresAt: number; agent: string | null; current: boolean }[]>('GET', '/api/admin/sessions'),
+    revokeSession: (id: string) => req<void>('DELETE', `/api/admin/sessions/${id}`),
+    invite: (email: string, festival: string) => req<{ token: string; email: string; expiresAt: number }>('POST', '/api/admin/invites', { email, festival }),
+    accounts: (festival: string) => req<{ id: string; name: string; email: string; role: string; totp: boolean; disabled: boolean }[]>('GET', `/api/admin/accounts?festival=${encodeURIComponent(festival)}`),
+    removeAccess: (id: string, festival: string) => req<void>('DELETE', `/api/admin/accounts/${id}/festivals/${festival}`),
+    audit: (festival: string) => req<{ by: string; festival: string | null; action: string; status: number; at: number }[]>('GET', `/api/admin/audit?festival=${encodeURIComponent(festival)}`),
     festivals: () => req<{ slug: string; name: string; status: string }[]>('GET', '/api/admin/festivals'),
     bundle: (slug: string) => req<FestivalBundle>('GET', `/api/festivals/${encodeURIComponent(slug)}`),
     // reads go through the admin token too, so drafts work

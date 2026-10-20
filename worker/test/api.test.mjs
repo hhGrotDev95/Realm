@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
-import { createHash } from 'node:crypto'
+import { createHash, createHmac } from 'node:crypto'
 
 const PORT = 8799
 const BASE = `http://127.0.0.1:${PORT}`
@@ -778,6 +778,72 @@ try {
     assert.equal((await signup('198.51.100.9', { challenge: { id: ch.id, nonce: solve(ch) } })).status, 429, 'a challenge is single-use')
     // the visitors behind the WLAN were not affected by the abuser
     assert.equal((await visitor('203.0.113.7', 999)).status, 201)
+  })
+
+  await test('organizer accounts (audit F01): an admin of festival A reaches nothing of festival B; 2FA, sessions, change log', async () => {
+    const A = 'test-admin-token'
+    const R = 'realm-open-air'
+    const unb32 = (s) => { let bits = 0, val = 0; const out = []; for (const ch of s) { val = (val << 5) | 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'.indexOf(ch); bits += 5; if (bits >= 8) { out.push((val >>> (bits - 8)) & 255); bits -= 8 } } return Buffer.from(out) }
+    const code = (secret, step = Math.floor(Date.now() / 30000)) => {
+      const msg = Buffer.alloc(8); msg.writeBigUInt64BE(BigInt(step))
+      const h = createHmac('sha1', unb32(secret)).update(msg).digest(); const o = h[h.length - 1] & 15
+      return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1e6).padStart(6, '0')
+    }
+    // the platform key invites an organizer for one festival only
+    assert.equal((await api('POST', '/api/admin/invites', A, { email: 'ohne@festival.de' }, null)).status, 400)
+    const inv = (await api('POST', '/api/admin/invites', A, { email: 'Ola@Realm.de', festival: R }, null)).data
+    assert.equal((await api('POST', '/api/auth/accept', null, { token: inv.token, name: 'Ola', password: 'zu-kurz' }, null)).status, 400)
+    const acc = await api('POST', '/api/auth/accept', null, { token: inv.token, name: 'Ola', password: 'ein-sehr-langes-passwort' }, null)
+    assert.equal(acc.status, 201)
+    assert.equal((await api('POST', '/api/auth/accept', null, { token: inv.token, name: 'Ola', password: 'ein-sehr-langes-passwort' }, null)).status, 404, 'invites are single-use')
+    let ola = acc.data.token
+    // nothing works until the authenticator app is set up
+    const blocked = await api('GET', '/api/admin/festivals', ola, undefined, null)
+    assert.deepEqual([blocked.status, blocked.data.mfa], [403, 'setup'])
+    const { secret, uri } = (await api('POST', '/api/admin/totp/setup', ola, undefined, null)).data
+    assert.match(uri, /^otpauth:\/\/totp\/Realm:ola%40realm\.de\?secret=/)
+    assert.equal((await api('POST', '/api/admin/totp/enable', ola, { code: '000000' }, null)).status, 400)
+    const s0 = Math.floor(Date.now() / 30000) // the step used for the setup (fixed, so a step change mid-test cannot flake)
+    assert.equal((await api('POST', '/api/admin/totp/enable', ola, { code: code(secret, s0) }, null)).status, 200)
+    // festival A only: the list, writes, drafts and festival-scoped routes of B do not exist for Ola
+    assert.deepEqual((await api('GET', '/api/admin/festivals', ola, undefined, null)).data.map((f) => f.slug), [R])
+    assert.equal((await api('PUT', `/api/admin/festivals/${R}/faq/ola-test`, ola, { question: 'Gibt es Pfand?', answer: 'Ja, 2 Euro.', category: 'Allgemein', status: 'draft' }, null)).status, 200)
+    for (const [m, path, b, f] of [
+      ['GET', '/api/admin/festivals/nordlicht/faq', undefined, null],
+      ['PUT', '/api/admin/festivals/nordlicht/faq/x', { question: 'Gekapert?', answer: 'Nein.', category: 'Allgemein' }, null],
+      ['PATCH', '/api/admin/festivals/nordlicht', { status: 'archived' }, null],
+      ['POST', '/api/admin/announcements', { title: 'Fremd' }, 'nordlicht'],
+      ['GET', '/api/festivals/geheim', undefined, null],
+      ['GET', '/api/admin/audit?festival=nordlicht', undefined, null],
+      ['POST', '/api/admin/invites', { email: 'x@y.de', festival: 'nordlicht' }, null],
+    ]) assert.equal((await api(m, path, ola, b, f)).status, 404, `${m} ${path} must not exist for Ola`)
+    assert.equal((await api('POST', '/api/admin/invites', ola, { email: 'boss@y.de', role: 'platform' }, null)).status, 403)
+    // the change log names who did what
+    const log = (await api('GET', `/api/admin/audit?festival=${R}`, ola, undefined, null)).data
+    assert.deepEqual([log[0].by, log[0].action], ['Ola', `PUT /api/admin/festivals/${R}/faq/ola-test`])
+    // a second login needs password + a fresh code; a code cannot be used twice
+    assert.equal((await api('POST', '/api/auth/login', null, { email: 'ola@realm.de', password: 'falsch-falsch-falsch' }, null)).status, 401)
+    const login = (await api('POST', '/api/auth/login', null, { email: 'ola@realm.de', password: 'ein-sehr-langes-passwort' }, null)).data
+    assert.equal(login.mfa, 'verify')
+    assert.equal((await api('GET', '/api/admin/festivals', login.token, undefined, null)).status, 403)
+    assert.equal((await api('POST', '/api/auth/totp', login.token, { code: code(secret, s0) }, null)).status, 401, 'the code used for the setup is spent')
+    assert.equal((await api('POST', '/api/auth/totp', login.token, { code: code(secret, s0 + 1) }, null)).status, 200)
+    assert.equal((await api('GET', '/api/admin/festivals', login.token, undefined, null)).status, 200)
+    // sessions: listed, and revoking one ends it at once
+    const sessions = (await api('GET', '/api/admin/sessions', login.token, undefined, null)).data
+    assert.equal(sessions.length, 2)
+    const other = sessions.find((x) => !x.current)
+    assert.equal((await api('DELETE', `/api/admin/sessions/${other.id}`, login.token, undefined, null)).status, 204)
+    assert.equal((await api('GET', '/api/admin/festivals', ola, undefined, null)).status, 401)
+    ola = login.token
+    // access taken away or account disabled: effective with the next request
+    const olaId = (await api('GET', '/api/admin/me', ola, undefined, null)).data.id
+    assert.equal((await api('DELETE', `/api/admin/accounts/${olaId}/festivals/${R}`, A, undefined, null)).status, 204)
+    assert.equal((await api('GET', `/api/admin/festivals/${R}/faq`, ola, undefined, null)).status, 404)
+    assert.equal((await api('DELETE', `/api/admin/accounts/${olaId}`, ola, undefined, null)).status, 403)
+    assert.equal((await api('DELETE', `/api/admin/accounts/${olaId}`, A, undefined, null)).status, 204)
+    assert.equal((await api('GET', '/api/admin/me', ola, undefined, null)).status, 401)
+    assert.equal((await api('POST', '/api/auth/login', null, { email: 'ola@realm.de', password: 'ein-sehr-langes-passwort' }, null)).status, 401)
   })
 
   await test('privacy: a location share expires on the server 2 h after it was last confirmed', async () => {

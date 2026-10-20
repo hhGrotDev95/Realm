@@ -1,6 +1,7 @@
 // Two-user end-to-end test against the real worker (wrangler dev, local D1) and the Vite dev server.
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { createHmac } from 'node:crypto'
 import { launch, promiseScrollIntoView } from './browser.mjs'
 
 const API = 'http://127.0.0.1:8798'
@@ -46,6 +47,21 @@ const user = async () => {
 const step = async (name, fn) => {
   await fn()
   console.log('✓', name)
+}
+/** the current code of an authenticator app for a base32 secret (RFC 6238) */
+const totpCode = (secret, step = Math.floor(Date.now() / 30000)) => {
+  let bits = 0, val = 0
+  const key = []
+  for (const ch of secret.replace(/\s/g, '')) {
+    val = (val << 5) | 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'.indexOf(ch)
+    bits += 5
+    if (bits >= 8) key.push((val >>> (bits -= 8)) & 255)
+  }
+  const msg = Buffer.alloc(8)
+  msg.writeBigUInt64BE(BigInt(step))
+  const h = createHmac('sha1', Buffer.from(key)).update(msg).digest()
+  const o = h[h.length - 1] & 15
+  return String((((h[o] & 127) << 24) | (h[o + 1] << 16) | (h[o + 2] << 8) | h[o + 3]) % 1e6).padStart(6, '0')
 }
 const nav = (p, t) => p.locator('nav').getByText(t).click()
 const name = async (p, n) => {
@@ -355,12 +371,20 @@ try {
   await step('organizer console: login, announcement, timetable change reach the app', async () => {
     const org = await user()
     await org.setViewportSize({ width: 1200, height: 900 })
-    await org.goto(`${WEB}/#admin`)
-    await org.getByLabel('Admin-Token').fill('falsch')
-    await org.getByRole('button', { name: 'Anmelden' }).click()
-    await org.getByRole('alert').filter({ hasText: 'Token ungültig' }).waitFor()
-    await org.getByLabel('Admin-Token').fill('e2e-admin')
-    await org.getByRole('button', { name: 'Anmelden' }).click()
+    // personal account (audit F01): the platform invites Olga for this one festival; she sets password and 2FA
+    const inv = await (await fetch(`${API}/api/admin/invites`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer e2e-admin' }, body: JSON.stringify({ email: 'olga@realm.test', festival: 'realm-open-air' }) })).json()
+    await org.goto(`${WEB}/#admin?invite=${inv.token}`)
+    await org.getByLabel('Dein Name').fill('Olga')
+    await org.getByLabel('Passwort (mindestens 12 Zeichen)').fill('olgas-langes-passwort')
+    await org.getByLabel('Passwort wiederholen').fill('olgas-langes-passwort')
+    await org.getByRole('button', { name: 'Konto anlegen' }).click()
+    const secret = await org.getByLabel('Geheimer Schlüssel').innerText()
+    await org.getByLabel('6-stelliger Code').fill(totpCode(secret))
+    await org.getByRole('button', { name: 'Einrichtung abschließen' }).click()
+    // only her festival is in the list
+    await org.getByLabel('Festival').locator('option', { hasText: 'Realm Open Air' }).waitFor({ state: 'attached' })
+    const options = await org.getByLabel('Festival').locator('option').allInnerTexts()
+    if (options.length !== 1 || !options[0].startsWith('Realm Open Air')) throw new Error('organizer sees other festivals: ' + options.join(', '))
     await org.getByPlaceholder('z. B. Gewitterwarnung ab 22:30').fill('Shuttle fährt ab 23 Uhr alle 5 Min.')
     await org.getByRole('button', { name: 'Veröffentlichen' }).click()
     await org.getByText('Meldung veröffentlicht').waitFor()
@@ -380,6 +404,11 @@ try {
     await lea.locator('.act', { hasText: 'Ruby Kade' }).getByText('Neu 18:15 statt 17:45').waitFor({ timeout: 15000 })
     await org.getByRole('button', { name: 'Zurücksetzen' }).click()
     await org.getByText('Originalzeit wiederhergestellt').waitFor()
+    // the change log names Olga for each change
+    await org.getByRole('tab', { name: 'Zugang' }).click()
+    const log = org.getByLabel('Änderungsprotokoll')
+    await log.locator('.list-item', { hasText: 'POST /api/admin/announcements' }).getByText('Olga').waitFor()
+    await log.locator('.list-item', { hasText: 'PUT /api/admin/timetable/' }).first().getByText('Olga').waitFor()
     await nav(lea, 'Home')
   })
 
@@ -426,8 +455,12 @@ try {
     const org = await user()
     await org.setViewportSize({ width: 1200, height: 900 })
     await org.goto(`${WEB}/#admin`)
-    await org.getByLabel('Admin-Token').fill('e2e-admin')
-    await org.getByRole('button', { name: 'Anmelden' }).click()
+    await org.getByRole('button', { name: 'Plattform-Schlüssel verwenden' }).click()
+    await org.getByLabel('Schlüssel').fill('falsch')
+    await org.getByRole('button', { name: 'Anmelden', exact: true }).click()
+    await org.getByRole('alert').waitFor()
+    await org.getByLabel('Schlüssel').fill('e2e-admin')
+    await org.getByRole('button', { name: 'Anmelden', exact: true }).click()
     await org.getByRole('button', { name: 'Neues Festival' }).click()
     await org.getByPlaceholder('z. B. Sommerwiese Open Air').fill('Testwiese Festival')
     await org.getByLabel('Erster Tag').fill('2027-06-04')

@@ -1,12 +1,13 @@
-import { BarChart3, MessagesSquare, CalendarClock, Map as MapIcon, CircleHelp, FileUp, LayoutGrid, Palette, ToggleRight, LogOut, Megaphone, Plus, RotateCcw, Settings2, Trash2, Wand2 } from 'lucide-react'
+import { BarChart3, KeyRound, MessagesSquare, CalendarClock, Map as MapIcon, CircleHelp, FileUp, LayoutGrid, Palette, ToggleRight, LogOut, Megaphone, Plus, RotateCcw, Settings2, Trash2, Wand2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { adminApi, ApiError, online, setFestival, type Announcement } from '../api'
+import { adminApi, online, setFestival, type Announcement } from '../api'
 import { Branding } from './Branding'
 import { Modules } from './Modules'
 import { FaqEditor } from './FaqEditor'
 import { MapEditor } from './MapEditor'
 import { Analytics } from './Analytics'
 import { ChatModeration } from './ChatModeration'
+import { AccessPanel, inviteFromUrl, SignIn, sessionState } from './Access'
 import { CommunityReports } from './CommunityReports'
 import { CreateFestival, ImportPanel, Settings, SetupWizard, StagesEditor } from './Setup'
 import { currentSlug } from '../festival'
@@ -14,7 +15,7 @@ import type { ModuleKey } from '../modules'
 import { ACTS, DAYS, FESTIVAL, fmt, loadFestivalBundle, on, STAGES, stageById, type Act, type StageId, type TimetableChange } from '../data'
 
 const KEY = 'realm.admin'
-type Tab = 'setup' | 'announcements' | 'timetable' | 'import' | 'stages' | 'map' | 'faq' | 'analytics' | 'chat' | 'branding' | 'modules' | 'settings'
+type Tab = 'access' | 'setup' | 'announcements' | 'timetable' | 'import' | 'stages' | 'map' | 'faq' | 'analytics' | 'chat' | 'branding' | 'modules' | 'settings'
 
 /** Parses "22:30" (or "01:30" after midnight) into festival-day minutes. */
 function parseTime(v: string): number | null {
@@ -39,6 +40,17 @@ export default function Admin() {
     setMsg({ kind, text })
     window.setTimeout(() => setMsg((m) => (m?.text === text ? null : m)), 4000)
   }, [])
+  // a stored session that expired, was revoked or never finished two-factor goes back to the sign-in
+  useEffect(() => {
+    if (!token || !online) return
+    sessionState(token).then((st) => {
+      if (st !== 'gone') return
+      try {
+        sessionStorage.removeItem(KEY)
+      } catch {}
+      setToken(null)
+    })
+  }, [token])
 
   if (!online)
     return (
@@ -51,11 +63,11 @@ export default function Admin() {
         </div>
       </AdminShell>
     )
-  if (!token)
+  if (!token || inviteFromUrl())
     return (
       <AdminShell>
-        <Login
-          onLogin={(t) => {
+        <SignIn
+          onReady={(t) => {
             try {
               sessionStorage.setItem(KEY, t)
             } catch {}
@@ -67,6 +79,7 @@ export default function Admin() {
   return (
     <AdminShell
       onLogout={() => {
+        adminApi(token).logout().catch(() => {})
         try {
           sessionStorage.removeItem(KEY)
         } catch {}
@@ -105,46 +118,6 @@ function AdminShell({ children, onLogout, msg }: { children: React.ReactNode; on
         </div>
       )}
     </div>
-  )
-}
-
-function Login({ onLogin }: { onLogin: (t: string) => void }) {
-  const [t, setT] = useState('')
-  const [err, setErr] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  return (
-    <form
-      className="card admin-login"
-      onSubmit={async (e) => {
-        e.preventDefault()
-        setBusy(true)
-        setErr(null)
-        try {
-          await adminApi(t.trim()).check()
-          onLogin(t.trim())
-        } catch (e) {
-          setErr(e instanceof ApiError && e.status === 401 ? 'Token ungültig' : e instanceof Error ? e.message : 'Fehler')
-        }
-        setBusy(false)
-      }}
-    >
-      <h1 className="h-display" style={{ fontSize: 28 }}>
-        Anmelden
-      </h1>
-      <p className="small muted">Admin-Token des Festivals (wird nur für diesen Browser-Tab gespeichert).</p>
-      <label className="admin-field">
-        <span>Admin-Token</span>
-        <input className="field" type="password" value={t} onChange={(e) => setT(e.target.value)} autoComplete="current-password" />
-      </label>
-      {err && (
-        <p className="small" role="alert" style={{ color: 'var(--crit)' }}>
-          {err}
-        </p>
-      )}
-      <button className="btn primary block" disabled={busy || !t.trim()}>
-        {busy ? 'Prüfe …' : 'Anmelden'}
-      </button>
-    </form>
   )
 }
 
@@ -241,6 +214,7 @@ const TABS: { id: Tab; label: string; icon: typeof Megaphone; draftOnly?: boolea
   { id: 'chat', label: 'Chat-Moderation', icon: MessagesSquare, module: 'festivalchat' },
   { id: 'analytics', label: 'Auswertung', icon: BarChart3 },
   { id: 'settings', label: 'Status', icon: Settings2 },
+  { id: 'access', label: 'Zugang', icon: KeyRound },
 ]
 
 function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string; tab: Tab; setTab: (t: Tab) => void; token: string; flash: (k: 'ok' | 'err', t: string) => void; reload: () => Promise<void> }) {
@@ -274,6 +248,7 @@ function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string
           <StagesEditor token={token} flash={flash} slug={slug} reload={reload} />
         </div>
       )}
+      {tab === 'access' && <AccessPanel token={token} flash={flash} slug={slug} />}
       {tab === 'chat' && <ChatModeration token={token} flash={flash} slug={slug} />}
       {tab === 'analytics' && <Analytics token={token} flash={flash} slug={slug} />}
       {tab === 'map' && <MapEditor token={token} flash={flash} slug={slug} reload={reload} />}
