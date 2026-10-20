@@ -19,9 +19,14 @@ const errors = []
 /** set when the offline step takes the server down: network errors after that are expected */
 let serverDownAt = Infinity
 let currentStep = 'start'
+/** pages that are deliberately reloading: WebKit rejects their pending dynamic imports on unload */
+const unloading = new Set()
 /** every page error with the step and page it happened on, plus failed requests – engines word errors differently */
 const watch = (pg, tag) => {
-  pg.on('pageerror', (e) => errors.push({ message: e.message, at: Date.now(), where: `${currentStep} [${tag}]` }))
+  pg.on('pageerror', (e) => {
+    if (unloading.has(tag) && /Importing a module script failed/.test(e.message)) return
+    errors.push({ message: e.message, at: Date.now(), where: `${currentStep} [${tag}]` })
+  })
   pg.on('requestfailed', (r) => failed.push(`${currentStep} [${tag}] ${r.url()} – ${r.failure()?.errorText}`))
 }
 const failed = []
@@ -135,11 +140,12 @@ try {
     await p.locator('.day-btn', { hasText: 'Fri' }).waitFor() // day names derived from the date
     await p.locator('.act', { hasText: 'Arcturus' }).getByText('Now 22:30 instead of 22:15').waitFor()
     await p.getByRole('button', { name: 'Profile & settings' }).click()
-    // switching the language reloads the page; let lazy chunks finish first, or WebKit reports
-    // the request the reload cancels ("Importing a module script failed") as a page error
-    await p.waitForLoadState('networkidle')
+    // switching the language reloads the page; WebKit rejects imports still pending at that moment
+    // ("Importing a module script failed") – expected only while this page unloads
+    unloading.add('second')
     await p.getByRole('button', { name: 'Deutsch' }).click()
     await p.getByText('Als Nächstes').waitFor() // reloaded in German, choice remembered over the browser language
+    unloading.delete('second')
     await p.reload()
     await p.getByText('Als Nächstes').waitFor()
     await ctx.close()
@@ -189,7 +195,10 @@ try {
   // a request failing once the server is down is expected (wording differs per engine: Chromium,
   // Firefox, WebKit incl. a lazy module that could not be fetched); before that, every error counts
   const network = /Failed to fetch|NetworkError|Load failed|Importing a module script failed/
-  errors.splice(0, errors.length, ...errors.filter((e) => !(e.at >= serverDownAt && network.test(e.message))))
+  // WebKit can report the rejected import of a reload-cancelled module late, after the reload finished:
+  // excuse it only when that same step and page really had a module load cancelled
+  const cancelled = (e) => /Importing a module script failed/.test(e.message) && failed.some((f) => f.startsWith(e.where + ' ') && /\.js – Load request cancelled/.test(f))
+  errors.splice(0, errors.length, ...errors.filter((e) => !(e.at >= serverDownAt && network.test(e.message)) && !cancelled(e)))
   if (errors.length) throw new Error('Page errors:\n' + errors.map((e) => `${e.where}: ${e.message}`).join('\n') + '\nFailed requests:\n' + failed.join('\n'))
   console.log('All smoke tests passed')
 } catch (e) {

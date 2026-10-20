@@ -607,6 +607,59 @@ try {
     await api('DELETE', `/api/admin/announcements/${a.id}`, A, undefined, 'nordlicht')
   })
 
+  await test('privacy (audit F03): revoking and deleting always works – module off or festival archived; old consent never revives', async () => {
+    const A = 'test-admin-token'
+    const N = 'nordlicht'
+    const mods = (m) => api('PUT', '/api/admin/festivals/nordlicht/modules', A, m, null)
+    const owner = (await api('POST', '/api/guests', null, { nickname: 'Owner' })).data
+    const mate = (await api('POST', '/api/guests', null, { nickname: 'Mate' })).data
+    const c = (await api('POST', '/api/crews', owner.token, { name: 'Privat' }, N)).data
+    await api('POST', '/api/crews/join', mate.token, { code: c.code }, N)
+    const share = (g, on) => api('PUT', `/api/crews/${c.id}/location`, g.token, { share: on, location: on ? 'pier' : null }, N)
+    const sharing = async () => (await api('GET', `/api/crews/${c.id}`, owner.token, undefined, N)).data.members.find((m) => m.nickname === 'Mate').sharing
+    assert.equal((await share(mate, true)).status, 200)
+    assert.equal(await sharing(), true)
+    assert.equal((await api('PUT', '/api/me/steps', mate.token, { day: 0, total: 9000 }, N)).status, 200)
+
+    // module off: revoking and deleting still work, sharing anew does not
+    assert.equal((await mods({ location: false, steps: false })).status, 200)
+    assert.equal((await share(mate, false)).status, 200, 'share:false must work with the module off')
+    assert.equal((await share(mate, true)).status, 403)
+    assert.equal((await api('DELETE', '/api/me/steps', mate.token, undefined, N)).status, 204, 'deleting steps must work with the module off')
+    // switching a module off ends existing consent: share again, switch off, switch on → not sharing
+    await mods({})
+    await share(mate, true)
+    await api('PUT', '/api/me/steps', mate.token, { day: 0, total: 1234 }, N)
+    await mods({ location: false, steps: false })
+    await mods({})
+    assert.equal(await sharing(), false, 'reactivating the module must not revive the old consent')
+    const steps = (await api('GET', `/api/crews/${c.id}`, owner.token, undefined, N)).data.members.find((m) => m.nickname === 'Mate').steps
+    assert.deepEqual(steps, [], 'step totals are deleted when the module is switched off')
+
+    // archived festival: revoke and leave still work, sharing does not
+    await share(mate, true)
+    assert.equal((await api('PATCH', '/api/admin/festivals/nordlicht', A, { status: 'archived' }, null)).status, 200)
+    assert.equal((await share(mate, true)).status, 403)
+    assert.equal((await share(mate, false)).status, 200, 'share:false must work in an archived festival')
+    assert.equal((await api('DELETE', '/api/me/steps', mate.token, undefined, N)).status, 204)
+    assert.equal((await api('POST', `/api/crews/${c.id}/leave`, mate.token, undefined, N)).status, 204, 'leaving must work in an archived festival')
+    assert.equal((await api('PATCH', '/api/admin/festivals/nordlicht', A, { status: 'published' }, null)).status, 200)
+  })
+
+  await test('privacy: a location share expires on the server 2 h after it was last confirmed', async () => {
+    const N = 'nordlicht'
+    const a = (await api('POST', '/api/guests', null, { nickname: 'Tia' })).data
+    const b = (await api('POST', '/api/guests', null, { nickname: 'Udo' })).data
+    const c = (await api('POST', '/api/crews', a.token, { name: 'Ablauf' }, N)).data
+    await api('POST', '/api/crews/join', b.token, { code: c.code }, N)
+    await api('PUT', `/api/crews/${c.id}/location`, b.token, { share: true, location: 'werft' }, N)
+    const udo = async () => (await api('GET', `/api/crews/${c.id}`, a.token, undefined, N)).data.members.find((m) => m.nickname === 'Udo')
+    assert.deepEqual([(await udo()).sharing, (await udo()).location], [true, 'werft'])
+    // age the share beyond 2 h directly in the local database
+    await run(['d1', 'execute', 'realm', '--local', '--persist-to', persist, '--command', `UPDATE crew_members SET location_at = ${Date.now() - 121 * 60_000} WHERE crew_id = '${c.id}'`])
+    assert.deepEqual([(await udo()).sharing, (await udo()).location], [false, null])
+  })
+
   await test('modules: switched-off features are refused by the API, dependencies enforced', async () => {
     const A = 'test-admin-token'
     const N = 'nordlicht'

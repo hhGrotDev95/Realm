@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { api, ApiError, execute, online, opId, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
+import { api, ApiError, execute, online, opId, privacyKey, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
 import { lang, t } from './i18n'
+import { ageSince } from './aging'
 import { DEFAULT_FESTIVAL } from './festival'
 import { on, ACTS, fmt, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
@@ -47,6 +48,8 @@ interface Persisted {
   crewRef: { id: string; name: string; code: string } | null
   remote: { me: string; owner?: string; members: CrewState['members'] } | null
   remoteReports: RemoteReport[]
+  /** when remoteReports were fetched – their ages are relative to it */
+  reportsFetchedAt: number
   pendingJoin: string | null
   outbox: OutboxOp[]
   announcements: { items: Announcement[]; fetchedAt: number } | null
@@ -93,6 +96,7 @@ function initial(): Persisted {
     crewRef: null,
     remote: null,
     remoteReports: [],
+    reportsFetchedAt: 0,
     pendingJoin: null,
     outbox: [],
     announcements: null,
@@ -177,6 +181,8 @@ interface Ctx extends Persisted {
   setNickname: (n: string, color: string) => void
   secure: (how: 'passkey' | 'code') => string | undefined | Promise<string | undefined>
   requireIdentity: (reason: string, then: () => void) => void
+  /** privacy decisions the server has not confirmed yet */
+  pendingPrivacy: { location: 'on' | 'off' | null; steps: boolean }
   addMeetup: (m: Omit<Meetup, 'id' | 'going' | 'createdBy'>) => void
   rsvp: (id: string, going: boolean) => void
   vote: (id: string, v: 'still' | 'fixed') => void
@@ -303,7 +309,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         c.at = Math.max(incremental ? c.at : 0, ...cs.messages.map((m) => m.at))
         c.polls++
       }
-      setS((p) => ({ ...p, remoteReports: reports, votes: { ...p.votes, ...Object.fromEntries(reports.filter((r) => r.myVote).map((r) => [r.id, r.myVote!])) } }))
+      setS((p) => ({ ...p, remoteReports: reports, reportsFetchedAt: Date.now(), votes: { ...p.votes, ...Object.fromEntries(reports.filter((r) => r.myVote).map((r) => [r.id, r.myVote!])) } }))
       return true
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setS((p) => ({ ...p, session: null, crewRef: null, remote: null }))
@@ -320,6 +326,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [netOnline, setNetOnline] = useState(() => navigator.onLine)
   const flushing = useRef(false)
+  /** confirmation texts for queued writes, shown once the server accepted them (audit D04) */
+  const confirmations = useRef(new Map<string, string>())
 
   /** Sends queued writes in order; stops at the first one that should be retried later. */
   const flush = useCallback(async () => {
@@ -331,12 +339,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           await execute(op)
           sent++
+          const msg = confirmations.current.get(op.id)
+          if (msg) toast(msg)
         } catch (e) {
           if (retryable(e)) break
           sent++
           toast(e instanceof ApiError ? t('Nicht gesendet: {error}', { error: e.message }) : t('Nicht gesendet'))
         }
         const done = op.id
+        confirmations.current.delete(done)
         setS((p) => ({ ...p, outbox: p.outbox.filter((o) => o.id !== done) }))
         sRef.current = { ...sRef.current, outbox: sRef.current.outbox.filter((o) => o.id !== done) }
       }
@@ -427,15 +438,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.clearTimeout(t)
   }, [s.plan, s.session?.id])
 
-  // coarse location sync: only the nearest stage area, only while sharing
+  /**
+   * Privacy decisions go through the outbox with priority: a newer decision replaces an older
+   * one for the same target, and the op stays queued (visible as pending) until the server
+   * confirmed it – also across offline periods and reloads (audit F02).
+   */
+  const enqueuePrivacy = useCallback(
+    (op: OutboxOp) => {
+      const key = privacyKey(op)
+      const next = (list: OutboxOp[]) => [op, ...list.filter((o) => privacyKey(o) !== key)]
+      setS((p) => ({ ...p, outbox: next(p.outbox) }))
+      sRef.current = { ...sRef.current, outbox: next(sRef.current.outbox) }
+      void flush()
+    },
+    [flush],
+  )
+
+  const sharedBefore = useRef(s.shareLocation)
+  // coarse location sync: only the nearest stage area, only while sharing; while sharing the
+  // app re-confirms every 30 min, because the server ends a share 2 h after the last confirmation
   useEffect(() => {
     if (!online || !s.session || !s.crewRef) return
-    if (on('location')) api.setLocation(s.crewRef.id, s.shareLocation, s.shareLocation ? nearestStage() : null).catch(() => {})
+    const crewId = s.crewRef.id
+    const was = sharedBefore.current
+    sharedBefore.current = s.shareLocation
+    const send = () => enqueuePrivacy({ id: opId('loc'), kind: 'location', crewId, share: s.shareLocation, location: s.shareLocation ? nearestStage() : null })
+    // sharing: (re)confirm now; not sharing: only a real change is a withdrawal worth sending
+    // (an unsent withdrawal survives reloads in the persisted outbox)
+    if (s.shareLocation || was) send()
+    if (!s.shareLocation) return
+    const timer = window.setInterval(send, 30 * 60_000)
+    return () => window.clearInterval(timer)
   }, [s.shareLocation, s.crewRef?.id, s.session?.id])
 
-  // leaving the step challenge deletes the synced totals
+  // a switched-off module ends the local share as well (the server already ended it)
   useEffect(() => {
-    if (online && s.session && !s.stepsOptIn && on('steps')) api.deleteSteps().catch(() => {})
+    if (s.shareLocation && !on('location')) setS((p) => ({ ...p, shareLocation: false }))
+  }, [s.shareLocation])
+
+  // leaving the step challenge deletes the synced totals – also when the module is off by now
+  const stepsBefore = useRef(s.stepsOptIn)
+  useEffect(() => {
+    const was = stepsBefore.current
+    stepsBefore.current = s.stepsOptIn
+    if (online && s.session && was && !s.stepsOptIn) enqueuePrivacy({ id: opId('st'), kind: 'deleteSteps' })
   }, [s.stepsOptIn, s.session?.id])
 
   const ensureSession = useCallback(async (nickname: string | null, color: string) => {
@@ -504,7 +550,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
 
     // official and app notices come from the festival; community reports from the server when online
-    const remoteUpdates: FestivalUpdate[] = s.remoteReports.map((r) => ({
+    // both kinds of server notices age from their fetch time and expire offline too (audit F10)
+    const remoteUpdates: FestivalUpdate[] = ageSince(s.remoteReports, s.reportsFetchedAt, Date.now()).map((r) => ({
       id: r.id,
       source: r.source,
       title: r.title,
@@ -516,9 +563,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       confirms: r.confirms - (r.myVote === 'still' ? 1 : 0),
       phases: ['before', 'arrival', 'during', 'departure'],
     }))
-    // ages are relative to the last fetch so cached notices keep counting up offline
-    const sinceFetch = s.announcements ? Math.floor((Date.now() - s.announcements.fetchedAt) / 60000) : 0
-    const official: FestivalUpdate[] = (s.announcements?.items ?? [])
+    const official: FestivalUpdate[] = ageSince(s.announcements?.items ?? [], s.announcements?.fetchedAt ?? Date.now(), Date.now())
       .map((a) => ({
         id: a.id,
         source: 'official' as const,
@@ -528,24 +573,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
         place: a.place ?? undefined,
         poi: a.poi ?? undefined,
         severity: a.severity,
-        ageMin: a.ageMin + sinceFetch,
-        validMin: a.validMin === null ? undefined : a.validMin - sinceFetch,
+        ageMin: a.ageMin,
+        validMin: a.validMin ?? undefined,
         phases: ['before', 'arrival', 'during', 'departure', 'after'] as Phase[],
       }))
-      .filter((a) => a.validMin === undefined || a.validMin > 0)
     const updates = online ? [...official, ...remoteUpdates, ...UPDATES.filter((u) => u.source === 'app')] : [...s.myUpdates, ...UPDATES]
 
     /** Queue a write locally first; it is sent now or as soon as the network is back. */
     const enqueue = (op: OutboxOp, sentMsg?: string) => {
       setS((p) => ({ ...p, outbox: [...p.outbox, op] }))
       sRef.current = { ...sRef.current, outbox: [...sRef.current.outbox, op] }
+      // the success message waits for the server; until then the item shows as pending
+      if (sentMsg) confirmations.current.set(op.id, sentMsg)
       if (!navigator.onLine) toast(t('Offline – wird gesendet, sobald du wieder Netz hast'))
-      else if (sentMsg) toast(sentMsg)
       void flush()
     }
 
+    const locOp = s.outbox.find((o) => o.kind === 'location')
+    const pendingPrivacy = { location: locOp && locOp.kind === 'location' ? (locOp.share ? ('on' as const) : ('off' as const)) : null, steps: s.outbox.some((o) => o.kind === 'deleteSteps') }
+
     return {
       ...s,
+      pendingPrivacy,
       phase,
       msToStart,
       online,

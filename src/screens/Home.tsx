@@ -191,7 +191,7 @@ function MeetupModule({ i }: { i: number }) {
 
 function CrewPeek({ i }: { i: number }) {
   const { crew } = useApp()
-  const { setTab, stepsOptIn } = useApp()
+  const { setTab, stepsOptIn, online } = useApp()
   const byStage = crew.members.filter((f) => f.at && f.at !== 'camp').reduce<Record<string, string[]>>((acc, f) => ((acc[f.at!] ??= []).push(f.id), acc), {})
   const top = Object.entries(byStage).sort((a, b) => b[1].length - a[1].length)[0]
   if (!top)
@@ -220,7 +220,7 @@ function CrewPeek({ i }: { i: number }) {
             {t('{n} Freunde bei {stage}', { n: top[1].length, stage: stageById[top[0] as keyof typeof stageById].name })}
           </span>
           <span className="small faint" style={{ display: 'block' }}>
-            {stepsOptIn ? t('Du liegst auf Platz 3 der Step-Challenge') : t('Crew öffnen')}
+            {stepsOptIn && !online ? t('Du liegst auf Platz 3 der Step-Challenge') : t('Crew öffnen')}
           </span>
         </span>
         <ChevronRight size={18} className="faint" />
