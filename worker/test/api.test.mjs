@@ -67,6 +67,24 @@ const test = async (name, fn) => {
 try {
   let lea, ben, crew
 
+  await test('legal texts (Welle 7): platform and festival, in the festival document; going live needs them', async () => {
+    const A = 'test-admin-token'
+    assert.deepEqual((await api('GET', '/api/legal', null, undefined, null)).data, { imprint: null, privacy: null })
+    const doc = (await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data
+    assert.deepEqual(doc.legal, { imprint: null, privacy: null, minAge: 16, platform: { imprint: null, privacy: null } })
+    // going live without any legal notice is refused (D10 checklist)
+    const ready = (await api('GET', '/api/admin/festivals/nordlicht/readiness', A, undefined, null)).data.checks
+    assert.deepEqual(ready.filter((x) => ['imprint', 'privacy'].includes(x.id)).map((x) => x.ok), [false, false])
+    assert.equal((await api('PUT', '/api/admin/platform/legal', A, { imprint: 'Realm GmbH (Platzhalter)', privacy: 'Plattform-Datenschutz (Platzhalter)' }, null)).status, 200)
+    assert.equal((await api('PUT', '/api/admin/festivals/nordlicht/legal', A, { privacy: 'Datenschutz Nordlicht', minAge: 18 }, null)).data.minAge, 18)
+    assert.equal((await api('PUT', '/api/admin/festivals/nordlicht/legal', A, { minAge: 40 }, null)).status, 400)
+    const d2 = (await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data.legal
+    assert.deepEqual(d2, { imprint: null, privacy: 'Datenschutz Nordlicht', minAge: 18, platform: { imprint: 'Realm GmbH (Platzhalter)', privacy: 'Plattform-Datenschutz (Platzhalter)' } })
+    const r2 = (await api('GET', '/api/admin/festivals/nordlicht/readiness', A, undefined, null)).data.checks
+    assert.ok(r2.filter((x) => ['imprint', 'privacy'].includes(x.id)).every((x) => x.ok))
+    await api('PUT', '/api/admin/festivals/nordlicht/legal', A, { privacy: null, minAge: 16 }, null)
+  })
+
   await test('creates guests; nickname is optional', async () => {
     const a = await api('POST', '/api/guests', null, { nickname: 'Lea', color: '#FF8A65' })
     assert.equal(a.status, 201)
@@ -850,6 +868,7 @@ try {
       ['POST', '/api/admin/invites', { email: 'x@y.de', festival: 'nordlicht' }, null],
     ]) assert.equal((await api(m, path, ola, b, f)).status, 404, `${m} ${path} must not exist for Ola`)
     assert.equal((await api('POST', '/api/admin/invites', ola, { email: 'boss@y.de', role: 'platform' }, null)).status, 403)
+    assert.equal((await api('PUT', '/api/admin/platform/legal', ola, { imprint: 'Gekapert' }, null)).status, 403)
     // the change log names who did what
     const log = (await api('GET', `/api/admin/audit?festival=${R}`, ola, undefined, null)).data
     assert.deepEqual([log[0].by, log[0].action], ['Ola', `PUT /api/admin/festivals/${R}/faq/ola-test`])

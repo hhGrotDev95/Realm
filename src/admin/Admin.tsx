@@ -1,4 +1,4 @@
-import { BarChart3, KeyRound, MessagesSquare, CalendarClock, Map as MapIcon, CircleHelp, FileUp, LayoutGrid, Palette, ToggleRight, LogOut, Megaphone, Plus, RotateCcw, Settings2, Trash2, Wand2 } from 'lucide-react'
+import { BarChart3, KeyRound, Scale, MessagesSquare, CalendarClock, Map as MapIcon, CircleHelp, FileUp, LayoutGrid, Palette, ToggleRight, LogOut, Megaphone, Plus, RotateCcw, Settings2, Trash2, Wand2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { adminApi, online, setFestival, type Announcement } from '../api'
 import { Branding } from './Branding'
@@ -7,6 +7,7 @@ import { FaqEditor } from './FaqEditor'
 import { MapEditor } from './MapEditor'
 import { Analytics } from './Analytics'
 import { ChatModeration } from './ChatModeration'
+import { LegalEditor } from './Legal'
 import { AccessPanel, inviteFromUrl, SignIn, sessionState } from './Access'
 import { CommunityReports } from './CommunityReports'
 import { CreateFestival, ImportPanel, Settings, SetupWizard, StagesEditor } from './Setup'
@@ -16,7 +17,7 @@ import type { ModuleKey } from '../modules'
 import { ACTS, DAYS, FESTIVAL, fmt, loadFestivalBundle, on, STAGES, stageById, type Act, type StageId, type TimetableChange } from '../data'
 
 const KEY = 'realm.admin'
-type Tab = 'access' | 'setup' | 'announcements' | 'timetable' | 'import' | 'stages' | 'map' | 'faq' | 'analytics' | 'chat' | 'branding' | 'modules' | 'settings'
+type Tab = 'legal' | 'access' | 'setup' | 'announcements' | 'timetable' | 'import' | 'stages' | 'map' | 'faq' | 'analytics' | 'chat' | 'branding' | 'modules' | 'settings'
 
 /** Parses "22:30" (or "01:30" after midnight) into festival-day minutes – the same night rule as everywhere (audit F15). */
 function parseTime(v: string): number | null {
@@ -215,6 +216,7 @@ const TABS: { id: Tab; label: string; icon: typeof Megaphone; draftOnly?: boolea
   { id: 'chat', label: 'Chat-Moderation', icon: MessagesSquare, module: 'festivalchat' },
   { id: 'analytics', label: 'Auswertung', icon: BarChart3 },
   { id: 'settings', label: 'Status', icon: Settings2 },
+  { id: 'legal', label: 'Recht', icon: Scale },
   { id: 'access', label: 'Zugang', icon: KeyRound },
 ]
 
@@ -268,6 +270,7 @@ function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string
           <StagesEditor token={token} flash={flash} slug={slug} reload={reload} />
         </div>
       )}
+      {tab === 'legal' && <LegalEditor token={token} flash={flash} slug={slug} reload={reload} />}
       {tab === 'access' && <AccessPanel token={token} flash={flash} slug={slug} />}
       {tab === 'chat' && <ChatModeration token={token} flash={flash} slug={slug} />}
       {tab === 'analytics' && <Analytics token={token} flash={flash} slug={slug} />}

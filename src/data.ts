@@ -316,7 +316,11 @@ export const FESTIVAL = {
   siteMap: null as string | null,
   /** the festival's time zone: every time in the app is wall-clock time there (audit F15) */
   timezone: DEFAULT_TZ as string,
+  /** legal notice and privacy information (the organizer's, then the platform's); null = not provided */
+  legal: { imprint: null, privacy: null, minAge: 16, platform: { imprint: null, privacy: null } } as Legal,
 }
+
+export type Legal = { imprint: string | null; privacy: string | null; minAge: number; platform: { imprint: string | null; privacy: string | null } }
 
 /** Is an optional module available at this festival? (all on in the demo) */
 export const on = (key: ModuleKey) => isEnabled(FESTIVAL.modules, key)
@@ -409,6 +413,7 @@ export interface FestivalBundle {
   acts: Omit<Act, 'change'>[]
   pois: Poi[]
   faq?: Faq[]
+  legal?: Legal
 }
 
 const replace = <T,>(arr: T[], items: T[]) => arr.splice(0, arr.length, ...items)
@@ -422,7 +427,7 @@ const refill = <T,>(map: Record<string, T>, entries: [string, T][]) => {
  * lookup maps are updated in place so every module keeps working with the same references.
  */
 export function loadFestivalBundle(b: FestivalBundle) {
-  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {}, modules: b.festival.modules ?? {}, siteMap: b.festival.siteMap ?? null, timezone: b.festival.timezone ?? DEFAULT_TZ })
+  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {}, modules: b.festival.modules ?? {}, siteMap: b.festival.siteMap ?? null, timezone: b.festival.timezone ?? DEFAULT_TZ, legal: b.legal ?? { imprint: null, privacy: null, minAge: 16, platform: { imprint: null, privacy: null } } })
   replace(DAYS, b.days)
   replace(STAGES, b.stages)
   refill(stageById, STAGES.map((st) => [st.id, st]))

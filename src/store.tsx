@@ -188,6 +188,8 @@ export type SheetState =
   | { kind: 'festivalChat' }
   /** "Where are you?" – `then` routes to that POI once a place is chosen */
   | { kind: 'place'; then?: string }
+  /** legal notice / privacy information (Welle 7) */
+  | { kind: 'legal'; doc: 'imprint' | 'privacy' }
   | null
 
 interface Ctx extends Persisted {

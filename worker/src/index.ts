@@ -269,9 +269,18 @@ async function actExists(c: Context<App>, actId: string) {
 
 app.get('/api/health', (c) => c.json({ ok: true }))
 
+async function platformLegal(db: D1Database) {
+  const rows = await db.prepare("SELECT key, value FROM platform_settings WHERE key IN ('imprint', 'privacy')").all<{ key: string; value: string }>()
+  const m = Object.fromEntries(rows.results.map((r) => [r.key, r.value]))
+  return { imprint: m.imprint ?? null, privacy: m.privacy ?? null }
+}
+
+/** The platform's legal notice and privacy information, also without a festival (console, landing). */
+app.get('/api/legal', async (c) => c.json(await platformLegal(c.env.DB)))
+
 /* ---------- Festivals (public) ---------- */
 
-type FestivalRow = { id: string; slug: string; name: string; location: string | null; status: string; theme: string; modules: string; site_map: string | null; timezone: string; updated_at: number }
+type FestivalRow = { id: string; slug: string; name: string; location: string | null; status: string; theme: string; modules: string; site_map: string | null; timezone: string; imprint: string | null; privacy: string | null; min_age: number; updated_at: number }
 
 app.get('/api/festivals', async (c) => {
   const rows = await c.env.DB.prepare("SELECT slug, name, location FROM festivals WHERE status = 'published' ORDER BY name").all()
@@ -292,6 +301,8 @@ app.get('/api/festivals/:slug', async (c) => {
   ])
   return c.json({
     festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), siteMap: f.site_map, timezone: f.timezone, updatedAt: f.updated_at },
+    // legal notice and privacy information: the festival's own, and the platform's (Welle 7)
+    legal: { imprint: f.imprint, privacy: f.privacy, minAge: f.min_age, platform: await platformLegal(c.env.DB) },
     days: days.results,
     stages: stages.results,
     acts: acts.results,
@@ -1095,6 +1106,7 @@ async function readiness(db: D1Database, festivalId: string, confirmed: string[]
       .first<Record<string, number>>(),
     db.prepare('SELECT modules FROM festivals WHERE id = ?').bind(festivalId).first<{ modules: string }>(),
   ])
+  const [legal, platform] = await Promise.all([db.prepare('SELECT imprint, privacy FROM festivals WHERE id = ?').bind(festivalId).first<{ imprint: string | null; privacy: string | null }>(), platformLegal(db)])
   const n = counts ?? {}
   const m = JSON.parse(mods?.modules || '{}') as ModuleState
   const on = MODULE_KEYS.filter((k) => isEnabled(m, k))
@@ -1106,6 +1118,8 @@ async function readiness(db: D1Database, festivalId: string, confirmed: string[]
     { id: 'entrance', ok: n.entrances > 0, text: 'Mindestens ein Eingang auf der Karte' },
     { id: 'medical', ok: n.medical > 0, text: 'Sanität auf der Karte' },
     ...(isEnabled(m, 'faqbot') ? [{ id: 'faq', ok: n.faqs > 0, text: 'Freigegebene FAQ für den FAQ-Bot' }] : []),
+    { id: 'imprint', ok: !!(legal?.imprint || platform.imprint), text: 'Impressum hinterlegt (Festival oder Plattform)' },
+    { id: 'privacy', ok: !!(legal?.privacy || platform.privacy), text: 'Datenschutzhinweise hinterlegt (Festival oder Plattform)' },
   ].map((x) => ({ ...x, kind: 'data' as const }))
   const confirm = [
     { id: 'terrain', text: 'Eingänge, Ausgänge, Sanität und Notrufnummer auf der Karte stimmen mit dem Gelände überein' },
@@ -1120,6 +1134,41 @@ async function readiness(db: D1Database, festivalId: string, confirmed: string[]
 app.get('/api/admin/festivals/:slug/readiness', async (c) => {
   const f = await festivalBySlug(c)
   return c.json({ checks: await readiness(c.env.DB, f.id, []) })
+})
+
+const LEGAL_MAX = 30_000
+
+/** The festival's legal notice, privacy information and minimum age – texts come from the organizer. */
+app.put('/api/admin/festivals/:slug/legal', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  const text = (x: unknown, name: string) => (x === undefined ? undefined : (v.str(x, name, { max: LEGAL_MAX, optional: true }) ?? null))
+  const imprint = text(b.imprint, 'Impressum')
+  const privacy = text(b.privacy, 'Datenschutzhinweise')
+  const minAge = b.minAge === undefined ? undefined : v.int(b.minAge, 'Mindestalter', 0, 21)
+  const db = c.env.DB
+  await db.batch([
+    ...(imprint !== undefined ? [db.prepare('UPDATE festivals SET imprint = ? WHERE id = ?').bind(imprint, f.id)] : []),
+    ...(privacy !== undefined ? [db.prepare('UPDATE festivals SET privacy = ? WHERE id = ?').bind(privacy, f.id)] : []),
+    ...(minAge !== undefined ? [db.prepare('UPDATE festivals SET min_age = ? WHERE id = ?').bind(minAge, f.id)] : []),
+    touch(db, f.id),
+  ])
+  const row = await db.prepare('SELECT imprint, privacy, min_age FROM festivals WHERE id = ?').bind(f.id).first<{ imprint: string | null; privacy: string | null; min_age: number }>()
+  return c.json({ imprint: row!.imprint, privacy: row!.privacy, minAge: row!.min_age })
+})
+
+/** Platform texts – platform administrators only. */
+app.put('/api/admin/platform/legal', async (c) => {
+  if (c.get('admin')!.role !== 'platform') throw new HttpError(403, 'Nur für die Plattform-Verwaltung')
+  const b = await body(c)
+  const db = c.env.DB
+  const writes = (['imprint', 'privacy'] as const).flatMap((k) => {
+    if (b[k] === undefined) return []
+    const val = v.str(b[k], k === 'imprint' ? 'Impressum' : 'Datenschutzhinweise', { max: LEGAL_MAX, optional: true })
+    return [val ? db.prepare('INSERT INTO platform_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').bind(k, val) : db.prepare('DELETE FROM platform_settings WHERE key = ?').bind(k)]
+  })
+  if (writes.length) await db.batch(writes)
+  return c.json(await platformLegal(db))
 })
 
 /** Replaces the stage list; stages still used by acts cannot be removed. */
