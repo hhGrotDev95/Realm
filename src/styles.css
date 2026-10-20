@@ -510,3 +510,7 @@ select.field { appearance: none; }
 .heat { border-collapse: separate; border-spacing: 2px; font-variant-numeric: tabular-nums; }
 .heat th[scope='row'] { text-align: left; padding-right: 10px; white-space: nowrap; font-weight: 500; }
 .heat td { width: 38px; height: 30px; text-align: center; font-size: 12px; border-radius: 6px; background: var(--surface-2); }
+
+/* gaps between planned sets */
+.gap { display: flex; align-items: center; gap: 8px; padding: 2px 0 2px 64px; font-size: 12px; color: var(--text-3); }
+.gap.tight { color: var(--warn); }

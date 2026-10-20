@@ -1,7 +1,8 @@
 import { AnimatePresence, m as motion } from 'framer-motion'
-import { GanttChart, Heart, LayoutList, Search, SlidersHorizontal, TriangleAlert, X } from 'lucide-react'
+import { CalendarPlus, Footprints, GanttChart, Heart, LayoutList, Search, SlidersHorizontal, TriangleAlert, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { ACTS, DAYS, fmt, STAGES, stageById, type Act, type StageId } from '../data'
+import { ACTS, actById, DAYS, fmt, STAGES, stageById, walkMinutes, type Act, type StageId } from '../data'
+import { downloadIcs } from '../calendar/download'
 import { conflictClusters, useApp } from '../store'
 import { status } from '../time'
 import { AvatarStack, FavButton, Segmented, StageDot, spring } from '../ui'
@@ -42,6 +43,7 @@ export function Lineup() {
 
   const clusters = mode === 'plan' && !q ? conflictClusters(plan, day, resolved) : []
   const clusterStart = new Map(clusters.map((c) => [c.acts[0].id, c]))
+  const inCluster = new Set(clusters.flatMap((c) => c.acts.slice(1).map((a) => a.id)))
   const filterCount = stages.length + (groupByStage ? 1 : 0)
   const dayIsToday = (d: number) => live && now.day === d
 
@@ -162,10 +164,12 @@ export function Lineup() {
             ))
           ) : (
             <div className="list">
-              {acts.map((a) => {
+              {acts.map((a, i) => {
                 const c = clusterStart.get(a.id)
+                const prev = mode === 'plan' && !q ? acts.slice(0, i).reverse().find((x) => !x.change?.cancelled) : undefined
                 return (
                   <Fragment key={a.id}>
+                    {prev && !c && !a.change?.cancelled && !inCluster.has(a.id) && <Gap from={prev} to={a} />}
                     {c && (
                       <button className="conflict" onClick={() => openSheet({ kind: 'resolver', ids: c.acts.map((x) => x.id), key: c.key })}>
                         <TriangleAlert className="a-ic" size={19} />
@@ -182,11 +186,49 @@ export function Lineup() {
                   </Fragment>
                 )
               })}
+              {mode === 'plan' && !q && <ExportPlan />}
             </div>
           )}
         </motion.div>
       </AnimatePresence>
     </main>
+  )
+}
+
+/** Time between two planned sets: free minutes and the walk to the next stage – warns when it gets tight. */
+function Gap({ from, to }: { from: Act; to: Act }) {
+  const gap = to.start - from.end
+  if (from.day !== to.day || gap < 0) return null
+  const same = from.stage === to.stage
+  const a = stageById[from.stage]
+  const b = stageById[to.stage]
+  const walk = same ? 0 : walkMinutes(a.x, a.y, b.x, b.y)
+  const tight = walk > 0 && gap < walk
+  return (
+    <div className={`gap ${tight ? 'tight' : ''}`}>
+      <Footprints size={14} aria-hidden />
+      <span>
+        {same
+          ? gap
+            ? t('{n} Min. Pause · gleiche Stage', { n: gap })
+            : t('Direkt weiter · gleiche Stage')
+          : tight
+            ? t('Knapp: {gap} Min. Zeit, {walk} Min. Laufweg zur {stage}', { gap, walk, stage: b.name })
+            : t('{gap} Min. frei · {walk} Min. Laufweg zur {stage}', { gap, walk, stage: b.name })}
+      </span>
+    </div>
+  )
+}
+
+/** Puts the whole plan into the phone's calendar, with a reminder 15 minutes before each set. */
+function ExportPlan() {
+  const { plan, toast } = useApp()
+  const acts = plan.map((id) => actById[id]).filter((a) => a && !a.change?.cancelled)
+  if (!acts.length) return null
+  return (
+    <button className="btn ghost sm" style={{ alignSelf: 'flex-start', marginTop: 12 }} onClick={() => (downloadIcs(acts), toast(t('Kalenderdatei mit {n} Acts erstellt', { n: acts.length })))}>
+      <CalendarPlus size={16} /> {t('Plan in den Kalender')}
+    </button>
   )
 }
 

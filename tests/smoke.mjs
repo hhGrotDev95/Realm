@@ -54,6 +54,16 @@ try {
     await page.getByRole('button', { name: /behalten$/ }).click()
     await page.getByText(/^Entschieden:/).waitFor()
   })
+  await step('my plan shows walking time between sets and exports to the calendar', async () => {
+    await page.getByRole('tab', { name: 'Mein Plan' }).click()
+    await page.locator('.gap').filter({ hasText: /Laufweg zur|gleiche Stage/ }).first().waitFor()
+    const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Plan in den Kalender' }).click()])
+    const ics = await (await import('node:fs/promises')).readFile(await download.path(), 'utf8')
+    const planned = await page.evaluate(() => JSON.parse(localStorage.getItem('realm.v2') ?? '{}').plan?.length ?? 0)
+    const events = ics.split('BEGIN:VEVENT').length - 1
+    if (!ics.startsWith('BEGIN:VCALENDAR') || events < 1 || events > planned) throw new Error(`calendar export: ${events} events for ${planned} planned acts`)
+    if (!download.suggestedFilename().endsWith('.ics')) throw new Error('not an .ics file: ' + download.suggestedFilename())
+  })
   await step('timeline view renders', async () => {
     await page.getByRole('button', { name: 'Timeline-Ansicht' }).click()
     await page.locator('.tl-act').first().waitFor()
