@@ -470,6 +470,41 @@ try {
     assert.deepEqual(t, { brand: '#4fd1c5', font: 'space', logo: png })
   })
 
+  await test('map editor: site plan, stage positions and pins; stage pins derive from stages', async () => {
+    const A = 'test-admin-token'
+    const put = (body) => api('PUT', '/api/admin/festivals/nordlicht/map', A, body, null)
+    const doc = () => api('GET', '/api/festivals/nordlicht', null, undefined, null).then((r) => r.data)
+    assert.equal((await api('PUT', '/api/admin/festivals/nordlicht/map', lea.token, { pois: [] }, null)).status, 401)
+    const before = await doc()
+    assert.equal(before.festival.siteMap, null)
+    assert.equal(before.pois.filter((p) => p.cat === 'stage').length, before.stages.length)
+    assert.equal((await put({ pois: [{ id: 'x', cat: 'stage', name: 'Fake', x: 1, y: 1 }] })).status, 400)
+    assert.equal((await put({ pois: [{ id: 'x', cat: 'water', name: 'W', x: 1001, y: 1 }] })).status, 400)
+    assert.equal((await put({ pois: [{ id: 'stage-pier', cat: 'water', name: 'W', x: 1, y: 1 }] })).status, 400)
+    assert.equal((await put({ stages: [{ id: 'nope', x: 1, y: 1 }] })).status, 400)
+    assert.equal((await put({ siteMap: 'data:image/svg+xml;base64,AAAA' })).status, 400)
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const pois = [
+      { id: 'w1', cat: 'water', name: 'Wasser Hafen', detail: 'kostenlos', status: 'open', important: true, x: 100.4, y: 200 },
+      { id: 'in1', cat: 'info', name: 'Info', x: 500, y: 900 },
+    ]
+    const ok = await put({ siteMap: png, stages: [{ id: 'pier', x: 120, y: 130 }], pois })
+    assert.equal(ok.status, 200)
+    const after = await doc()
+    assert.equal(after.festival.siteMap, png)
+    assert.deepEqual(after.stages.find((s) => s.id === 'pier'), { ...before.stages.find((s) => s.id === 'pier'), x: 120, y: 130 })
+    assert.deepEqual(after.pois.find((p) => p.id === 'stage-pier'), { id: 'stage-pier', cat: 'stage', name: 'Pier', x: 120, y: 130, detail: 'Electronic · Waterfront', important: true })
+    assert.deepEqual(after.pois.filter((p) => p.cat !== 'stage'), [
+      { id: 'w1', cat: 'water', name: 'Wasser Hafen', x: 100, y: 200, detail: 'kostenlos', status: 'open', important: true },
+      { id: 'in1', cat: 'info', name: 'Info', x: 500, y: 900, detail: '', important: false },
+    ])
+    // omitted fields stay as they are; null removes the plan
+    assert.equal((await put({ siteMap: null })).status, 200)
+    const cleared = await doc()
+    assert.equal(cleared.festival.siteMap, null)
+    assert.equal(cleared.pois.length, after.pois.length)
+  })
+
   await test('modules: switched-off features are refused by the API, dependencies enforced', async () => {
     const A = 'test-admin-token'
     const N = 'nordlicht'
