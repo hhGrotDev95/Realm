@@ -19,9 +19,14 @@ const errors = []
 /** set when the offline step takes the server down: network errors after that are expected */
 let serverDownAt = Infinity
 let currentStep = 'start'
+/** pages that are deliberately reloading: WebKit rejects their pending dynamic imports on unload */
+const unloading = new Set()
 /** every page error with the step and page it happened on, plus failed requests – engines word errors differently */
 const watch = (pg, tag) => {
-  pg.on('pageerror', (e) => errors.push({ message: e.message, at: Date.now(), where: `${currentStep} [${tag}]` }))
+  pg.on('pageerror', (e) => {
+    if (unloading.has(tag) && /Importing a module script failed/.test(e.message)) return
+    errors.push({ message: e.message, at: Date.now(), where: `${currentStep} [${tag}]` })
+  })
   pg.on('requestfailed', (r) => failed.push(`${currentStep} [${tag}] ${r.url()} – ${r.failure()?.errorText}`))
 }
 const failed = []
@@ -135,12 +140,12 @@ try {
     await p.locator('.day-btn', { hasText: 'Fri' }).waitFor() // day names derived from the date
     await p.locator('.act', { hasText: 'Arcturus' }).getByText('Now 22:30 instead of 22:15').waitFor()
     await p.getByRole('button', { name: 'Profile & settings' }).click()
-    // switching the language reloads the page; let lazy chunks finish first, or WebKit reports
-    // the request the reload cancels ("Importing a module script failed") as a page error
-    await p.waitForFunction(() => performance.getEntriesByType('resource').some((e) => e.name.includes('motionFeatures') && e.responseEnd > 0))
-    await p.waitForLoadState('networkidle')
+    // switching the language reloads the page; WebKit rejects imports still pending at that moment
+    // ("Importing a module script failed") – expected only while this page unloads
+    unloading.add('second')
     await p.getByRole('button', { name: 'Deutsch' }).click()
     await p.getByText('Als Nächstes').waitFor() // reloaded in German, choice remembered over the browser language
+    unloading.delete('second')
     await p.reload()
     await p.getByText('Als Nächstes').waitFor()
     await ctx.close()
