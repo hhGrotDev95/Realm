@@ -1,6 +1,6 @@
 # Realm – Fortschritt
 
-Stand: 19.10.2026
+Stand: 20.10.2026
 
 - Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
 - Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`, gemergt als PR #5
@@ -330,3 +330,14 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 
 ## Prüfbericht-Behebung · Welle 2 (claude/realm-fix-wave2)
 - F04/D02 ehrliche Navigation, D01 keine Demo-Inhalte im Live-Modus + Demo-Kennzeichen, D03 Warnungen in jeder Phase oben. Details in `docs/AUDIT.md`. Nebenbei gefunden und behoben: nach der Standortwahl startete die angeforderte Richtung nicht (Karte kannte den Ort noch nicht).
+
+## Runde: Karte auf 320 px (Prüfbericht D08, Branch `ccr-c4b0523e-ltc4vo`, 20.10.)
+- Auf 320 px überdeckten sich Marker (Generator × Wasserstelle Nord, Meldungs-Pins auf ihren Orten), Stage-Namen liefen aus dem Bild oder unter die Kartenknöpfe, Meldungs-Pins waren 22 px klein.
+- Jetzt: `src/screens/mapLabels.ts` entscheidet je Ansicht, welche Stages ihren Namen zeigen (frei von Nachbarn, Bildrand und Bedienelementen; ausgewählte zuerst, sonst von links – kein Flackern beim Verschieben). Meldungen als Warn-Badge am Ort, Knopfname „<Ort> – Meldung: <Titel>“. Marker-Tippfläche 44 px. Eigene Pins dürfen weiter überall liegen (bewusst gesetzt).
+- Verworfen: Startausschnitt in den freien Bereich (unter Suche, links der Knöpfe) zu zentrieren – auf 320 px schnitt das links mehr ab als vorher.
+- Geprüft: typecheck (Web + Worker), build, test:import (inkl. 9 neuer Kartenbeschriftungs-Prüfungen), test:e2e (neuer 320-px-Kartenschritt; am alten Stand nachweislich rot), test:a11y (0 Befunde), Worker-API (33), test:live (alle Szenarien). Firefox/WebKit lokal nicht installiert → nur CI-Job `browsers`.
+
+## Nächste Schritte (Stand 20.10.)
+1. Übrige Befunde F01, F05, F06, F08, F09, F11, F12, F14–F17, D05, D09, D10 aus den Prüfberichten vom 20.10. – **Blocker:** Die Berichte liegen nicht im Repo (nur ihre IDs in `docs/AUDIT.md`), Google Drive findet sie nicht. Bitte als `docs/audit-source.md` o. ä. ablegen, sonst kann ein Durchlauf sie nicht bearbeiten.
+2. Unabhängig davon möglich: Plattform-Schritt 8 Push (braucht VAPID-Schlüssel + Deployment → blockiert) – stattdessen lokal planbare Erinnerungen vor geplanten Acts (Notification API ohne Server) prüfen.
+3. Karte: Namen kompakter Stages per Langdruck/Fokus als Tooltip zeigen (heute nur über Antippen → Ort-Sheet).

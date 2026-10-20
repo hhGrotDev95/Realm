@@ -166,6 +166,31 @@ try {
     if (report.clipped.length || report.toolbarRight > 320 || report.overflow > 0) throw new Error('narrow layout: ' + JSON.stringify(report))
     await ctx.close()
   })
+  await step('narrow phone (320 px): map markers and labels do not cover each other or slide under the buttons (audit D08)', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 320, height: 640 }, locale: 'de-DE' })
+    const p = await ctx.newPage()
+    await p.goto(url)
+    await p.locator('nav').getByText('Map').click()
+    await p.locator('.map-fabs').waitFor()
+    await p.waitForTimeout(600)
+    const report = await p.evaluate(() => {
+      const meet = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+      // personal pins are placed by the visitor on purpose and may sit on anything
+      const marks = [...document.querySelectorAll('.map-wrap button:not(.map-userpin)')]
+        .map((b) => ({ name: b.getAttribute('aria-label'), btn: b.getBoundingClientRect(), r: b.firstElementChild.getBoundingClientRect(), text: b.textContent.trim() }))
+        .filter((m) => meet(m.r, { left: 0, top: 0, right: innerWidth, bottom: innerHeight }))
+      const overlaps = []
+      for (let i = 0; i < marks.length; i++) for (let j = i + 1; j < marks.length; j++) if (meet(marks[i].r, marks[j].r)) overlaps.push(`${marks[i].name} × ${marks[j].name}`)
+      const controls = [...document.querySelectorAll('.map-fabs, .map-search, .map-overlay-top .chips')].map((e) => e.getBoundingClientRect())
+      const hiddenLabels = marks.filter((m) => m.text && (m.r.left < 0 || m.r.right > innerWidth || controls.some((c) => meet(m.r, c)))).map((m) => m.name)
+      const tiny = marks.filter((m) => m.btn.width < 24 || m.btn.height < 24).map((m) => m.name)
+      return { count: marks.length, overlaps, hiddenLabels, tiny }
+    })
+    if (report.count < 5 || report.overlaps.length || report.hiddenLabels.length || report.tiny.length) throw new Error('map at 320 px: ' + JSON.stringify(report))
+    // a community report is announced on its place
+    await p.getByRole('button', { name: /Wasserstelle Lagoon – Meldung:/ }).waitFor()
+    await ctx.close()
+  })
   await step('offline: after ONE online visit the app and lazily loaded screens open with the server down', async () => {
     const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
     const p = await ctx.newPage()
