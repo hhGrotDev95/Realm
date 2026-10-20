@@ -179,4 +179,10 @@ export const EN_SCREENS: Record<string, string> = {
   "In die Zwischenablage kopiert": "Copied to clipboard",
   "Teilen": "Share",
   "Schließen": "Close",
+  "{n} Min. Pause · gleiche Stage": "{n} min break · same stage",
+  "Direkt weiter · gleiche Stage": "Straight on · same stage",
+  "Knapp: {gap} Min. Zeit, {walk} Min. Laufweg zur {stage}": "Tight: {gap} min to get there, {walk} min walk to {stage}",
+  "{gap} Min. frei · {walk} Min. Laufweg zur {stage}": "{gap} min free · {walk} min walk to {stage}",
+  "Kalenderdatei mit {n} Acts erstellt": "Calendar file with {n} acts created",
+  "Plan in den Kalender": "Add plan to calendar",
 }

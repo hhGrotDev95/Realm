@@ -168,4 +168,5 @@ export const EN_SHEETS: Record<string, string> = {
   "Deine Schritte kommen aus der iOS-/Android-App": "Your steps come from the iOS/Android app",
   "keine Preise, nur Ehre": "no prizes, just glory",
   "Beenden": "Stop",
+  "In den Kalender": "Add to calendar",
 }
