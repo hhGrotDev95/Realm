@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect } from 'react'
-import { House, ListMusic, Map as MapIcon, Users } from 'lucide-react'
+import { CircleHelp, House, ListMusic, Map as MapIcon, Users } from 'lucide-react'
 import { DAYS, FESTIVAL, on, PHASES, fmt } from './data'
 import { Crew } from './screens/Crew'
 import { Home } from './screens/Home'
@@ -43,6 +43,11 @@ export function AppBar({ floating }: { floating?: boolean }) {
         <h1 className="appbar-h">{FESTIVAL.name}</h1>
         <span>{sub}</span>
       </div>
+      {on('faq') && (
+        <button className="icon-btn" aria-label="Infos & FAQ" onClick={() => openSheet({ kind: 'faq' })}>
+          <CircleHelp size={22} />
+        </button>
+      )}
       <button className="icon-btn" aria-label="Profil & Einstellungen" onClick={() => openSheet({ kind: 'profile' })}>
         <Avatar id="me" />
       </button>

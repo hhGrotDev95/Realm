@@ -244,8 +244,29 @@ Beim Testen gefunden und behoben: Die gemeinsame `Switch`-Komponente war ein `<b
 | `npm run test:e2e` · `npm run test:a11y` | 9 Abläufe · 13 Ansichten ohne Befund |
 | `npm run test:live` | 17 Szenarien; der Festival-Ablauf schaltet jetzt „Crew & Freunde“ ab: Crew-Tab verschwindet beim Besucher, API lehnt ab |
 
+GitHub Actions auf PR #10: `web`, `api`, `live` grün, gemergt.
+
+## P5 · FAQ und FAQ-Bot — erledigt (Branch `claude/realm-faq`)
+
+- Migration `0008_faq.sql` (FAQ je Festival mit Quelle, Stand, Status Entwurf/Freigegeben; Demo-FAQ generiert aus `DEMO_FAQ` per `worker/scripts/build-faq-seed.mts`).
+- Worker: freigegebene FAQ im Festivaldokument (nur bei aktivem Modul), Admin-Routen zum Lesen, Anlegen/Ändern, Löschen; Entwürfe bleiben privat.
+- Bot `src/faq/match.ts`: lokale Suche (Synonyme DE/EN, Umlaute, Wortstämme, Gewichtung Frage/Stichworte/Kategorie, Abdeckung), Antwort nur über einer Schwelle **und** mit Treffer in Frage/Stichworten/Kategorie; sonst Vorschläge oder ehrliches „keine freigegebene Antwort“ mit Verweis aufs Info-Zelt. Erzeugt nie eigenen Text.
+- App: „Infos & FAQ“ (Fragezeichen in der App-Leiste) mit Bot, Suche, Kategorien und aufklappbaren Antworten, jeweils mit Quelle und Stand; offline nutzbar.
+- Konsole: Tab „FAQ“ mit Liste, Editor, Freigabe und Bot-Testfeld. Neue Module „FAQ & Infos“ und „FAQ-Bot“.
+- Nebenbei: `allowImportingTsExtensions`, damit `src/data.ts` auch von Node-Skripten (Seeds, Unit-Tests) geladen werden kann – der Import von `./modules` aus P4 hatte das Seed-Skript gebrochen.
+
+Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam die Einlass-Antwort, weil „Samstag“ im Antworttext steht – jetzt zählt ein Treffer nur im Antworttext höchstens als Vorschlag.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler |
+| Unit-Tests (`npm run test:import`) | 8 Parser, 9 Kontrast, 7 Module, 19 FAQ-Bot (14 Fragen richtig beantwortet, 3 unbekannte ehrlich abgelehnt) |
+| `cd worker && npm test` | 27 API-Tests (neu: FAQ-Entwurf/Freigabe/Modul) + Migrationstest (8 Migrationen) |
+| `npm run test:e2e` · `npm run test:a11y` | 10 Abläufe (neu: Bot) · 14 Ansichten ohne Befund (neu: FAQ mit Bot-Antwort) |
+| `npm run test:live` | 17 Szenarien; Festival-Ablauf: FAQ-Entwurf unsichtbar, nach Freigabe beantwortet der Bot die Frage – auch offline |
+
 ## Nächste Schritte
 
-1. P5: FAQ verwalten + FAQ-Bot, der nur aus freigegebenen Antworten mit Quelle antwortet.
-2. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen).
-3. P6: Karteneditor (eigener Geländeplan, Marker mit relativen Koordinaten).
+1. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen) – der Build warnt.
+2. P6: Karteneditor (eigener Geländeplan, Marker mit relativen Koordinaten).
+3. P7: Sprachen DE/EN.

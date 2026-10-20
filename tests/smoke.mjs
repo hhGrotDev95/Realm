@@ -37,6 +37,16 @@ try {
     await page.locator('.act', { hasText: 'Arcturus' }).getByText('Neu 22:30 statt 22:15').waitFor()
     await page.locator('nav').getByText('Home').click()
   })
+  await step('FAQ bot answers from approved FAQ with source, admits what it does not know', async () => {
+    await page.getByRole('button', { name: 'Infos & FAQ' }).click()
+    await page.getByLabel('Frage an den Festival-Bot').fill('Akku leer – wo kann ich mein Handy laden?')
+    await page.getByRole('button', { name: 'Fragen' }).click()
+    await page.getByText('Quelle: Service-Seite').waitFor()
+    await page.getByLabel('Frage an den Festival-Bot').fill('Wer ist der Headliner am Samstag?')
+    await page.getByRole('button', { name: 'Fragen' }).click()
+    await page.getByText(/keine freigegebene Antwort/).waitFor()
+    await page.keyboard.press('Escape')
+  })
   await step('line-up resolves a conflict', async () => {
     await page.locator('nav').getByText('Line-up').click()
     await page.locator('.conflict').first().click()

@@ -64,6 +64,12 @@ try {
   await page.getByRole('button', { name: 'Profil & Einstellungen' }).click()
   await audit('Profil')
   await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Infos & FAQ' }).click()
+  await page.getByLabel('Frage an den Festival-Bot').fill('Wo ist das Fundbüro?')
+  await page.getByRole('button', { name: 'Fragen' }).click()
+  await page.locator('.faq-item button').first().click()
+  await audit('Infos & FAQ mit Bot-Antwort')
+  await page.keyboard.press('Escape')
   await page.goto(url + '/#admin').catch(() => {}) // the hash change triggers a reload into the console
   await page.waitForLoadState('load')
   await page.getByText('Kein Server konfiguriert').waitFor()

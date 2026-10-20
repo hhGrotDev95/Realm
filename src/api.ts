@@ -179,6 +179,18 @@ export function execute(op: OutboxOp): Promise<unknown> {
 const rand = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('')
 export const opId = (prefix: string) => `${prefix}_${rand()}`
 
+export interface AdminFaq {
+  id: string
+  question: string
+  answer: string
+  category: string
+  keywords: string
+  source: string | null
+  status: 'draft' | 'published'
+  sort: number
+  updatedAt: number
+}
+
 export interface ImportResult {
   dryRun: boolean
   mode: 'merge' | 'replace'
@@ -217,6 +229,9 @@ export const adminApi = (adminToken: string) => {
     updateFestival: (slug: string, f: { name?: string; location?: string; status?: 'draft' | 'published' | 'archived' }) => req<{ slug: string; name: string; status: string }>('PATCH', `/api/admin/festivals/${slug}`, f),
     setStages: (slug: string, stages: { id?: string; name: string; color?: string; vibe?: string }[]) => req<{ stages: { id: string; name: string; color: string }[] }>('PUT', `/api/admin/festivals/${slug}/stages`, { stages }),
     importTimetable: (slug: string, body: { mode: 'merge' | 'replace'; dryRun: boolean; rows: unknown[] }) => req<ImportResult>('POST', `/api/admin/festivals/${slug}/import`, body),
+    faq: (slug: string) => req<AdminFaq[]>('GET', `/api/admin/festivals/${slug}/faq`),
+    saveFaq: (slug: string, f: Omit<AdminFaq, 'updatedAt' | 'source'> & { source?: string }) => req<AdminFaq>('PUT', `/api/admin/festivals/${slug}/faq/${f.id}`, f),
+    deleteFaq: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/faq/${id}`),
     setModules: (slug: string, modules: Record<string, boolean>) => req<Record<string, boolean>>('PUT', `/api/admin/festivals/${slug}/modules`, modules),
     setTheme: (slug: string, theme: { brand?: string; font?: string; logo?: string }) => req<Record<string, string>>('PUT', `/api/admin/festivals/${slug}/theme`, theme),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),

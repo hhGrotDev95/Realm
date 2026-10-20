@@ -152,11 +152,12 @@ app.get('/api/festivals/:slug', async (c) => {
   const f = await c.env.DB.prepare('SELECT * FROM festivals WHERE slug = ?').bind(c.req.param('slug')).first<FestivalRow>()
   if (!f || (f.status === 'draft' && !(await isAdminRequest(c)))) throw new HttpError(404, 'Festival nicht gefunden')
   const db = c.env.DB
-  const [days, stages, acts, pois] = await db.batch([
+  const [days, stages, acts, pois, faqs] = await db.batch([
     db.prepare('SELECT idx, date, label, short FROM festival_days WHERE festival_id = ? ORDER BY idx').bind(f.id),
     db.prepare('SELECT id, name, color, x, y, vibe FROM stages WHERE festival_id = ? ORDER BY sort, name').bind(f.id),
     db.prepare('SELECT id, day, stage_id AS stage, artist, start_min AS start, end_min AS "end", genre, bio, popularity FROM acts WHERE festival_id = ? ORDER BY day, start_min').bind(f.id),
     db.prepare('SELECT id, cat, name, x, y, detail, status, important FROM pois WHERE festival_id = ?').bind(f.id),
+    db.prepare("SELECT id, question, answer, category, keywords, source, updated_at AS updatedAt FROM faqs WHERE festival_id = ? AND status = 'published' ORDER BY sort, category, question").bind(f.id),
   ])
   return c.json({
     festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), updatedAt: f.updated_at },
@@ -164,6 +165,8 @@ app.get('/api/festivals/:slug', async (c) => {
     stages: stages.results,
     acts: acts.results,
     pois: (pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+    // published answers travel with the festival document, so FAQ and bot work offline
+    faq: isEnabled(JSON.parse(f.modules) as ModuleState, 'faq') ? faqs.results : [],
   })
 })
 
@@ -708,6 +711,50 @@ app.put('/api/admin/festivals/:slug/modules', async (c) => {
   const stored = Object.fromEntries(Object.entries(state).filter(([, on]) => on === false))
   await c.env.DB.prepare('UPDATE festivals SET modules = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(stored), Date.now(), f.id).run()
   return c.json(stored)
+})
+
+/* FAQ (admin): drafts stay in the console until published. */
+type FaqRow = { id: string; question: string; answer: string; category: string; keywords: string; source: string | null; status: string; sort: number; updated_at: number }
+const toFaq = (r: FaqRow) => ({ id: r.id, question: r.question, answer: r.answer, category: r.category, keywords: r.keywords, source: r.source, status: r.status, sort: r.sort, updatedAt: r.updated_at })
+
+app.get('/api/admin/festivals/:slug/faq', async (c) => {
+  const f = await festivalBySlug(c)
+  const rows = await c.env.DB.prepare('SELECT * FROM faqs WHERE festival_id = ? ORDER BY sort, category, question').bind(f.id).all<FaqRow>()
+  return c.json(rows.results.map(toFaq))
+})
+
+app.put('/api/admin/festivals/:slug/faq/:id', async (c) => {
+  const f = await festivalBySlug(c)
+  const id = c.req.param('id')
+  if (!/^[a-z0-9-]{1,60}$/.test(id)) throw new HttpError(400, 'id darf nur a–z, 0–9 und - enthalten')
+  const b = await body(c)
+  const row: FaqRow = {
+    id,
+    question: v.str(b.question, 'Frage', { min: 3, max: 200 })!,
+    answer: v.str(b.answer, 'Antwort', { min: 3, max: 2000 })!,
+    category: v.str(b.category, 'Kategorie', { max: 40, optional: true }) ?? 'Allgemein',
+    keywords: v.str(b.keywords, 'Stichworte', { max: 300, optional: true }) ?? '',
+    source: v.str(b.source, 'Quelle', { max: 80, optional: true }) ?? null,
+    status: b.status === undefined ? 'draft' : v.oneOf(b.status, 'Status', ['draft', 'published'] as const),
+    sort: b.sort === undefined ? 0 : v.int(b.sort, 'sort', 0, 9999),
+    updated_at: Date.now(),
+  }
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO faqs (festival_id, id, question, answer, category, keywords, source, status, sort, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(festival_id, id) DO UPDATE SET question = excluded.question, answer = excluded.answer, category = excluded.category, keywords = excluded.keywords, source = excluded.source, status = excluded.status, sort = excluded.sort, updated_at = excluded.updated_at`,
+    ).bind(f.id, row.id, row.question, row.answer, row.category, row.keywords, row.source, row.status, row.sort, row.updated_at),
+    touch(c.env.DB, f.id),
+  ])
+  return c.json(toFaq(row))
+})
+
+app.delete('/api/admin/festivals/:slug/faq/:id', async (c) => {
+  const f = await festivalBySlug(c)
+  const res = await c.env.DB.prepare('DELETE FROM faqs WHERE festival_id = ? AND id = ?').bind(f.id, c.req.param('id')).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Eintrag nicht gefunden')
+  await touch(c.env.DB, f.id).run()
+  return c.body(null, 204)
 })
 
 const FONT_KEYS = ['bricolage', 'space', 'unbounded', 'fraunces', 'archivo'] as const
