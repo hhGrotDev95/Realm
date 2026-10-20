@@ -1,6 +1,6 @@
 // End-to-end smoke test: builds must already exist (npm run build).
 import { spawn } from 'node:child_process'
-import { chromium } from 'playwright'
+import { launch, promiseScrollIntoView } from './browser.mjs'
 
 const PORT = 4321
 const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore', detached: true })
@@ -12,11 +12,22 @@ for (let i = 0; i < 50; i++) {
   await new Promise((r) => setTimeout(r, 200))
 }
 
-const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
+const browser = await launch()
 const page = await browser.newPage({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
+await page.addInitScript(promiseScrollIntoView)
 const errors = []
-page.on('pageerror', (e) => errors.push(e.message))
+/** set when the offline step takes the server down: network errors after that are expected */
+let serverDownAt = Infinity
+let currentStep = 'start'
+/** every page error with the step and page it happened on, plus failed requests – engines word errors differently */
+const watch = (pg, tag) => {
+  pg.on('pageerror', (e) => errors.push({ message: e.message, at: Date.now(), where: `${currentStep} [${tag}]` }))
+  pg.on('requestfailed', (r) => failed.push(`${currentStep} [${tag}] ${r.url()} – ${r.failure()?.errorText}`))
+}
+const failed = []
+watch(page, 'main')
 const step = async (name, fn) => {
+  currentStep = name
   await fn()
   await page.waitForTimeout(350)
   console.log('✓', name)
@@ -115,7 +126,7 @@ try {
   await step('English browser gets the English app; the language can be switched in the profile', async () => {
     const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'en-US' })
     const p = await ctx.newPage()
-    p.on('pageerror', (e) => errors.push(e.message))
+    watch(p, 'second')
     await p.goto(url)
     await p.getByText('Up next').waitFor()
     if ((await p.evaluate(() => document.documentElement.lang)) !== 'en') throw new Error('html lang not set to en')
@@ -124,16 +135,34 @@ try {
     await p.locator('.day-btn', { hasText: 'Fri' }).waitFor() // day names derived from the date
     await p.locator('.act', { hasText: 'Arcturus' }).getByText('Now 22:30 instead of 22:15').waitFor()
     await p.getByRole('button', { name: 'Profile & settings' }).click()
+    // switching the language reloads the page; let lazy chunks finish first, or WebKit reports
+    // the request the reload cancels ("Importing a module script failed") as a page error
+    await p.waitForLoadState('networkidle')
     await p.getByRole('button', { name: 'Deutsch' }).click()
     await p.getByText('Als Nächstes').waitFor() // reloaded in German, choice remembered over the browser language
     await p.reload()
     await p.getByText('Als Nächstes').waitFor()
     await ctx.close()
   })
+  await step('narrow phone (320 px) with larger text: line-up toolbar fits, no clipped labels, no sideways scroll', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 320, height: 700 }, locale: 'de-DE' })
+    const p = await ctx.newPage()
+    await p.goto(url)
+    // fonts differ between machines; scale the labels up so wrapping shows up everywhere (users with larger text)
+    await p.addStyleTag({ content: '.seg button, .nav button { font-size: 16px !important }' })
+    await p.locator('nav').getByText('Line-up').click()
+    const report = await p.evaluate(() => ({
+      clipped: [...document.querySelectorAll('.seg button, .nav button')].filter((b) => b.scrollHeight > b.clientHeight + 1 || (b.closest('.seg') && b.getBoundingClientRect().height > 44)).map((b) => b.textContent),
+      toolbarRight: document.querySelector('.toolbar').getBoundingClientRect().right,
+      overflow: document.documentElement.scrollWidth - innerWidth,
+    }))
+    if (report.clipped.length || report.toolbarRight > 320 || report.overflow > 0) throw new Error('narrow layout: ' + JSON.stringify(report))
+    await ctx.close()
+  })
   await step('offline: after ONE online visit the app and lazily loaded screens open with the server down', async () => {
     const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
     const p = await ctx.newPage()
-    p.on('pageerror', (e) => errors.push(e.message))
+    watch(p, 'second')
     await p.goto(url)
     await p.getByText('Als Nächstes').waitFor()
     await p.evaluate(() => navigator.serviceWorker.ready)
@@ -141,6 +170,7 @@ try {
     // Playwright's setOffline does not cover service-worker fetches, so take the server down instead:
     // from here on there is really no network, only what the service worker cached.
     try {
+      serverDownAt = Date.now()
       process.kill(-server.pid)
     } catch {}
     await new Promise((r) => setTimeout(r, 500))
@@ -156,8 +186,11 @@ try {
     await ctx.close()
   })
   // a fetch failing while the server is down is expected; real page errors are not
-  errors.splice(0, errors.length, ...errors.filter((e) => !/Failed to fetch|NetworkError|Load failed/.test(e)))
-  if (errors.length) throw new Error('Page errors:\n' + errors.join('\n'))
+  // a request failing once the server is down is expected (wording differs per engine: Chromium,
+  // Firefox, WebKit incl. a lazy module that could not be fetched); before that, every error counts
+  const network = /Failed to fetch|NetworkError|Load failed|Importing a module script failed/
+  errors.splice(0, errors.length, ...errors.filter((e) => !(e.at >= serverDownAt && network.test(e.message))))
+  if (errors.length) throw new Error('Page errors:\n' + errors.map((e) => `${e.where}: ${e.message}`).join('\n') + '\nFailed requests:\n' + failed.join('\n'))
   console.log('All smoke tests passed')
 } catch (e) {
   console.error(e)

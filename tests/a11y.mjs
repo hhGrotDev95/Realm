@@ -2,7 +2,7 @@
 // Fails on "serious" and "critical" violations; lists "moderate" ones as warnings.
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { chromium } from 'playwright'
+import { launch, promiseScrollIntoView } from './browser.mjs'
 
 const require = createRequire(import.meta.url)
 const AXE = require.resolve('axe-core/axe.min.js')
@@ -16,8 +16,9 @@ for (let i = 0; i < 100; i++) {
   await new Promise((r) => setTimeout(r, 200))
 }
 
-const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
+const browser = await launch()
 const page = await browser.newPage({ viewport: { width: 400, height: 860 }, reducedMotion: 'reduce', locale: 'de-DE' })
+await page.addInitScript(promiseScrollIntoView)
 const results = []
 /**
  * Waits until nothing moves any more: contrast is only meaningful once fade-ins (inline opacity
@@ -55,6 +56,12 @@ try {
   await page.keyboard.press('Escape')
   await nav('Line-up')
   await audit('Line-up · Liste')
+  // D06: the previous day consists of past (dimmed) and cancelled acts – their text must stay readable
+  await page.getByRole('tab', { name: 'Alle', exact: true }).click()
+  await page.locator('.day-btn').first().click()
+  await page.locator('.act.past').first().waitFor()
+  await audit('Line-up · Vortag (vergangene Acts)')
+  await page.locator('.day-btn').nth(1).click()
   await page.getByRole('button', { name: 'Filter' }).click()
   await audit('Line-up · Filter offen')
   await page.getByRole('button', { name: 'Timeline-Ansicht' }).click()
@@ -78,7 +85,19 @@ try {
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Profil & Einstellungen' }).click()
   await audit('Profil')
-  await page.keyboard.press('Escape')
+  // D07: a modal keeps keyboard focus inside – Tab never reaches the page behind it
+  const escaped = []
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press('Tab')
+    const where = await page.evaluate(() => {
+      const el = document.activeElement
+      return el?.closest('.sheet') ? null : `${el?.tagName}${el?.getAttribute('aria-label') ? ` "${el.getAttribute('aria-label')}"` : ''}`
+    })
+    if (where) escaped.push(where)
+  }
+  results.push({ name: 'Profil · Tastaturfokus bleibt im Dialog', violations: escaped.length ? [{ id: 'focus-escape', impact: 'serious', help: 'Tab verlässt den modalen Dialog', nodes: [...new Set(escaped)].slice(0, 3), count: escaped.length }] : [] })
+  await page.locator('.sheet').getByRole('button', { name: 'Schließen' }).click()
+  await page.locator('.sheet').waitFor({ state: 'detached' })
   await page.getByRole('button', { name: 'Infos & FAQ' }).click()
   await page.getByLabel('Frage an den Festival-Bot').fill('Wo ist das Fundbüro?')
   await page.getByRole('button', { name: 'Fragen' }).click()

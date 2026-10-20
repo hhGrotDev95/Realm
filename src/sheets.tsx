@@ -1070,7 +1070,10 @@ function Chat() {
   const [text, setText] = useState('')
   const [active, setActive] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null)
-  useEffect(() => end.current?.scrollIntoView({ behavior: 'smooth' }), [chat.length])
+  // block body: newer browsers return a Promise from scrollIntoView, which must not become the effect's cleanup
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chat.length])
   return (
     <>
       <div className="sheet-head" style={{ marginBottom: 10 }}>

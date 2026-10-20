@@ -321,3 +321,6 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - API: `en`-Objekt in FAQ (`en: { question, answer, keywords }`) und Meldungen (`titleEn`, `bodyEn` → `en: { title, body }`); halbe Fassungen (Frage ohne Antwort) werden abgelehnt – auch schon in der Konsole. Migration 0012.
 - Grenze: Kategorie-Namen, Act-Bios und Ortsnamen bleiben wie eingegeben.
 - Geprüft: Worker-API (neuer Test), Migration, test:import, e2e, a11y, live (neuer Schritt: englische Fassung pflegen → englischer Besucher sieht FAQ und Meldung auf Englisch, Bot beantwortet englische Frage).
+## Prüfbericht-Behebung · Welle 0 (claude/realm-fix-wave0)
+- F07 Chat-Absturz in neuen Chrome-Versionen (Crew- und Festival-Chat), D07 Fokus im Dialog + Schließen-Knopf, D06 Lesbarkeit vergangener Acts, D08 Line-up auf 320 px. Jeder Fix mit einem Test, der am alten Stand nachweislich anschlägt; Übersicht in `docs/AUDIT.md`.
+- Tests: Browser-Setup zentral (`tests/browser.mjs`, `BROWSER=chromium|firefox|webkit`), CI-Job `browsers` für Firefox und WebKit.
