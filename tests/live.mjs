@@ -31,7 +31,7 @@ await waitFor(WEB)
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
 const errors = []
 const user = async () => {
-  const ctx = await browser.newContext({ viewport: { width: 400, height: 860 } })
+  const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
   // pin the app clock to "Friday 19:52" so the scenario does not depend on today's date
   await ctx.addInitScript(() => {
     try {

@@ -1,4 +1,5 @@
 import { STAGES } from '../data'
+import { t } from '../i18n'
 
 /** Map units: pins, routes and the editor all use this coordinate space. */
 export const MAP_W = 1000
@@ -54,10 +55,10 @@ export function Ground({ satellite, siteMap }: { satellite: boolean; siteMap?: s
         </g>
       ))}
       <text x="720" y="610" fill={satellite ? '#5c8aa8' : '#2c3e4d'} fontSize="16" fontFamily="Inter" fontWeight="600" letterSpacing="3">
-        SEE
+        {t('SEE')}
       </text>
       <text x="140" y="700" fill={satellite ? '#4c6e44' : '#26332b'} fontSize="16" fontFamily="Inter" fontWeight="600" letterSpacing="3">
-        WALD
+        {t('WALD')}
       </text>
     </svg>
   )

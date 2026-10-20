@@ -5,6 +5,7 @@ import App from './App'
 import { bootFestival } from './festival'
 import { AppProvider } from './store'
 import './styles.css'
+import { t } from './i18n'
 
 // The organizer console lives at /#admin and is loaded only there.
 const Admin = lazy(() => import('./admin/Admin'))
@@ -17,11 +18,11 @@ function BootError({ error }: { error: string }) {
     <div className="stagewrap">
       <div className="card" style={{ maxWidth: 360, margin: 16, textAlign: 'center' }} role="alert">
         <h1 className="h-display" style={{ fontSize: 24, marginBottom: 8 }}>
-          Festival nicht erreichbar
+          {t('Festival nicht erreichbar')}
         </h1>
-        <p className="muted small">Die Festivaldaten konnten nicht geladen werden und sind auf diesem Gerät noch nicht gespeichert. ({error})</p>
+        <p className="muted small">{t('Die Festivaldaten konnten nicht geladen werden und sind auf diesem Gerät noch nicht gespeichert. ({error})', { error })}</p>
         <button className="btn primary block" onClick={() => location.reload()}>
-          Erneut versuchen
+          {t('Erneut versuchen')}
         </button>
       </div>
     </div>

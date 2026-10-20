@@ -4,13 +4,14 @@ import { useMemo, useState } from 'react'
 import { FAQS, on, POIS } from './data'
 import { ask, type BotAnswer, type Faq } from './faq/match'
 import { useApp } from './store'
+import { locale, t } from './i18n'
 
-const stand = (ms: number) => new Date(ms).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+const stand = (ms: number) => new Date(ms).toLocaleDateString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric' })
 
 function Source({ f }: { f: Faq }) {
   return (
     <span className="tiny faint">
-      Quelle: {f.source || 'Veranstalter'} · Stand {stand(f.updatedAt)}
+      {t('Quelle: {source} · Stand {date}', { source: f.source || t('Veranstalter'), date: stand(f.updatedAt) })}
     </span>
   )
 }
@@ -32,13 +33,13 @@ export function FaqSheet({ q: initial }: { q?: string }) {
     <>
       <div className="sheet-head">
         <div className="grow">
-          <h2 style={{ fontSize: 26 }}>Infos & FAQ</h2>
-          <div className="small muted">{FAQS.length} Antworten vom Veranstalter</div>
+          <h2 style={{ fontSize: 26 }}>{t('Infos & FAQ')}</h2>
+          <div className="small muted">{t('{n} Antworten vom Veranstalter', { n: FAQS.length })}</div>
         </div>
       </div>
 
       {bot && (
-        <section className="faq-bot" aria-label="Festival-Bot">
+        <section className="faq-bot" aria-label={t('Festival-Bot')}>
           <form
             className="chat-input"
             style={{ paddingTop: 0 }}
@@ -47,8 +48,8 @@ export function FaqSheet({ q: initial }: { q?: string }) {
               if (q.trim()) setResult({ ...ask(q, FAQS), q: q.trim() })
             }}
           >
-            <input className="field" style={{ borderRadius: 99 }} placeholder="Frag den Festival-Bot, z. B. „Wo kann ich mein Handy laden?“" aria-label="Frage an den Festival-Bot" value={q} onChange={(e) => setQ(e.target.value)} />
-            <button className="icon-btn" style={{ background: 'var(--brand)', color: 'var(--brand-ink)', width: 48, height: 48, flex: 'none' }} aria-label="Fragen">
+            <input className="field" style={{ borderRadius: 99 }} placeholder={t('Frag den Festival-Bot, z. B. „Wo kann ich mein Handy laden?“')} aria-label={t('Frage an den Festival-Bot')} value={q} onChange={(e) => setQ(e.target.value)} />
+            <button className="icon-btn" style={{ background: 'var(--brand)', color: 'var(--brand-ink)', width: 48, height: 48, flex: 'none' }} aria-label={t('Fragen')}>
               <Send size={19} />
             </button>
           </form>
@@ -56,7 +57,7 @@ export function FaqSheet({ q: initial }: { q?: string }) {
             {result && (
               <motion.div key={result.q} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="faq-answer" role="status" aria-live="polite">
                 <div className="row small faint" style={{ gap: 6, marginBottom: 6 }}>
-                  <Bot size={15} /> Festival-Bot
+                  <Bot size={15} /> {t('Festival-Bot')}
                 </div>
                 {result.kind === 'answer' && result.faq ? (
                   <>
@@ -67,12 +68,12 @@ export function FaqSheet({ q: initial }: { q?: string }) {
                 ) : (
                   <>
                     <p style={{ margin: '0 0 8px' }}>
-                      Dazu habe ich keine freigegebene Antwort – und raten will ich nicht.
-                      {result.suggestions.length ? ' Meintest du vielleicht:' : ''}
+                      {t('Dazu habe ich keine freigegebene Antwort – und raten will ich nicht.')}
+                      {result.suggestions.length ? ' ' + t('Meintest du vielleicht:') : ''}
                     </p>
                     {!result.suggestions.length && info && (
                       <button className="btn ghost sm" style={{ paddingLeft: 0 }} onClick={() => openSheet({ kind: 'poi', id: info.id })}>
-                        <Info size={15} /> Frag am {info.name}
+                        <Info size={15} /> {t('Frag am {place}', { place: info.name })}
                       </button>
                     )}
                   </>
@@ -94,11 +95,11 @@ export function FaqSheet({ q: initial }: { q?: string }) {
 
       <div className="search" style={{ margin: '18px 0 10px' }}>
         <Search size={18} />
-        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="FAQ durchsuchen" aria-label="FAQ durchsuchen" />
+        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t('FAQ durchsuchen')} aria-label={t('FAQ durchsuchen')} />
       </div>
       <div className="chips" style={{ marginBottom: 8 }}>
         <button className={`chip ${!cat ? 'on' : ''}`} aria-pressed={!cat} onClick={() => setCat(null)}>
-          Alle
+          {t('Alle')}
         </button>
         {cats.map((c) => (
           <button key={c} className={`chip ${cat === c ? 'on' : ''}`} aria-pressed={cat === c} onClick={() => setCat(cat === c ? null : c)}>
@@ -127,8 +128,8 @@ export function FaqSheet({ q: initial }: { q?: string }) {
         ))}
         {!list.length && (
           <div className="empty">
-            <b>Nichts gefunden</b>
-            {FAQS.length ? 'Versuch es mit einem anderen Begriff.' : 'Der Veranstalter hat noch keine FAQ veröffentlicht.'}
+            <b>{t('Nichts gefunden')}</b>
+            {FAQS.length ? t('Versuch es mit einem anderen Begriff.') : t('Der Veranstalter hat noch keine FAQ veröffentlicht.')}
           </div>
         )}
       </div>

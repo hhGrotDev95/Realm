@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, execute, online, opId, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
+import { t } from './i18n'
 import { DEFAULT_FESTIVAL } from './festival'
-import { on, ACTS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
+import { on, ACTS, fmt, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
   id: string
@@ -251,7 +252,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   )
 
-  const fail = useCallback((e: unknown) => toast(e instanceof ApiError ? e.message : 'Etwas ist schiefgelaufen'), [toast])
+  const fail = useCallback((e: unknown) => toast(e instanceof ApiError ? e.message : t('Etwas ist schiefgelaufen')), [toast])
 
   /** Maps a server crew snapshot onto the local view model ('me' stands for the current guest). */
   const applyCrew = useCallback((cs: CrewState, incremental = false) => {
@@ -307,7 +308,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (e instanceof ApiError && e.status === 401) setS((p) => ({ ...p, session: null, crewRef: null, remote: null }))
       if (e instanceof ApiError && e.status === 404 && crewId) {
         setS((p) => ({ ...p, crewRef: null, remote: null, chat: [], meetups: [], declined: [] }))
-        toast('Du bist nicht mehr Mitglied dieser Crew')
+        toast(t('Du bist nicht mehr Mitglied dieser Crew'))
       }
       return !retryable(e)
     }
@@ -332,7 +333,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } catch (e) {
           if (retryable(e)) break
           sent++
-          toast(e instanceof ApiError ? `Nicht gesendet: ${e.message}` : 'Nicht gesendet')
+          toast(e instanceof ApiError ? t('Nicht gesendet: {error}', { error: e.message }) : t('Nicht gesendet'))
         }
         const done = op.id
         setS((p) => ({ ...p, outbox: p.outbox.filter((o) => o.id !== done) }))
@@ -493,7 +494,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       : {
           live: false,
           owner: online ? null : 'me', // the demo crew is yours to try moderation
-          name: online ? 'Noch keine Crew' : 'Demo-Crew',
+          name: online ? t('Noch keine Crew') : t('Demo-Crew'),
           code: null,
           members: online ? [] : FRIENDS,
           byId: online ? {} : Object.fromEntries(FRIENDS.map((f) => [f.id, f])),
@@ -536,7 +537,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const enqueue = (op: OutboxOp, sentMsg?: string) => {
       setS((p) => ({ ...p, outbox: [...p.outbox, op] }))
       sRef.current = { ...sRef.current, outbox: [...sRef.current.outbox, op] }
-      if (!navigator.onLine) toast('Offline – wird gesendet, sobald du wieder Netz hast')
+      if (!navigator.onLine) toast(t('Offline – wird gesendet, sobald du wieder Netz hast'))
       else if (sentMsg) toast(sentMsg)
       void flush()
     }
@@ -557,22 +558,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         api.deleteMessage(crewId, id).then(() => (mark(), refresh()), fail)
       },
       flagMessage: (id) =>
-        requireIdentity('Meldungen brauchen einen Namen, damit Missbrauch erkennbar bleibt.', () => {
+        requireIdentity(t('Meldungen brauchen einen Namen, damit Missbrauch erkennbar bleibt.'), () => {
           const mark = (hidden: boolean) => setS((p) => ({ ...p, chat: p.chat.map((m) => (m.id === id ? { ...m, flaggedByMe: true, hidden: m.hidden || hidden } : m)) }))
           if (!online) {
             mark(true)
-            return toast('Gemeldet – die Nachricht ist ausgeblendet')
+            return toast(t('Gemeldet – die Nachricht ist ausgeblendet'))
           }
           if (!crewId) return
           api.flagMessage(crewId, id).then((r) => {
             mark(r.hidden)
-            toast(r.hidden ? 'Gemeldet – die Nachricht ist jetzt ausgeblendet' : 'Gemeldet – danke')
+            toast(r.hidden ? t('Gemeldet – die Nachricht ist jetzt ausgeblendet') : t('Gemeldet – danke'))
           }, fail)
         }),
       removeMember: (id) => {
-        if (!online || !crewId) return toast('Im Demo-Modus können keine Mitglieder entfernt werden')
+        if (!online || !crewId) return toast(t('Im Demo-Modus können keine Mitglieder entfernt werden'))
         api.removeMember(crewId, id).then(() => {
-          toast('Mitglied entfernt')
+          toast(t('Mitglied entfernt'))
           refresh()
         }, fail)
       },
@@ -582,7 +583,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setS((p) => ({ ...p, crewRef: c }))
           sRef.current = { ...sRef.current, crewRef: c }
           await refresh()
-          toast(`Crew „${c.name}“ gegründet`)
+          toast(t('Crew „{name}“ gegründet', { name: c.name }))
         } catch (e) {
           fail(e)
         }
@@ -593,7 +594,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setS((p) => ({ ...p, crewRef: c, pendingJoin: null }))
           sRef.current = { ...sRef.current, crewRef: c }
           await refresh()
-          toast(`Willkommen bei „${c.name}“`)
+          toast(t('Willkommen bei „{name}“', { name: c.name }))
         } catch (e) {
           fail(e)
         }
@@ -603,7 +604,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           await api.leaveCrew(crewId)
           setS((p) => ({ ...p, crewRef: null, remote: null, chat: [], meetups: [], declined: [] }))
-          toast('Crew verlassen')
+          toast(t('Crew verlassen'))
         } catch (e) {
           fail(e)
         }
@@ -615,7 +616,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setS((p) => ({ ...p, session: { id: g.id, token: g.token }, crewRef: null, remote: null, guest: { ...p.guest, id: g.id, nickname: g.nickname, color: g.color, secured: 'code' } }))
           const me = await api.me()
           setS((p) => ({ ...p, crewRef: me.crews[0] ?? null, plan: me.plan.length ? me.plan : p.plan }))
-          toast('Profil wiederhergestellt')
+          toast(t('Profil wiederhergestellt'))
           return true
         } catch (e) {
           fail(e)
@@ -630,7 +631,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setS(fresh())
           setStack([])
           setTabRaw('home')
-          toast('Profil und alle Daten gelöscht')
+          toast(t('Profil und alle Daten gelöscht'))
         } catch (e) {
           fail(e)
         }
@@ -651,8 +652,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleFav: (id) => {
         const inPlan = s.plan.includes(id)
         setS((p) => ({ ...p, plan: inPlan ? p.plan.filter((x) => x !== id) : [...p.plan, id] }))
-        toast(inPlan ? `${actById[id].artist} aus deinem Plan entfernt` : `${actById[id].artist} ist in deinem Plan`, {
-          label: 'Rückgängig',
+        toast(inPlan ? t('{artist} aus deinem Plan entfernt', { artist: actById[id].artist }) : t('{artist} ist in deinem Plan', { artist: actById[id].artist }), {
+          label: t('Rückgängig'),
           run: () => setS((p) => ({ ...p, plan: inPlan ? [...p.plan, id] : p.plan.filter((x) => x !== id) })),
         })
       },
@@ -663,13 +664,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           plan: p.plan.filter((x) => !all.includes(x) || keep.includes(x)),
           resolved: { ...p.resolved, [key]: keep.join(',') },
         }))
-        toast(keep.length > 1 ? 'Hopping geplant – beide bleiben im Plan' : `Entschieden: ${actById[keep[0]].artist}`)
+        toast(keep.length > 1 ? 'Hopping geplant – beide bleiben im Plan' : t('Entschieden: {artist}', { artist: actById[keep[0]].artist }))
       },
       toggleReminder: (id) => {
         const on = !s.reminders[id]
         setS((p) => ({ ...p, reminders: { ...p.reminders, [id]: on } }))
         if (on) scheduleReminder(id, now)
-        toast(on ? 'Erinnerung 15 Min. vorher' : 'Erinnerung entfernt')
+        toast(on ? t('Erinnerung 15 Min. vorher') : t('Erinnerung entfernt'))
       },
       setPhase: (phase) => setS((p) => ({ ...p, phase, clockMode: 'demo' })),
       setNickname: async (nickname, color) => {
@@ -700,42 +701,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
       requireIdentity,
       addMeetup: (m) => {
         if (online) {
-          if (!crewId) return toast('Gründe zuerst eine Crew oder tritt einer bei')
+          if (!crewId) return toast(t('Gründe zuerst eine Crew oder tritt einer bei'))
           const op: OutboxOp = { id: opId('mt'), kind: 'meetup', crewId, data: { place: m.place, poi: m.poi, actId: m.actId, day: m.day, min: m.min, note: m.note } }
           setS((p) => ({ ...p, meetups: [...p.meetups, { ...m, id: op.id, going: ['me'], createdBy: 'me' }] }))
-          return enqueue(op, 'Meetup erstellt – deine Crew sieht es gleich')
+          return enqueue(op, t('Meetup erstellt – deine Crew sieht es gleich'))
         }
         const id = 'm' + rid()
         setS((p) => ({ ...p, meetups: [...p.meetups, { ...m, id, going: ['me'], createdBy: 'me' }] }))
-        toast('Meetup erstellt – deine Crew wurde benachrichtigt')
+        toast(t('Meetup erstellt – deine Crew wurde benachrichtigt'))
       },
       rsvp: (id, going) =>
-        requireIdentity('Damit deine Crew sieht, wer kommt.', () => {
+        requireIdentity(t('Damit deine Crew sieht, wer kommt.'), () => {
           if (online) enqueue({ id: opId('rs'), kind: 'rsvp', meetupId: id, going })
           setS((p) => ({
             ...p,
             meetups: p.meetups.map((m) => (m.id === id ? { ...m, going: going ? [...new Set([...m.going, 'me'])] : m.going.filter((x) => x !== 'me') } : m)),
             declined: going ? p.declined.filter((x) => x !== id) : [...new Set([...p.declined, id])],
           }))
-          toast(going ? 'Du bist dabei' : 'Abgesagt')
+          toast(going ? t('Du bist dabei') : t('Abgesagt'))
         }),
       vote: (id, v) =>
-        requireIdentity('Bestätigungen helfen allen – dafür brauchst du nur einen Namen.', () => {
+        requireIdentity(t('Bestätigungen helfen allen – dafür brauchst du nur einen Namen.'), () => {
           if (online && s.remoteReports.some((r) => r.id === id)) enqueue({ id: opId('vo'), kind: 'vote', reportId: id, vote: v })
           setS((p) => ({ ...p, votes: { ...p.votes, [id]: v } }))
-          toast(v === 'still' ? 'Danke – als weiterhin gültig bestätigt' : 'Danke – als behoben gemeldet')
+          toast(v === 'still' ? t('Danke – als weiterhin gültig bestätigt') : t('Danke – als behoben gemeldet'))
         }),
       report: (u) => {
         if (online) {
-          return enqueue({ id: opId('r'), kind: 'report', data: { title: u.title, place: u.place, poi: u.poi, severity: u.severity === 'critical' ? 'warning' : u.severity } }, 'Meldung veröffentlicht · läuft in 60 Min. ab')
+          return enqueue({ id: opId('r'), kind: 'report', data: { title: u.title, place: u.place, poi: u.poi, severity: u.severity === 'critical' ? 'warning' : u.severity } }, t('Meldung veröffentlicht · läuft in 60 Min. ab'))
         }
         const nu: FestivalUpdate = { ...u, id: 'r' + rid(), ageMin: 0, source: 'unconfirmed', phases: ['before', 'arrival', 'during', 'departure'], validMin: 60, confirms: 1 }
         setS((p) => ({ ...p, myUpdates: [nu, ...p.myUpdates] }))
-        toast('Meldung veröffentlicht · läuft in 60 Min. ab')
+        toast(t('Meldung veröffentlicht · läuft in 60 Min. ab'))
       },
       sendChat: (text) => {
         if (online) {
-          if (!crewId) return toast('Gründe zuerst eine Crew oder tritt einer bei')
+          if (!crewId) return toast(t('Gründe zuerst eine Crew oder tritt einer bei'))
           const op: OutboxOp = { id: opId('m'), kind: 'message', crewId, text, at: Date.now() }
           setS((p) => ({ ...p, chat: [...p.chat, { id: op.id, from: 'me', text, min: minuteOfDay(op.at), pending: true }] }))
           return enqueue(op)
@@ -795,8 +796,8 @@ async function scheduleReminder(id: string, now: { day: number; min: number }) {
   window.clearTimeout(timers[id])
   timers[id] = window.setTimeout(async () => {
     const reg = await navigator.serviceWorker?.getRegistration()
-    const body = `${a.artist} beginnt um ${String(Math.floor((a.start % 1440) / 60)).padStart(2, '0')}:${String(a.start % 60).padStart(2, '0')}`
-    if (reg) reg.showNotification('Gleich geht’s los', { body, icon: '/icon.svg', tag: id })
-    else new Notification('Gleich geht’s los', { body, icon: '/icon.svg', tag: id })
+    const body = t('{artist} beginnt um {time}', { artist: a.artist, time: fmt(a.start) })
+    if (reg) reg.showNotification(t('Gleich geht’s los'), { body, icon: '/icon.svg', tag: id })
+    else new Notification(t('Gleich geht’s los'), { body, icon: '/icon.svg', tag: id })
   }, delay)
 }

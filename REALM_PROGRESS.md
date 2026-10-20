@@ -284,3 +284,12 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - Behoben: Bühnen neuer Festivals fehlten auf der Karte, weil Bühnen-Pins nur aus der Seed-Tabelle kamen. Bühnen-Pins werden jetzt aus den Bühnen selbst erzeugt (eine Quelle für Positionen).
 - Besucher-Karte zeigt den hochgeladenen Plan (Satelliten-Ebene entfällt dann).
 - Geprüft: typecheck, Worker-API (28 Tests inkl. neuem Karten-Test), Migrationstest, test:import, e2e, a11y, live (neuer Schritt: Plan hochladen, Punkt per Klick setzen, mit Tastatur verschieben, Besucher findet ihn in der Kartensuche).
+
+## Runde: Deutsch/Englisch (Schritt 7, claude/realm-i18n)
+- Besucher-App komplett zweisprachig: 467 UI-Texte über `t('Deutscher Text')` (`src/i18n/`); Sprache folgt dem Browser, lässt sich im Profil umschalten und wird gemerkt; `<html lang>` passt sich an.
+- Wochentage aus dem Datum in der jeweiligen Sprache, Daten/Zahlen über `Intl` (`locale()`, `num()`, `formatRange`).
+- Festival-Inhalte (Acts, FAQ, Meldungen) bleiben wie vom Veranstalter geschrieben; Fehlermeldungen des Servers und die Veranstalter-Konsole sind noch deutsch.
+- Wächter-Test `tests/i18n.test.mts`: jeder `t()`-Text hat eine englische Übersetzung mit denselben Platzhaltern, keine verwaisten Einträge, keine Template-Strings.
+- Nebenbei behoben: Tagesumschalter zeigte den Monat fest als „.07.“; Wrapped behauptete immer „Drei Tage. Fünf Stages.“ und „3 Tage“ – jetzt aus den echten Festivaldaten.
+- Tests laufen jetzt explizit mit `locale: 'de-DE'` (Playwright-Standard ist Englisch); neuer Smoke-Schritt prüft die englische App und den Sprachwechsel.
+- Geprüft: typecheck, test:import (inkl. i18n), build, e2e, a11y, live.

@@ -1,4 +1,5 @@
 // Which festival this app shows, and loading its data from the API (with an offline copy).
+import { t } from './i18n'
 import { adminApi, api, online, setFestival } from './api'
 import { FESTIVAL, loadFestivalBundle as loadBundle, type FestivalBundle } from './data'
 import { applyTheme } from './theme/apply'
@@ -57,18 +58,18 @@ export async function bootFestival(): Promise<BootResult> {
   if (adminToken) {
     try {
       const b = await adminApi(adminToken).bundle(slug)
-      if (!isBundle(b)) throw new Error('Festivaldaten unvollständig')
+      if (!isBundle(b)) throw new Error(t('Festivaldaten unvollständig'))
       loadFestivalBundle(b)
       return { ok: true, fresh: Promise.resolve(false) }
     } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : 'Vorschau nicht möglich' }
+      return { ok: false, error: e instanceof Error ? e.message : t('Vorschau nicht möglich') }
     }
   }
   const stored = safe(() => JSON.parse(localStorage.getItem(bundleKey(slug)) ?? 'null') as unknown, null)
   const cached = isBundle(stored) && stored.festival.slug === slug ? stored : null
   const fetchFresh = async () => {
     const b = await api.festival(slug)
-    if (!isBundle(b)) throw new Error('Festivaldaten unvollständig')
+    if (!isBundle(b)) throw new Error(t('Festivaldaten unvollständig'))
     safe(() => localStorage.setItem(bundleKey(slug), JSON.stringify(b)), undefined)
     return b
   }
@@ -88,6 +89,6 @@ export async function bootFestival(): Promise<BootResult> {
     loadFestivalBundle(await fetchFresh())
     return { ok: true, fresh: Promise.resolve(false) }
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'Unbekannter Fehler' }
+    return { ok: false, error: e instanceof Error ? e.message : t('Unbekannter Fehler') }
   }
 }

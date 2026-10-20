@@ -6,6 +6,7 @@ import { conflictClusters, useApp } from '../store'
 import { status } from '../time'
 import { AvatarStack, FavButton, Segmented, StageDot, spring } from '../ui'
 import { useScrollTop } from './Home'
+import { locale, t } from '../i18n'
 
 type Mode = 'plan' | 'all'
 
@@ -51,11 +52,11 @@ export function Lineup() {
           {searchOpen ? (
             <motion.div key="s" className="search" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
               <Search size={18} />
-              <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Artist, Genre oder Stage" aria-label="Suche" />
+              <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Artist, Genre oder Stage')} aria-label={t('Suche')} />
               <button
                 className="icon-btn"
                 style={{ width: 32, height: 32 }}
-                aria-label="Suche schließen"
+                aria-label={t('Suche schließen')}
                 onClick={() => {
                   setQ('')
                   setSearchOpen(false)
@@ -69,9 +70,9 @@ export function Lineup() {
               {DAYS.map((d) => (
                 <button key={d.idx} className={`day-btn ${day === d.idx ? 'on' : ''}`} onClick={() => setDay(d.idx)} aria-pressed={day === d.idx}>
                   {day === d.idx && <motion.span layoutId="day-pill" className="pill" transition={spring} />}
-                  {dayIsToday(d.idx) && <span className="today" aria-label="heute" />}
+                  {dayIsToday(d.idx) && <span className="today" aria-label={t('heute')} />}
                   <b>{d.short}</b>
-                  <span>{d.date.slice(8)}.07.</span>
+                  <span>{new Date(d.date + 'T12:00:00').toLocaleDateString(locale(), { day: '2-digit', month: '2-digit' })}</span>
                 </button>
               ))}
             </motion.div>
@@ -83,19 +84,19 @@ export function Lineup() {
             value={mode}
             onChange={setMode}
             options={[
-              { value: 'plan', label: `Mein Plan` },
-              { value: 'all', label: 'Alle' },
+              { value: 'plan', label: t('Mein Plan') },
+              { value: 'all', label: t('Alle') },
             ]}
           />
           <span className="grow" />
-          <button className={`icon-btn ${searchOpen ? 'active' : ''}`} aria-label="Suche" onClick={() => setSearchOpen((v) => !v)}>
+          <button className={`icon-btn ${searchOpen ? 'active' : ''}`} aria-label={t('Suche')} onClick={() => setSearchOpen((v) => !v)}>
             <Search size={20} />
           </button>
-          <button className={`icon-btn ${filterOpen || filterCount ? 'active' : ''}`} aria-label="Filter" onClick={() => setFilterOpen((v) => !v)}>
+          <button className={`icon-btn ${filterOpen || filterCount ? 'active' : ''}`} aria-label={t('Filter')} onClick={() => setFilterOpen((v) => !v)}>
             <SlidersHorizontal size={20} />
             {filterCount > 0 && !filterOpen && <span className="dot" />}
           </button>
-          <button className="icon-btn" aria-label={view === 'list' ? 'Timeline-Ansicht' : 'Listen-Ansicht'} onClick={() => setView((v) => (v === 'list' ? 'timeline' : 'list'))}>
+          <button className="icon-btn" aria-label={view === 'list' ? t('Timeline-Ansicht') : t('Listen-Ansicht')} onClick={() => setView((v) => (v === 'list' ? 'timeline' : 'list'))}>
             {view === 'list' ? <GanttChart size={20} /> : <LayoutList size={20} />}
           </button>
         </div>
@@ -115,7 +116,7 @@ export function Lineup() {
               </div>
               <div className="row small" style={{ paddingTop: 10, justifyContent: 'space-between' }}>
                 <button className={`chip ${groupByStage ? 'on' : ''}`} onClick={() => setGroup(!groupByStage)}>
-                  Nach Stage gruppieren
+                  {t('Nach Stage gruppieren')}
                 </button>
                 {filterCount > 0 && (
                   <button
@@ -125,7 +126,7 @@ export function Lineup() {
                       setGroup(false)
                     }}
                   >
-                    Zurücksetzen
+                    {t('Zurücksetzen')}
                   </button>
                 )}
               </div>
@@ -136,7 +137,7 @@ export function Lineup() {
 
       {q && (
         <div className="small faint" style={{ margin: '6px 0' }}>
-          {acts.length} Treffer an allen Tagen
+          {t('{n} Treffer an allen Tagen', { n: acts.length })}
         </div>
       )}
 
@@ -172,9 +173,9 @@ export function Lineup() {
                           <strong>
                             {fmt(c.start)}–{fmt(c.end)}
                           </strong>{' '}
-                          · {c.acts.length} Acts überschneiden sich
+                          · {t('{n} Acts überschneiden sich', { n: c.acts.length })}
                         </span>
-                        <span className="go">Entscheiden</span>
+                        <span className="go">{t('Entscheiden')}</span>
                       </button>
                     )}
                     <ActRow a={a} showDay={!!q} />
@@ -193,19 +194,20 @@ function Empty({ mode, q, onAll }: { mode: Mode; q: string; onAll: () => void })
   if (q)
     return (
       <div className="empty">
-        <b>Nichts gefunden</b>Versuch es mit einem Genre wie „Techno“ oder einer Stage.
+        <b>{t('Nichts gefunden')}</b>
+        {t('Versuch es mit einem Genre wie „Techno“ oder einer Stage.')}
       </div>
     )
   return (
     <div className="empty">
       <Heart size={28} style={{ marginBottom: 10 }} />
-      <b>{mode === 'plan' ? 'Noch nichts geplant' : 'Keine Acts'}</b>
+      <b>{mode === 'plan' ? t('Noch nichts geplant') : t('Keine Acts')}</b>
       {mode === 'plan' && (
         <>
-          Tippe auf das Herz bei einem Act, um ihn zu deinem Plan hinzuzufügen.
+          {t('Tippe auf das Herz bei einem Act, um ihn zu deinem Plan hinzuzufügen.')}
           <div style={{ marginTop: 16 }}>
             <button className="btn primary sm" onClick={onAll}>
-              Alle Acts ansehen
+              {t('Alle Acts ansehen')}
             </button>
           </div>
         </>
@@ -225,7 +227,7 @@ export function ActRow({ a, showDay }: { a: Act; showDay?: boolean }) {
       <button className="act-main" onClick={() => openSheet({ kind: 'act', id: a.id })}>
       <div className="time">
         {fmt(a.start)}
-        <small>{showDay ? DAYS[a.day].short : st === 'live' ? 'live' : fmt(a.end)}</small>
+        <small>{showDay ? DAYS[a.day].short : st === 'live' ? t('live') : fmt(a.end)}</small>
       </div>
       <div style={{ minWidth: 0 }}>
         <div className="name ellipsis">{a.artist}</div>
@@ -249,12 +251,12 @@ export function ActRow({ a, showDay }: { a: Act; showDay?: boolean }) {
 /** Short, colour-coded hint when the organizer changed a slot. */
 export function ChangeTag({ a }: { a: Act }) {
   const c = a.change!
-  if (c.cancelled) return <span className="tag crit" style={{ marginTop: 3 }}>Abgesagt</span>
+  if (c.cancelled) return <span className="tag crit" style={{ marginTop: 3 }}>{t('Abgesagt')}</span>
   return (
     <span className="tag warn" style={{ marginTop: 3 }}>
-      {c.moved ? `Neu ${fmt(a.start)} statt ${fmt(c.was.start)}` : ''}
+      {c.moved ? t('Neu {time} statt {was}', { time: fmt(a.start), was: fmt(c.was.start) }) : ''}
       {c.moved && c.restaged ? ' · ' : ''}
-      {c.restaged ? `jetzt ${stageById[a.stage].name}` : ''}
+      {c.restaged ? t('jetzt {stage}', { stage: stageById[a.stage].name }) : ''}
     </span>
   )
 }

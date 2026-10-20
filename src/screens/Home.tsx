@@ -3,6 +3,7 @@ import { CalendarClock, Users, ArrowRight, Bus, CalendarHeart, Car, ChevronRight
 import { useEffect, useRef } from 'react'
 import { on, dateRange, FESTIVAL, ACTS, actById, DAYS, fmt, stageById, walkMinutes, ME } from '../data'
 import { conflictClusters, isMeetupActive, useApp } from '../store'
+import { t } from '../i18n'
 import { nowNext, planFor, status, untilLabel } from '../time'
 import { AvatarStack, SourceTag, StageDot, ago, stagger } from '../ui'
 
@@ -49,7 +50,7 @@ function Urgent() {
       <span className="grow">
         <strong>{urgent.title}</strong>
         <span className="small muted">
-          Offiziell · {ago(urgent.ageMin)}
+          {t('Offiziell')} · {ago(urgent.ageMin)}
           {urgent.place ? ` · ${urgent.place}` : ''}
         </span>
       </span>
@@ -66,9 +67,9 @@ function UpdatesModule({ i, exclude }: { i: number; exclude?: string }) {
   return (
     <motion.section {...stagger(i)}>
       <div className="section-h">
-        <h2>Updates</h2>
+        <h2>{t('Updates')}</h2>
         <button onClick={() => openSheet({ kind: 'updates' })}>
-          Alle {total} <ChevronRight size={16} />
+          {t('Alle {n}', { n: total })} <ChevronRight size={16} />
         </button>
       </div>
       <div className="list">
@@ -98,12 +99,12 @@ function NowNextHero() {
   if (!focus) {
     return (
       <motion.div {...stagger(1)} className="hero">
-        <span className="label">Heute</span>
-        <h1>Nichts mehr geplant.</h1>
-        <p className="meta">Entdecke, was noch läuft – oder gönn dir eine Pause.</p>
+        <span className="label">{t('Heute')}</span>
+        <h1>{t('Nichts mehr geplant.')}</h1>
+        <p className="meta">{t('Entdecke, was noch läuft – oder gönn dir eine Pause.')}</p>
         <div className="actions">
           <button className="btn primary" onClick={() => setTab('lineup')}>
-            Line-up öffnen
+            {t('Line-up öffnen')}
           </button>
         </div>
       </motion.div>
@@ -117,10 +118,10 @@ function NowNextHero() {
   return (
     <motion.div {...stagger(1)} className="hero">
       <div className="row" style={{ justifyContent: 'space-between' }}>
-        <span className={`label ${isLive ? 'live' : 'next'}`}>{isLive ? 'Jetzt' : 'Als Nächstes'}</span>
+        <span className={`label ${isLive ? 'live' : 'next'}`}>{isLive ? t('Jetzt') : t('Als Nächstes')}</span>
         {live && next && (
           <button className="tiny muted" onClick={() => openSheet({ kind: 'act', id: live.id })}>
-            Gerade: {live.artist}
+            {t('Gerade: {artist}', { artist: live.artist })}
           </button>
         )}
       </div>
@@ -135,7 +136,7 @@ function NowNextHero() {
           <>
             <span className="faint">·</span>
             <AvatarStack ids={friends} />
-            <span className="muted">{friends.length} Freunde gehen hin</span>
+            <span className="muted">{friends.length === 1 ? t('1 Freund geht hin') : t('{n} Freunde gehen hin', { n: friends.length })}</span>
           </>
         )}
       </div>
@@ -152,10 +153,10 @@ function NowNextHero() {
             setTab('map')
           }}
         >
-          <Navigation size={17} /> Route · {walk} Min.
+          <Navigation size={17} /> {t('Route · {n} Min.', { n: walk })}
         </button>
         <button className="btn secondary" onClick={() => openSheet({ kind: 'act', id: focus.id })}>
-          Details
+          {t('Details')}
         </button>
       </div>
     </motion.div>
@@ -170,18 +171,18 @@ function MeetupModule({ i }: { i: number }) {
   return (
     <motion.section {...stagger(i)} className="card" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
       <button className="grow" style={{ textAlign: 'left' }} onClick={() => openSheet({ kind: 'meetup', id: m.id })}>
-        <span className="label">Meetup um {fmt(m.min)}</span>
+        <span className="label">{t('Meetup um {time}', { time: fmt(m.min) })}</span>
         <div style={{ fontWeight: 600, fontSize: 17, marginTop: 4 }}>{m.place}</div>
         <div className="row small muted" style={{ marginTop: 6, gap: 8 }}>
           <AvatarStack ids={m.going} />
-          {m.going.length} zugesagt
+          {t('{n} zugesagt', { n: m.going.length })}
         </div>
       </button>
       {going ? (
-        <span className="tag ok">Dabei</span>
+        <span className="tag ok">{t('Dabei')}</span>
       ) : (
         <button className="btn primary sm" onClick={() => rsvp(m.id, true)}>
-          Bin dabei
+          {t('Bin dabei')}
         </button>
       )}
     </motion.section>
@@ -201,9 +202,9 @@ function CrewPeek({ i }: { i: number }) {
             <Users size={20} />
           </span>
           <span className="grow">
-            <span style={{ fontWeight: 600 }}>{crew.members.length ? `${crew.members.length} in deiner Crew` : 'Crew starten'}</span>
+            <span style={{ fontWeight: 600 }}>{crew.members.length ? t('{n} in deiner Crew', { n: crew.members.length }) : t('Crew starten')}</span>
             <span className="small faint" style={{ display: 'block' }}>
-              {crew.members.length ? 'Niemand teilt gerade den Standort' : 'Freunde einladen, Meetups planen'}
+              {crew.members.length ? t('Niemand teilt gerade den Standort') : t('Freunde einladen, Meetups planen')}
             </span>
           </span>
           <ChevronRight size={18} className="faint" />
@@ -216,10 +217,10 @@ function CrewPeek({ i }: { i: number }) {
         <AvatarStack ids={top[1]} />
         <span className="grow">
           <span style={{ fontWeight: 600 }}>
-            {top[1].length} Freunde bei {stageById[top[0] as keyof typeof stageById].name}
+            {t('{n} Freunde bei {stage}', { n: top[1].length, stage: stageById[top[0] as keyof typeof stageById].name })}
           </span>
           <span className="small faint" style={{ display: 'block' }}>
-            {stepsOptIn ? 'Du liegst auf Platz 3 der Step-Challenge' : 'Crew öffnen'}
+            {stepsOptIn ? t('Du liegst auf Platz 3 der Step-Challenge') : t('Crew öffnen')}
           </span>
         </span>
         <ChevronRight size={18} className="faint" />
@@ -234,14 +235,14 @@ function AttendPrompt({ i }: { i: number }) {
   if (!a) return null
   return (
     <motion.section {...stagger(i)} className="card" style={{ padding: 16 }}>
-      <div className="small muted">Für deinen Festival-Rückblick</div>
-      <div style={{ fontWeight: 600, margin: '4px 0 12px' }}>Warst du bei {a.artist}?</div>
+      <div className="small muted">{t('Für deinen Festival-Rückblick')}</div>
+      <div style={{ fontWeight: 600, margin: '4px 0 12px' }}>{t('Warst du bei {artist}?', { artist: a.artist })}</div>
       <div className="row" style={{ gap: 8 }}>
         <button className="btn secondary sm" onClick={() => setAttended(a.id, true)}>
-          Ja, war da
+          {t('Ja, war da')}
         </button>
         <button className="btn ghost sm" onClick={() => setAttended(a.id, false)}>
-          Nicht geschafft
+          {t('Nicht geschafft')}
         </button>
       </div>
     </motion.section>
@@ -263,10 +264,11 @@ function PlanChanges({ i }: { i: number }) {
       <CalendarClock className="a-ic" size={20} />
       <span className="grow">
         <strong>
-          {a.artist}: {c.cancelled ? 'abgesagt' : [c.moved && `jetzt ${fmt(a.start)}`, c.restaged && `auf ${stageById[a.stage].name}`].filter(Boolean).join(', ')}
+          {a.artist}: {c.cancelled ? t('abgesagt') : [c.moved && t('jetzt {time}', { time: fmt(a.start) }), c.restaged && t('auf {stage}', { stage: stageById[a.stage].name })].filter(Boolean).join(', ')}
         </strong>
         <span className="small muted">
-          Änderung in deinem Plan{changed.length > 1 ? ` · +${changed.length - 1} weitere` : ''}
+          {t('Änderung in deinem Plan')}
+          {changed.length > 1 ? ' · ' + t('+{n} weitere', { n: changed.length - 1 }) : ''}
         </span>
       </span>
       <ChevronRight size={18} className="faint" />
@@ -293,9 +295,9 @@ function Countdown() {
   const { msToStart } = useApp()
   const total = Math.max(0, Math.floor(msToStart / 60_000))
   const parts = [
-    [Math.floor(total / 1440), 'Tage'],
-    [Math.floor((total % 1440) / 60), 'Std.'],
-    [total % 60, 'Min.'],
+    [Math.floor(total / 1440), t('Tage')],
+    [Math.floor((total % 1440) / 60), t('Std.')],
+    [total % 60, t('Min.')],
   ] as const
   return (
     <motion.div {...stagger(0)} className="hero">
@@ -331,9 +333,9 @@ function Before() {
             <CalendarHeart size={20} />
           </span>
           <span className="grow">
-            <span style={{ fontWeight: 600 }}>Plan fortsetzen</span>
+            <span style={{ fontWeight: 600 }}>{t('Plan fortsetzen')}</span>
             <span className="small faint" style={{ display: 'block' }}>
-              {plan.length} Acts gemerkt · {ACTS.length - plan.length} noch zu entdecken
+              {t('{n} Acts gemerkt · {m} noch zu entdecken', { n: plan.length, m: ACTS.length - plan.length })}
             </span>
           </span>
           <ChevronRight size={18} className="faint" />
@@ -344,12 +346,12 @@ function Before() {
           <button className="conflict" onClick={() => openSheet({ kind: 'resolver', ids: conflicts[0].acts.map((a) => a.id), key: conflicts[0].key })}>
             <TriangleAlert className="a-ic" size={20} />
             <span className="grow">
-              <strong>{conflicts.length} Überschneidungen</strong> in deinem Plan
+              {conflicts.length === 1 ? <strong>{t('1 Überschneidung')}</strong> : <strong>{t('{n} Überschneidungen', { n: conflicts.length })}</strong>} {t('in deinem Plan')}
               <span className="small muted" style={{ display: 'block' }}>
-                {DAYS[conflicts[0].acts[0].day].short} {fmt(conflicts[0].start)}–{fmt(conflicts[0].end)} · {conflicts[0].acts.length} Acts
+                {DAYS[conflicts[0].acts[0].day].short} {fmt(conflicts[0].start)}–{fmt(conflicts[0].end)} · {t('{n} Acts', { n: conflicts[0].acts.length })}
               </span>
             </span>
-            <span className="go">Entscheiden</span>
+            <span className="go">{t('Entscheiden')}</span>
           </button>
         </motion.section>
       )}
@@ -361,9 +363,9 @@ function Before() {
             <UserPlus size={20} />
           </span>
           <div className="grow">
-            <div style={{ fontWeight: 600 }}>Crew einladen</div>
+            <div style={{ fontWeight: 600 }}>{t('Crew einladen')}</div>
             <div className="small muted" style={{ marginTop: 2 }}>
-              Seht, wer wo hingeht, und plant Meetups. Kein Account nötig.
+              {t('Seht, wer wo hingeht, und plant Meetups. Kein Account nötig.')}
             </div>
           </div>
         </div>
@@ -371,15 +373,15 @@ function Before() {
           className="btn secondary block"
           style={{ marginTop: 14 }}
           onClick={() =>
-            requireIdentity('Damit deine Freunde wissen, von wem die Einladung kommt.', () => {
+            requireIdentity(t('Damit deine Freunde wissen, von wem die Einladung kommt.'), () => {
               const link = online ? inviteLink() : `${location.origin}/?join=DEMO-CREW`
               if (!link) return setTab('crew')
               navigator.clipboard?.writeText(link).catch(() => {})
-              toast('Einladungslink kopiert')
+              toast(t('Einladungslink kopiert'))
             })
           }
         >
-          <Share2 size={17} /> Einladungslink teilen
+          <Share2 size={17} /> {t('Einladungslink teilen')}
         </button>
       </motion.section>
       )}
@@ -413,23 +415,23 @@ function Arrival() {
   return (
     <>
       <motion.div {...stagger(0)} className="hero">
-        <span className="label next">Anreise · Tag 1</span>
-        <h1>Willkommen, die Tore sind offen.</h1>
-        <p className="meta">Erster Act: Sol Arcadia um 15:00 · Lagoon</p>
+        <span className="label next">{t('Anreise · Tag 1')}</span>
+        <h1>{t('Willkommen, die Tore sind offen.')}</h1>
+        <p className="meta">{t('Erster Act: Sol Arcadia um 15:00 · Lagoon')}</p>
         <div className="actions">
           <button className="btn primary" onClick={() => go('en1')}>
-            <Navigation size={17} /> Zum Eingang
+            <Navigation size={17} /> {t('Zum Eingang')}
           </button>
           <button className="btn secondary" onClick={() => openSheet({ kind: 'poi', id: 'en1' })}>
-            <Ticket size={17} /> Einlass-Infos
+            <Ticket size={17} /> {t('Einlass-Infos')}
           </button>
         </div>
       </motion.div>
       <div className="list" style={{ gap: 8 }}>
-        <InfoTile i={1} icon={Bus} title="Shuttle ab Bahnhof" sub="Nächste Abfahrt 11:50 · alle 10 Min." onClick={() => openSheet({ kind: 'poi', id: 'sh1' })} tone="ok" />
-        <InfoTile i={2} icon={DoorOpen} title="Eingang Nord · ca. 25 Min." sub="Eingang Süd ist gerade schneller (5 Min.)" onClick={() => go('en2')} tone="warn" />
-        <InfoTile i={3} icon={Tent} title="Camping B · Reihe 14" sub="Dein Zeltplatz · 9 Min. vom Eingang" onClick={() => go('cp1')} />
-        <InfoTile i={4} icon={CloudSun} title="24° und sonnig" sub="Ab 22:30 Gewitter möglich – Regenjacke einpacken" />
+        <InfoTile i={1} icon={Bus} title={t('Shuttle ab Bahnhof')} sub={t('Nächste Abfahrt 11:50 · alle 10 Min.')} onClick={() => openSheet({ kind: 'poi', id: 'sh1' })} tone="ok" />
+        <InfoTile i={2} icon={DoorOpen} title={t('Eingang Nord · ca. 25 Min.')} sub={t('Eingang Süd ist gerade schneller (5 Min.)')} onClick={() => go('en2')} tone="warn" />
+        <InfoTile i={3} icon={Tent} title={t('Camping B · Reihe 14')} sub={t('Dein Zeltplatz · 9 Min. vom Eingang')} onClick={() => go('cp1')} />
+        <InfoTile i={4} icon={CloudSun} title={t('24° und sonnig')} sub={t('Ab 22:30 Gewitter möglich – Regenjacke einpacken')} />
       </div>
       <UpdatesModule i={5} />
     </>
@@ -441,9 +443,9 @@ function Departure() {
   return (
     <>
       <motion.div {...stagger(0)} className="hero">
-        <span className="label next">Abreise</span>
-        <h1>Komm gut nach Hause.</h1>
-        <p className="meta">Letztes Shuttle zum Bahnhof: 18:30</p>
+        <span className="label next">{t('Abreise')}</span>
+        <h1>{t('Komm gut nach Hause.')}</h1>
+        <p className="meta">{t('Letztes Shuttle zum Bahnhof: 18:30')}</p>
         <div className="actions">
           <button
             className="btn primary"
@@ -452,20 +454,20 @@ function Departure() {
               setTab('map')
             }}
           >
-            <Navigation size={17} /> Zum Shuttle
+            <Navigation size={17} /> {t('Zum Shuttle')}
           </button>
         </div>
       </motion.div>
       <div className="list" style={{ gap: 8 }}>
-        <InfoTile i={1} icon={Bus} title="Shuttle 11:25" sub="In 10 Min. · Terminal Süd-Ost · Takt erhöht" tone="ok" onClick={() => openSheet({ kind: 'poi', id: 'sh1' })} />
-        <InfoTile i={2} icon={Car} title="A7 Richtung Hamburg" sub="+35 Min. Verzögerung · Community bestätigt" tone="warn" onClick={() => openSheet({ kind: 'updates' })} />
-        <InfoTile i={3} icon={PackageSearch} title="Lost & Found" sub="Bis Montag 14 Uhr im Info-Zelt" onClick={() => openSheet({ kind: 'poi', id: 'in1' })} />
+        <InfoTile i={1} icon={Bus} title={t('Shuttle 11:25')} sub={t('In 10 Min. · Terminal Süd-Ost · Takt erhöht')} tone="ok" onClick={() => openSheet({ kind: 'poi', id: 'sh1' })} />
+        <InfoTile i={2} icon={Car} title={t('A7 Richtung Hamburg')} sub={t('+35 Min. Verzögerung · Community bestätigt')} tone="warn" onClick={() => openSheet({ kind: 'updates' })} />
+        <InfoTile i={3} icon={PackageSearch} title={t('Lost & Found')} sub={t('Bis Montag 14 Uhr im Info-Zelt')} onClick={() => openSheet({ kind: 'poi', id: 'in1' })} />
       </div>
       <motion.section {...stagger(4)} className="card">
-        <span className="label">Bald verfügbar</span>
-        <div style={{ fontWeight: 600, marginTop: 6 }}>Dein Festival Wrapped</div>
+        <span className="label">{t('Bald verfügbar')}</span>
+        <div style={{ fontWeight: 600, marginTop: 6 }}>{t('Dein Festival Wrapped')}</div>
         <p className="small muted" style={{ margin: '4px 0 0' }}>
-          Bestätige noch kurz, welche Sets du wirklich gesehen hast – damit dein Rückblick stimmt.
+          {t('Bestätige noch kurz, welche Sets du wirklich gesehen hast – damit dein Rückblick stimmt.')}
         </p>
       </motion.section>
       <AttendPrompt i={5} />
@@ -487,20 +489,20 @@ function After() {
       >
         <Sparkles size={28} style={{ position: 'absolute', top: 22, right: 22 }} />
         <span className="label" style={{ color: 'rgba(255,255,255,.75)' }}>
-          Festival Wrapped
+          {t('Festival Wrapped')}
         </span>
-        <h1 style={{ fontSize: 46 }}>Dein {FESTIVAL.name}.</h1>
+        <h1 style={{ fontSize: 46 }}>{t('Dein {name}.', { name: FESTIVAL.name })}</h1>
         <p className="meta" style={{ color: 'rgba(255,255,255,.85)' }}>
-          {seen} Sets gesehen · {plan.length} im Plan · 3 Tage
+          {t('{seen} Sets gesehen · {n} im Plan · {days} Tage', { seen, n: plan.length, days: DAYS.length })}
         </p>
         <span className="btn" style={{ background: '#fff', color: '#111', alignSelf: 'flex-start', marginTop: 16 }}>
-          Ansehen <ArrowRight size={17} />
+          {t('Ansehen')} <ArrowRight size={17} />
         </span>
       </motion.button>
       )}
       <motion.section {...stagger(1)}>
         <div className="section-h">
-          <h2>Deine Timeline</h2>
+          <h2>{t('Deine Timeline')}</h2>
         </div>
         <div className="list">
           {DAYS.map((d) => {
@@ -527,9 +529,9 @@ function After() {
             <MapPin size={20} />
           </span>
           <span className="grow">
-            <span style={{ fontWeight: 600 }}>Erinnerungen sichern</span>
+            <span style={{ fontWeight: 600 }}>{t('Erinnerungen sichern')}</span>
             <span className="small faint" style={{ display: 'block' }}>
-              Ohne Sicherung geht dein Profil beim Gerätewechsel verloren.
+              {t('Ohne Sicherung geht dein Profil beim Gerätewechsel verloren.')}
             </span>
           </span>
           <ChevronRight size={18} className="faint" />
@@ -537,7 +539,7 @@ function After() {
       </motion.section>
       <motion.section {...stagger(3)} className="card row">
         <Footprints size={20} className="faint" />
-        <span className="small muted grow">Bis zum nächsten {FESTIVAL.name}!</span>
+        <span className="small muted grow">{t('Bis zum nächsten {name}!', { name: FESTIVAL.name })}</span>
       </motion.section>
     </>
   )
