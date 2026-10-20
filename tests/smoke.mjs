@@ -223,16 +223,19 @@ try {
     await p.getByRole('button', { name: 'Profil & Einstellungen' }).click()
     await p.locator('.sheet').getByText('Echtzeit').click()
     await p.keyboard.press('Escape')
-    const bell = async (artist) => {
+    const bell = async (artist, expect) => {
       await p.locator('nav').getByText('Line-up').click()
       await p.getByRole('tab', { name: 'Alle', exact: true }).click()
       await p.locator('.act', { hasText: artist }).first().click()
+      await p.locator('.sheet').getByRole('heading', { name: artist }).waitFor()
       await p.locator('.sheet').getByRole('button', { name: 'Erinnerung' }).click()
+      await p.getByText(expect).last().waitFor()
       await p.keyboard.press('Escape')
+      await p.locator('.sheet').waitFor({ state: 'detached' })
     }
-    await bell('Arcturus') // moved to 22:30 by a live change → reminder at 22:15 Berlin
-    await bell('Somna') // on …
-    await bell('Somna') // … and off again: must not fire
+    await bell('Arcturus', /Erinnerung 15 Min\. vorher/) // moved to 22:30 by a live change → reminder at 22:15 Berlin
+    await bell('Somna', /Erinnerung 15 Min\. vorher/) // on …
+    await bell('Somna', 'Erinnerung entfernt') // … and off again: must not fire
     await p.reload()
     await p.getByText('Als Nächstes').waitFor()
     await p.clock.runFor(50 * 60_000)

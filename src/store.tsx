@@ -827,7 +827,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         toast(keep.length > 1 ? 'Hopping geplant – beide bleiben im Plan' : t('Entschieden: {artist}', { artist: actById[keep[0]].artist }))
       },
       toggleReminder: (id) => {
-        const on = !s.reminders[id]
+        // the latest state, not this render's: two quick taps must switch on and off again
+        const on = !sRef.current.reminders[id]
+        sRef.current = { ...sRef.current, reminders: { ...sRef.current.reminders, [id]: on } }
         setS((p) => ({ ...p, reminders: { ...p.reminders, [id]: on } }))
         if (on && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {})
         toast(on ? t('Erinnerung 15 Min. vorher · nur solange Realm geöffnet ist') : t('Erinnerung entfernt'))
