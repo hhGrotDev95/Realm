@@ -12,7 +12,7 @@ import { ActRow } from './screens/Lineup'
 import { useApp, type SheetState } from './store'
 import { status, untilLabel } from './time'
 import { t, num, setLang, LANGS, lang } from './i18n'
-import { Avatar, AvatarStack, Segmented, Sheet, SourceTag, StageDot, ago, spring, LazyBoundary } from './ui'
+import { Avatar, AvatarStack, Segmented, Sheet, SourceTag, StageDot, ago, spring, LazyBoundary, Switch } from './ui'
 
 export function Sheets() {
   const { sheet, closeSheet } = useApp()
@@ -715,6 +715,8 @@ function NewMeetup({ actId, poi, place: initialPlace, note: initialNote }: { act
 /* ---------------- Updates ---------------- */
 function UpdateItem({ u, vote, voted }: { u: FestivalUpdate; vote: (id: string, v: 'still' | 'fixed') => void; voted?: 'still' | 'fixed' }) {
   const community = (u.source === 'confirmed' || u.source === 'unconfirmed') && on('reports')
+  // how many people reported it – a count, not a check (audit F06); your own vote does not add to your own report
+  const people = (u.confirms ?? 0) + (voted === 'still' && !u.mine ? 1 : 0)
   return (
     <div className="list-item" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 6 }}>
       <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
@@ -727,14 +729,22 @@ function UpdateItem({ u, vote, voted }: { u: FestivalUpdate; vote: (id: string, 
       </div>
       <div style={{ fontWeight: 600 }}>{u.title}</div>
       {u.body && <div className="small muted">{u.body}</div>}
+      {community && <div className="tiny faint">{people === 1 ? t('Von 1 Person gemeldet · nicht geprüft') : t('Von {n} Personen gemeldet · nicht geprüft', { n: people })}{u.fixedVotes ? ' · ' + t('{n} sagen: behoben', { n: u.fixedVotes }) : ''}</div>}
       {u.validMin !== undefined && <div className="tiny faint">{community ? t('Läuft in {n} Min. ab, wenn niemand bestätigt', { n: u.validMin }) : t('Gültig noch {n} Min.', { n: u.validMin })}</div>}
-      {community && (
+      {community && u.mine && (
+        <div className="row" style={{ gap: 8, marginTop: 4 }}>
+          <button className="btn ghost sm" onClick={() => vote(u.id, 'fixed')}>
+            {t('Erledigt – zurückziehen')}
+          </button>
+        </div>
+      )}
+      {community && !u.mine && (
         <div className="row" style={{ gap: 8, marginTop: 4 }}>
           <button className={`btn sm ${voted === 'still' ? 'on' : 'secondary'}`} onClick={() => vote(u.id, 'still')}>
-            {voted === 'still' && <Check size={15} />} {t('Stimmt noch')} · {(u.confirms ?? 0) + (voted === 'still' ? 1 : 0)}
+            {voted === 'still' && <Check size={15} />} {t('Stimmt noch')}
           </button>
-          <button className="btn ghost sm" onClick={() => vote(u.id, 'fixed')}>
-            {t('Behoben')}
+          <button className={`btn sm ${voted === 'fixed' ? 'on' : 'ghost'}`} onClick={() => vote(u.id, 'fixed')}>
+            {voted === 'fixed' && <Check size={15} />} {t('Behoben')}
           </button>
         </div>
       )}
@@ -763,8 +773,8 @@ function Updates() {
           [
             ['all', t('Alle')],
             ['official', t('Offiziell')],
-            ['confirmed', t('Bestätigt')],
-            ['unconfirmed', t('Unbestätigt')],
+            ['confirmed', t('Mehrfach gemeldet')],
+            ['unconfirmed', t('Einzelmeldung')],
             ['app', t('App')],
           ] as const
         ).map(([v, l]) => (
@@ -792,7 +802,8 @@ const OTHER = t('Sonstiges')
 const REPORT_TYPES = [t('Wasser leer'), t('Lange Schlange'), t('WC defekt'), t('Sehr voll'), OTHER]
 
 function Report({ poi }: { poi?: string }) {
-  const { report, closeSheet, requireIdentity } = useApp()
+  const { report, closeSheet, requireIdentity, openSheet } = useApp()
+  const help = POIS.filter((x) => x.cat === 'medical' || x.cat === 'info')
   const [type, setType] = useState<string | null>(null)
   const [where, setWhere] = useState(poi)
   const [text, setText] = useState('')
@@ -803,8 +814,26 @@ function Report({ poi }: { poi?: string }) {
         <div className="grow">
           <span className="label">{t('Community-Meldung')}</span>
           <h2>{t('Was ist los?')}</h2>
-          <div className="small muted">{t('Meldungen laufen nach 60 Minuten automatisch ab, wenn niemand sie bestätigt.')}</div>
+          <div className="small muted">{t('Andere sehen das mit Verzögerung, niemand prüft es sofort. Meldungen laufen nach 60 Minuten ab, wenn niemand sie bestätigt.')}</div>
         </div>
+      </div>
+      {/* a community report is no emergency call: the way to immediate help comes first (audit D05) */}
+      <div className="alert critical" role="note" style={{ marginBottom: 16 }}>
+        <TriangleAlert className="a-ic" size={20} />
+        <span className="grow">
+          <strong>{t('Notfall? Ruf 112 – das hier ist kein Notruf.')}</strong>
+          <span className="small muted">{t('Sprich Personal oder Security direkt an oder geh zur Sanität.')}</span>
+          <span className="row" style={{ gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+            <a className="btn primary sm" href="tel:112">
+              {t('112 anrufen')}
+            </a>
+            {help.map((x) => (
+              <button key={x.id} className="btn secondary sm" onClick={() => openSheet({ kind: 'poi', id: x.id })}>
+                {x.name}
+              </button>
+            ))}
+          </span>
+        </span>
       </div>
       <div className="chips" style={{ flexWrap: 'wrap', marginBottom: 18 }}>
         {REPORT_TYPES.map((ty) => (
@@ -1245,7 +1274,7 @@ function Chat() {
 }
 
 function Members() {
-  const { crew, guest, removeMember } = useApp()
+  const { crew, guest, removeMember, approveMember, setApproveJoins, renewCode } = useApp()
   const rows = [{ id: 'me', name: guest.nickname ?? t('Du'), color: guest.color }, ...crew.members]
   const canModerate = crew.owner === 'me' && crew.live
   return (
@@ -1258,6 +1287,31 @@ function Members() {
           </div>
         </div>
       </div>
+      {canModerate && crew.requests.length > 0 && (
+        <>
+          <div className="label" style={{ marginBottom: 8 }}>
+            {t('Beitrittsanfragen')}
+          </div>
+          <div className="list" style={{ marginBottom: 18 }}>
+            {crew.requests.map((r) => (
+              <div key={r.id} className="list-item">
+                <span className="avatar" style={{ background: r.color }}>
+                  {r.name[0]?.toUpperCase()}
+                </span>
+                <span className="grow" style={{ fontWeight: 500 }}>
+                  {r.name}
+                </span>
+                <button className="btn primary sm" onClick={() => approveMember(r.id)}>
+                  {t('Freigeben')}
+                </button>
+                <button className="btn ghost sm" aria-label={t('{name} ablehnen', { name: r.name })} onClick={() => removeMember(r.id)}>
+                  {t('Ablehnen')}
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       <div className="list">
         {rows.map((m) => (
           <div key={m.id} className="list-item">
@@ -1267,14 +1321,14 @@ function Members() {
             </span>
             {crew.owner === m.id && (
               <span className="tag official">
-                <Crown size={12} /> {t('Gründer:in')}
+                <Crown size={12} /> {t('Verantwortlich')}
               </span>
             )}
             {canModerate && m.id !== 'me' && (
               <button
                 className="btn ghost sm"
                 aria-label={t('{name} entfernen', { name: m.name })}
-                onClick={() => confirm(t('{name} aus der Crew entfernen? Die Person kann mit dem Code nicht wieder beitreten.', { name: m.name })) && removeMember(m.id)}
+                onClick={() => confirm(t('{name} aus der Crew entfernen? Der Einladungscode wird dabei erneuert – der alte Link funktioniert für niemanden mehr.', { name: m.name })) && removeMember(m.id)}
               >
                 <UserMinus size={16} /> {t('Entfernen')}
               </button>
@@ -1282,9 +1336,26 @@ function Members() {
           </div>
         ))}
       </div>
+      {canModerate && (
+        <div className="list" style={{ marginTop: 18 }}>
+          <div className="list-item">
+            <span className="grow">
+              <span style={{ fontWeight: 600, display: 'block' }}>{t('Beitritt bestätigen')}</span>
+              <span className="small faint">{t('Neue Mitglieder warten, bis du sie freigibst.')}</span>
+            </span>
+            <Switch on={crew.approveJoins} onChange={setApproveJoins} label={t('Beitritt bestätigen')} />
+          </div>
+          <button className="list-item" onClick={() => confirm(t('Neuen Code erzeugen? Der bisherige Link funktioniert dann nicht mehr.')) && renewCode()}>
+            <span className="grow" style={{ fontWeight: 600 }}>
+              {t('Einladungscode erneuern')}
+            </span>
+            <span className="small faint">{crew.code}</span>
+          </button>
+        </div>
+      )}
       <p className="tiny faint" style={{ marginTop: 14 }}>
         {t('Nachrichten, die zwei Mitglieder melden, werden für alle außer der verfassenden Person ausgeblendet.')}{' '}
-        {canModerate ? t('Als Gründer:in kannst du Nachrichten löschen und Mitglieder entfernen.') : ''}
+        {canModerate ? t('Als Verantwortliche:r kannst du Nachrichten löschen und Mitglieder entfernen.') : t('Verlässt die verantwortliche Person die Crew, übernimmt das am längsten dabei gewesene Mitglied.')}
       </p>
     </>
   )

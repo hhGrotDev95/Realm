@@ -69,8 +69,9 @@ export function FavButton({ id }: { id: string }) {
 
 const SOURCE: Record<UpdateSource, string> = {
   official: t('Offiziell'),
-  confirmed: t('Community bestätigt'),
-  unconfirmed: t('Unbestätigt'),
+  // community reports are counted, never checked: only the organizer makes something official (audit F06)
+  confirmed: t('Mehrfach gemeldet'),
+  unconfirmed: t('Einzelmeldung'),
   app: t('App-Hinweis'),
 }
 export function SourceTag({ source }: { source: UpdateSource }) {

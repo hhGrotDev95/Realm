@@ -7,6 +7,7 @@ import { FaqEditor } from './FaqEditor'
 import { MapEditor } from './MapEditor'
 import { Analytics } from './Analytics'
 import { ChatModeration } from './ChatModeration'
+import { CommunityReports } from './CommunityReports'
 import { CreateFestival, ImportPanel, Settings, SetupWizard, StagesEditor } from './Setup'
 import { currentSlug } from '../festival'
 import type { ModuleKey } from '../modules'
@@ -256,7 +257,12 @@ function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string
         ))}
       </nav>
       {tab === 'setup' && <SetupWizard token={token} flash={flash} slug={slug} reload={reload} />}
-      {tab === 'announcements' && <Announcements token={token} flash={flash} />}
+      {tab === 'announcements' && (
+        <div className="stack" style={{ gap: 16 }}>
+          <Announcements token={token} flash={flash} />
+          {on('reports') && <CommunityReports token={token} flash={flash} slug={slug} />}
+        </div>
+      )}
       {tab === 'timetable' && <Timetable token={token} flash={flash} />}
       {tab === 'import' && (
         <div className="card">

@@ -543,7 +543,7 @@ function DepartureDemo() {
       </motion.div>
       <div className="list" style={{ gap: 8 }}>
         <InfoTile i={1} icon={Bus} title={t('Shuttle 11:25')} sub={t('In 10 Min. · Terminal Süd-Ost · Takt erhöht')} tone="ok" onClick={() => openSheet({ kind: 'poi', id: 'sh1' })} />
-        <InfoTile i={2} icon={Car} title={t('A7 Richtung Hamburg')} sub={t('+35 Min. Verzögerung · Community bestätigt')} tone="warn" onClick={() => openSheet({ kind: 'updates' })} />
+        <InfoTile i={2} icon={Car} title={t('A7 Richtung Hamburg')} sub={t('+35 Min. Verzögerung · mehrfach gemeldet')} tone="warn" onClick={() => openSheet({ kind: 'updates' })} />
         <InfoTile i={3} icon={PackageSearch} title={t('Lost & Found')} sub={t('Bis Montag 14 Uhr im Info-Zelt')} onClick={() => openSheet({ kind: 'poi', id: 'in1' })} />
       </div>
       <motion.section {...stagger(4)} className="card">

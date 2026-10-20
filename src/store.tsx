@@ -47,8 +47,9 @@ interface Persisted {
   dismissed: string[]
   // backend (only used when VITE_API_URL is set)
   session: Pick<Session, 'id' | 'token'> | null
-  crewRef: { id: string; name: string; code: string } | null
-  remote: { me: string; owner?: string; members: CrewState['members'] } | null
+  /** `pending`: the join request still waits for the owner (audit F05) */
+  crewRef: { id: string; name: string; code: string; pending?: boolean } | null
+  remote: { me: string; owner?: string; approveJoins?: boolean; members: CrewState['members'] } | null
   remoteReports: RemoteReport[]
   /** when remoteReports were fetched – their ages are relative to it */
   reportsFetchedAt: number
@@ -66,6 +67,9 @@ export interface CrewView {
   name: string
   code: string | null
   members: Friend[]
+  /** join requests, for the owner only */
+  requests: { id: string; name: string; color: string }[]
+  approveJoins: boolean
   byId: Record<string, Friend>
   friendsFor: (actId: string) => string[]
   stepsSyncedMin: number | null
@@ -222,6 +226,9 @@ interface Ctx extends Persisted {
   deleteMessage: (id: string) => void
   flagMessage: (id: string) => void
   removeMember: (id: string) => void
+  approveMember: (id: string) => void
+  setApproveJoins: (v: boolean) => void
+  renewCode: () => void
 }
 
 const C = createContext<Ctx>(null!)
@@ -285,8 +292,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const rsvps = new Map(queued.flatMap((o) => (o.kind === 'rsvp' ? [[o.meetupId, o.going] as const] : [])))
       return {
         ...p,
-        crewRef: cs.crew,
-        remote: { me: cs.me, owner: cs.owner, members: cs.members },
+        crewRef: { id: cs.crew.id, name: cs.crew.name, code: cs.crew.code },
+        remote: { me: cs.me, owner: cs.owner, approveJoins: cs.crew.approveJoins, members: cs.members },
         chat: [
           // incremental polls only carry new messages: keep the ones we already have
           ...(incremental && p.crewRef?.id === cs.crew.id ? p.chat.filter((m) => !m.pending && !cs.messages.some((n) => n.id === m.id)) : []),
@@ -318,7 +325,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const incremental = c.at > 0 && c.polls % 15 !== 0
     try {
       const [cs, reports] = await Promise.all([crewId && on('crew') ? api.crew(crewId, incremental ? c.at - 1 : undefined) : null, on('reports') ? api.reports() : []])
-      if (cs) {
+      if (cs?.pending) {
+        // still waiting for the owner: nothing of the crew is shown yet
+        setS((p) => ({ ...p, crewRef: { ...cs.crew, pending: true }, remote: null }))
+      } else if (cs) {
+        // just approved: the next round fetches everything
+        if (sRef.current.crewRef?.pending) toast(t('Du bist jetzt in „{name}“', { name: cs.crew.name }))
         applyCrew(cs, incremental)
         c.at = Math.max(incremental ? c.at : 0, ...cs.messages.map((m) => m.at))
         c.polls++
@@ -526,11 +538,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const crewId = s.crewRef?.id
     const live = online && !!s.remote
     const crew: CrewView = !on('crew')
-      ? { live: false, owner: null, name: '', code: null, members: [], byId: {}, friendsFor: () => [], stepsSyncedMin: null }
+      ? { live: false, owner: null, name: '', code: null, members: [], requests: [], approveJoins: false, byId: {}, friendsFor: () => [], stepsSyncedMin: null }
       : live
       ? (() => {
           const members: Friend[] = s.remote!.members
-            .filter((m) => m.id !== s.remote!.me)
+            .filter((m) => m.id !== s.remote!.me && !m.pending)
             .map((m) => ({
               id: m.id,
               name: m.nickname ?? 'Gast',
@@ -547,6 +559,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             name: s.crewRef!.name,
             code: s.crewRef!.code,
             members,
+            requests: s.remote!.members.filter((m) => m.pending).map((m) => ({ id: m.id, name: m.nickname ?? 'Gast', color: m.color })),
+            approveJoins: !!s.remote!.approveJoins,
             byId: Object.fromEntries(members.map((m) => [m.id, m])),
             friendsFor: (actId: string) => members.filter((m) => plans[m.id]?.includes(actId)).map((m) => m.id),
             stepsSyncedMin: synced.length ? Math.round((Date.now() - Math.max(...synced)) / 60000) : null,
@@ -558,6 +572,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           name: online ? t('Noch keine Crew') : t('Demo-Crew'),
           code: null,
           members: online ? [] : FRIENDS,
+          requests: [],
+          approveJoins: false,
           byId: online ? {} : Object.fromEntries(FRIENDS.map((f) => [f.id, f])),
           friendsFor: online ? () => [] : demoFriendsFor,
           stepsSyncedMin: online ? null : 4,
@@ -574,7 +590,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ageMin: r.ageMin,
       validMin: r.validMin,
       severity: r.severity,
-      confirms: r.confirms - (r.myVote === 'still' ? 1 : 0),
+      confirms: r.confirms - (r.myVote === 'still' && !r.mine ? 1 : 0),
+      fixedVotes: r.fixedVotes,
+      mine: r.mine,
       phases: ['before', 'arrival', 'during', 'departure'],
     }))
     const official: FestivalUpdate[] = ageSince(s.announcements?.items ?? [], s.announcements?.fetchedAt ?? Date.now(), Date.now())
@@ -616,7 +634,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       netOnline,
       crew,
       updates,
-      inviteLink: () => (s.crewRef ? `${location.origin}/?join=${s.crewRef.code}` : null),
+      // the link names the festival, so it opens the right one on any phone (audit F11)
+      inviteLink: () => (s.crewRef && !s.crewRef.pending && s.crewRef.code ? `${location.origin}/?f=${encodeURIComponent(FESTIVAL.slug)}&join=${s.crewRef.code}` : null),
       deleteMessage: (id) => {
         const mark = () => setS((p) => ({ ...p, chat: p.chat.map((m) => (m.id === id ? { ...m, deleted: true, text: '' } : m)) }))
         if (!online) return mark()
@@ -638,9 +657,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }),
       removeMember: (id) => {
         if (!online || !crewId) return toast(t('Im Demo-Modus können keine Mitglieder entfernt werden'))
-        api.removeMember(crewId, id).then(() => {
-          toast(t('Mitglied entfernt'))
+        api.removeMember(crewId, id).then(({ code }) => {
+          // the old invite link no longer works – also not for a new profile of the same person (audit F05)
+          setS((p) => ({ ...p, crewRef: p.crewRef && { ...p.crewRef, code } }))
+          toast(t('Entfernt · neuer Einladungscode {code}', { code }))
           refresh()
+        }, fail)
+      },
+      approveMember: (id) => {
+        if (!crewId) return
+        api.approveMember(crewId, id).then(() => {
+          toast(t('Beitritt freigegeben'))
+          refresh()
+        }, fail)
+      },
+      setApproveJoins: (v) => {
+        if (!crewId) return
+        api.setApproveJoins(crewId, v).then(() => {
+          setS((p) => ({ ...p, remote: p.remote && { ...p.remote, approveJoins: v } }))
+          toast(v ? t('Neue Mitglieder brauchen jetzt deine Freigabe') : t('Mit dem Code kann jetzt jede:r direkt beitreten'))
+        }, fail)
+      },
+      renewCode: () => {
+        if (!crewId) return
+        api.renewCode(crewId).then(({ code }) => {
+          setS((p) => ({ ...p, crewRef: p.crewRef && { ...p.crewRef, code } }))
+          toast(t('Neuer Code {code} · der alte Link gilt nicht mehr', { code }))
         }, fail)
       },
       createCrew: async (name) => {
@@ -660,7 +702,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setS((p) => ({ ...p, crewRef: c, pendingJoin: null }))
           sRef.current = { ...sRef.current, crewRef: c }
           await refresh()
-          toast(t('Willkommen bei „{name}“', { name: c.name }))
+          toast(c.pending ? t('Anfrage gesendet – wer „{name}“ verantwortet, gibt dich frei', { name: c.name }) : t('Willkommen bei „{name}“', { name: c.name }))
         } catch (e) {
           fail(e)
         }

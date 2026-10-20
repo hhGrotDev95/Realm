@@ -39,6 +39,20 @@ async function api(method, path, token, body, festival = 'realm-open-air') {
   return { status: res.status, data: text ? JSON.parse(text) : null }
 }
 
+/** join by code and have the crew owner approve the request (new crews ask before anyone joins) */
+async function joinApproved(owner, joiner, crew, festival) {
+  const j = await api('POST', '/api/crews/join', joiner.token, { code: crew.code }, festival)
+  if (j.data?.pending) await api('POST', `/api/crews/${crew.id}/members/${joiner.id}/approve`, owner.token, undefined, festival)
+  return j
+}
+
+/** guests for the later tests come from their own address, so the per-IP signup limit does not get in the way */
+let ipN = 0
+async function newGuest(nickname) {
+  const res = await fetch(BASE + '/api/guests', { method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': `10.0.0.${++ipN}` }, body: JSON.stringify({ nickname }) })
+  return res.json()
+}
+
 let passed = 0
 const test = async (name, fn) => {
   await fn()
@@ -84,6 +98,14 @@ try {
     const j = await api('POST', '/api/crews/join', ben.token, { code: crew.code.toLowerCase().replace('-', ' ') })
     assert.equal(j.status, 200)
     assert.equal(j.data.id, crew.id)
+    // new crews ask the owner first; until then the joiner sees nothing but the name
+    assert.equal(j.data.pending, true)
+    assert.equal(j.data.code, '')
+    assert.deepEqual((await api('GET', `/api/crews/${crew.id}`, ben.token)).data, { pending: true, crew: { id: crew.id, name: 'Zeltplatz 14', code: '' } })
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages`, ben.token, { text: 'Hallo?' })).status, 403)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/members/${ben.id}/approve`, ben.token)).status, 403)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/members/${ben.id}/approve`, lea.token)).status, 204)
+    assert.equal((await api('GET', `/api/crews/${crew.id}`, ben.token)).data.crew.code, crew.code)
     assert.equal((await api('POST', '/api/crews/join', ben.token, { code: 'ZZZZ-ZZZZ' })).status, 404)
   })
 
@@ -142,7 +164,7 @@ try {
 
   await test('moderation: delete own, flag others, owner deletes and removes', async () => {
     const eve = (await api('POST', '/api/guests', null, { nickname: 'Eve' })).data
-    await api('POST', '/api/crews/join', eve.token, { code: crew.code })
+    await joinApproved(lea, eve, crew)
     const spam = (await api('POST', `/api/crews/${crew.id}/messages`, eve.token, { text: 'Spam!' })).data
     const own = (await api('POST', `/api/crews/${crew.id}/messages`, ben.token, { text: 'Tippfehler' })).data
     const since = own.at - 1
@@ -175,9 +197,11 @@ try {
     assert.equal(state.owner, lea.id)
     assert.equal((await api('DELETE', `/api/crews/${crew.id}/members/${eve.id}`, ben.token)).status, 403)
     assert.equal((await api('DELETE', `/api/crews/${crew.id}/members/${lea.id}`, lea.token)).status, 400)
-    assert.equal((await api('DELETE', `/api/crews/${crew.id}/members/${eve.id}`, lea.token)).status, 204)
+    const removed = await api('DELETE', `/api/crews/${crew.id}/members/${eve.id}`, lea.token)
+    assert.equal(removed.status, 200)
     assert.equal((await api('GET', `/api/crews/${crew.id}`, eve.token)).status, 404)
-    assert.equal((await api('POST', '/api/crews/join', eve.token, { code: crew.code })).status, 403)
+    assert.equal((await api('POST', '/api/crews/join', eve.token, { code: removed.data.code })).status, 403)
+    crew.code = removed.data.code
     // owner deletes someone else's message
     const m2 = (await api('POST', `/api/crews/${crew.id}/messages`, ben.token, { text: 'Bitte löschen' })).data
     assert.equal((await api('DELETE', `/api/crews/${crew.id}/messages/${m2.id}`, lea.token)).status, 204)
@@ -217,6 +241,8 @@ try {
     const mine = list.find((x) => x.id === r.data.id)
     assert.equal(mine.confirms, 2)
     assert.equal(mine.myVote, 'still')
+    // the reporter's own "still" does not count again (audit F06)
+    assert.equal((await api('PUT', `/api/reports/${r.data.id}/vote`, lea.token, { kind: 'still' })).status, 400)
     // one "fixed" from someone else is not enough …
     await api('PUT', `/api/reports/${r.data.id}/vote`, ben.token, { kind: 'fixed' })
     list = (await api('GET', '/api/reports', ben.token)).data
@@ -614,7 +640,7 @@ try {
     const owner = (await api('POST', '/api/guests', null, { nickname: 'Owner' })).data
     const mate = (await api('POST', '/api/guests', null, { nickname: 'Mate' })).data
     const c = (await api('POST', '/api/crews', owner.token, { name: 'Privat' }, N)).data
-    await api('POST', '/api/crews/join', mate.token, { code: c.code }, N)
+    await joinApproved(owner, mate, c, N)
     const share = (g, on) => api('PUT', `/api/crews/${c.id}/location`, g.token, { share: on, location: on ? 'pier' : null }, N)
     const sharing = async () => (await api('GET', `/api/crews/${c.id}`, owner.token, undefined, N)).data.members.find((m) => m.nickname === 'Mate').sharing
     assert.equal((await share(mate, true)).status, 200)
@@ -646,12 +672,91 @@ try {
     assert.equal((await api('PATCH', '/api/admin/festivals/nordlicht', A, { status: 'published' }, null)).status, 200)
   })
 
+  await test('crew safety (audit F05): a removed person cannot get back in with a fresh profile and the old code', async () => {
+    const N = 'nordlicht'
+    const guest = newGuest
+    const [owner, mate, troll] = [await guest('Ole'), await guest('Mia'), await guest('Tom')]
+    const c = (await api('POST', '/api/crews', owner.token, { name: 'Sicher' }, N)).data
+    await joinApproved(owner, mate, c, N)
+    await joinApproved(owner, troll, c, N)
+    const removed = await api('DELETE', `/api/crews/${c.id}/members/${troll.id}`, owner.token, undefined, N)
+    assert.equal(removed.status, 200)
+    assert.notEqual(removed.data.code, c.code, 'removing someone renews the invite code')
+    // the same person with a brand-new profile and the old link: not found
+    const again = await guest('Tom2')
+    assert.equal((await api('POST', '/api/crews/join', again.token, { code: c.code }, N)).status, 404)
+    // with approval switched off and the code leaked anyway, the owner can still renew it by hand
+    assert.equal((await api('PATCH', `/api/crews/${c.id}`, mate.token, { approveJoins: false }, N)).status, 403)
+    assert.equal((await api('PATCH', `/api/crews/${c.id}`, owner.token, { approveJoins: false }, N)).status, 200)
+    const direct = await api('POST', '/api/crews/join', again.token, { code: removed.data.code }, N)
+    assert.equal(direct.data.pending, false)
+    const fresh = (await api('POST', `/api/crews/${c.id}/code`, owner.token, undefined, N)).data.code
+    assert.equal((await api('POST', '/api/crews/join', troll.token, { code: removed.data.code }, N)).status, 404)
+    // join requests: only the owner sees them, without plan or location; declining bans and renews
+    await api('PATCH', `/api/crews/${c.id}`, owner.token, { approveJoins: true }, N)
+    const stranger = await guest('Fremd')
+    assert.equal((await api('POST', '/api/crews/join', stranger.token, { code: fresh }, N)).data.pending, true)
+    const seenBy = async (g) => (await api('GET', `/api/crews/${c.id}`, g.token, undefined, N)).data.members.find((m) => m.id === stranger.id)
+    assert.equal(await seenBy(mate), undefined)
+    assert.deepEqual(await seenBy(owner), { id: stranger.id, nickname: 'Fremd', color: stranger.color, pending: true, sharing: false, location: null, locationAt: null, plan: [], steps: [] })
+    assert.equal((await api('DELETE', `/api/crews/${c.id}/members/${stranger.id}`, owner.token, undefined, N)).status, 200)
+    assert.equal((await api('POST', '/api/crews/join', stranger.token, { code: fresh }, N)).status, 404)
+  })
+
+  await test('crew safety (audit F09): when the owner leaves or deletes the profile, the longest member takes over', async () => {
+    const N = 'nordlicht'
+    const guest = newGuest
+    const [a, b, d, p] = [await guest('Ann'), await guest('Bo'), await guest('Dan'), await guest('Pia')]
+    const c = (await api('POST', '/api/crews', a.token, { name: 'Erbe' }, N)).data
+    await joinApproved(a, b, c, N)
+    await joinApproved(a, d, c, N)
+    await api('POST', '/api/crews/join', p.token, { code: c.code }, N) // still pending: never becomes owner
+    assert.equal((await api('POST', `/api/crews/${c.id}/leave`, a.token, undefined, N)).status, 204)
+    const s = (await api('GET', `/api/crews/${c.id}`, b.token, undefined, N)).data
+    assert.equal(s.owner, b.id)
+    // the new owner can moderate; deleting the profile hands over again
+    assert.equal((await api('POST', `/api/crews/${c.id}/members/${p.id}/approve`, b.token, undefined, N)).status, 204)
+    assert.equal((await api('DELETE', '/api/me', b.token, undefined, N)).status, 204)
+    assert.equal((await api('GET', `/api/crews/${c.id}`, d.token, undefined, N)).data.owner, d.id)
+    // a pending request alone does not keep a crew alive
+    const solo = (await api('POST', '/api/crews', d.token, { name: 'Allein' }, N)).data
+    const q = await guest('Quinn')
+    await api('POST', '/api/crews/join', q.token, { code: solo.code }, N)
+    await api('POST', `/api/crews/${solo.id}/leave`, d.token, undefined, N)
+    assert.equal((await api('GET', `/api/crews/${solo.id}`, q.token, undefined, N)).status, 404)
+  })
+
+  await test('community reports (audit F06): own votes do not count, others cannot retire a report, only the organizer verifies', async () => {
+    const A = 'test-admin-token'
+    const N = 'nordlicht'
+    const guest = newGuest
+    const [rep, x, y] = [await guest('Rita'), await guest('Xa'), await guest('Yo')]
+    const r = (await api('POST', '/api/reports', rep.token, { title: 'Sanität überlastet' }, N)).data
+    const get = async () => (await api('GET', '/api/reports', x.token, undefined, N)).data.find((z) => z.id === r.id)
+    // the old trick: reporter + own vote + one more profile looked "confirmed"
+    await api('PUT', `/api/reports/${r.id}/vote`, rep.token, { kind: 'still' }, N)
+    await api('PUT', `/api/reports/${r.id}/vote`, x.token, { kind: 'still' }, N)
+    assert.deepEqual([(await get()).confirms, (await get()).source], [2, 'unconfirmed'])
+    // two other profiles saying "fixed" no longer end someone else's report
+    await api('PUT', `/api/reports/${r.id}/vote`, x.token, { kind: 'fixed' }, N)
+    await api('PUT', `/api/reports/${r.id}/vote`, y.token, { kind: 'fixed' }, N)
+    assert.equal((await get()).fixedVotes, 2)
+    // the organizer verifies (→ official) or ends it
+    assert.equal((await api('PUT', `/api/admin/festivals/nordlicht/reports/${r.id}`, x.token, { verified: true }, null)).status, 401)
+    assert.equal((await api('PUT', `/api/admin/festivals/nordlicht/reports/${r.id}`, A, { verified: true }, null)).status, 200)
+    assert.equal((await get()).source, 'official')
+    const list = (await api('GET', '/api/admin/festivals/nordlicht/reports', A, undefined, null)).data
+    assert.deepEqual(list.find((z) => z.id === r.id).verified, true)
+    assert.equal((await api('DELETE', `/api/admin/festivals/nordlicht/reports/${r.id}`, A, undefined, null)).status, 204)
+    assert.equal(await get(), undefined)
+  })
+
   await test('privacy: a location share expires on the server 2 h after it was last confirmed', async () => {
     const N = 'nordlicht'
     const a = (await api('POST', '/api/guests', null, { nickname: 'Tia' })).data
     const b = (await api('POST', '/api/guests', null, { nickname: 'Udo' })).data
     const c = (await api('POST', '/api/crews', a.token, { name: 'Ablauf' }, N)).data
-    await api('POST', '/api/crews/join', b.token, { code: c.code }, N)
+    await joinApproved(a, b, c, N)
     await api('PUT', `/api/crews/${c.id}/location`, b.token, { share: true, location: 'werft' }, N)
     const udo = async () => (await api('GET', `/api/crews/${c.id}`, a.token, undefined, N)).data.members.find((m) => m.nickname === 'Udo')
     assert.deepEqual([(await udo()).sharing, (await udo()).location], [true, 'werft'])
