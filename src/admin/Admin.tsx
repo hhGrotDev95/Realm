@@ -1,15 +1,16 @@
-import { CalendarClock, CircleHelp, FileUp, LayoutGrid, Palette, ToggleRight, LogOut, Megaphone, Plus, RotateCcw, Settings2, Trash2, Wand2 } from 'lucide-react'
+import { CalendarClock, Map as MapIcon, CircleHelp, FileUp, LayoutGrid, Palette, ToggleRight, LogOut, Megaphone, Plus, RotateCcw, Settings2, Trash2, Wand2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { adminApi, ApiError, online, setFestival, type Announcement } from '../api'
 import { Branding } from './Branding'
 import { Modules } from './Modules'
 import { FaqEditor } from './FaqEditor'
+import { MapEditor } from './MapEditor'
 import { CreateFestival, ImportPanel, Settings, SetupWizard, StagesEditor } from './Setup'
 import { currentSlug } from '../festival'
 import { ACTS, DAYS, FESTIVAL, fmt, loadFestivalBundle, STAGES, stageById, type Act, type StageId, type TimetableChange } from '../data'
 
 const KEY = 'realm.admin'
-type Tab = 'setup' | 'announcements' | 'timetable' | 'import' | 'stages' | 'faq' | 'branding' | 'modules' | 'settings'
+type Tab = 'setup' | 'announcements' | 'timetable' | 'import' | 'stages' | 'map' | 'faq' | 'branding' | 'modules' | 'settings'
 
 /** Parses "22:30" (or "01:30" after midnight) into festival-day minutes. */
 function parseTime(v: string): number | null {
@@ -229,6 +230,7 @@ const TABS: { id: Tab; label: string; icon: typeof Megaphone; draftOnly?: boolea
   { id: 'timetable', label: 'Live-Änderungen', icon: CalendarClock },
   { id: 'import', label: 'Import', icon: FileUp },
   { id: 'stages', label: 'Bühnen', icon: LayoutGrid },
+  { id: 'map', label: 'Karte', icon: MapIcon },
   { id: 'faq', label: 'FAQ', icon: CircleHelp },
   { id: 'branding', label: 'Branding', icon: Palette },
   { id: 'modules', label: 'Module', icon: ToggleRight },
@@ -261,6 +263,7 @@ function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string
           <StagesEditor token={token} flash={flash} slug={slug} reload={reload} />
         </div>
       )}
+      {tab === 'map' && <MapEditor token={token} flash={flash} slug={slug} reload={reload} />}
       {tab === 'branding' && <Branding token={token} flash={flash} slug={slug} reload={reload} />}
       {tab === 'faq' && <FaqEditor token={token} flash={flash} slug={slug} reload={reload} />}
       {tab === 'modules' && <Modules token={token} flash={flash} slug={slug} reload={reload} />}

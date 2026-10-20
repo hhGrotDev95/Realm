@@ -399,6 +399,31 @@ try {
     await visitor.getByRole('button', { name: 'Fragen' }).click()
     await visitor.getByText('Quelle: Service-Infos').waitFor()
     await visitor.context().setOffline(false)
+
+    // map editor: upload a site plan, place a new point by clicking, name it; visitors find it on the map
+    await visitor.keyboard.press('Escape')
+    await org.getByRole('tab', { name: 'Karte' }).click()
+    await org.getByLabel('Bühne Wiese – mit Pfeiltasten verschieben').waitFor() // stages are on the map from the start
+    await org.locator('input[type=file][accept^="image/png"]').setInputFiles({ name: 'plan.png', mimeType: 'image/png', buffer: png })
+    await org.getByRole('button', { name: 'Plan entfernen' }).waitFor()
+    const canvas = await org.getByLabel('Karte bearbeiten').boundingBox()
+    await org.mouse.click(canvas.x + canvas.width * 0.8, canvas.y + canvas.height * 0.2)
+    await org.getByLabel('Name', { exact: true }).fill('Schließfächer')
+    await org.getByLabel('Kategorie').selectOption('info')
+    await org.getByLabel('Schließfächer – mit Pfeiltasten verschieben').press('Shift+ArrowLeft')
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/map-editor.png`, fullPage: true })
+    await org.getByRole('button', { name: 'Karte speichern' }).click()
+    await org.getByText('Karte gespeichert').waitFor()
+    const doc = await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()
+    const locker = doc.pois.find((p) => p.name === 'Schließfächer')
+    if (!locker || Math.abs(locker.x - 775) > 15 || Math.abs(locker.y - 188) > 15) throw new Error('point not saved where it was placed: ' + JSON.stringify(locker))
+    if (!doc.festival.siteMap?.startsWith('data:image/jpeg')) throw new Error('site plan not saved')
+    await visitor.reload()
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await nav(visitor, 'Map')
+    await visitor.locator('.map-wrap image').waitFor({ state: 'attached' })
+    await visitor.getByLabel('Karte durchsuchen').fill('Schließ')
+    await visitor.getByRole('button', { name: /Schließfächer/ }).first().waitFor()
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

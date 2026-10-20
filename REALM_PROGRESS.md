@@ -277,3 +277,10 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - `LazyBoundary`: ein fehlgeschlagener Chunk-Load zeigt „Erneut versuchen“ statt die App abstürzen zu lassen.
 - Smoke-Test prüft Offline jetzt ehrlich (Server wird beendet, da `setOffline` Service-Worker-Fetches nicht abdeckt).
 - Geprüft: typecheck, test:import, build, test:e2e, test:a11y, test:live – alles grün.
+
+## Runde: Karteneditor (Schritt 6, claude/realm-map-editor)
+- Konsole → „Karte“: eigenen Geländeplan hochladen (PNG/JPEG/WebP, wird auf 1600 px skaliert und als JPEG gespeichert, max. ~650 kB), Bühnen und Punkte per Drag & Drop verschieben, neue Punkte per Klick setzen, Name/Kategorie/Status/Beschreibung/„wichtig“ bearbeiten, löschen. Tastatur: Pfeiltasten verschieben (Shift = große Schritte).
+- API `PUT /api/admin/festivals/:slug/map` (validiert Koordinaten 0–1000 × 0–940, Kategorien, max. 300 Punkte); Migration 0009 (`festivals.site_map`).
+- Behoben: Bühnen neuer Festivals fehlten auf der Karte, weil Bühnen-Pins nur aus der Seed-Tabelle kamen. Bühnen-Pins werden jetzt aus den Bühnen selbst erzeugt (eine Quelle für Positionen).
+- Besucher-Karte zeigt den hochgeladenen Plan (Satelliten-Ebene entfällt dann).
+- Geprüft: typecheck, Worker-API (28 Tests inkl. neuem Karten-Test), Migrationstest, test:import, e2e, a11y, live (neuer Schritt: Plan hochladen, Punkt per Klick setzen, mit Tastatur verschieben, Besucher findet ihn in der Kartensuche).
