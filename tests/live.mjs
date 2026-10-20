@@ -68,6 +68,7 @@ const totpCode = (secret, step = Math.floor(Date.now() / 30000)) => {
 const nav = (p, t) => p.locator('nav').getByText(t).click()
 const name = async (p, n) => {
   await p.getByPlaceholder('Spitzname').fill(n)
+  if (await p.getByRole('button', { name: 'Weiter', exact: true }).isEnabled()) throw new Error('age notice must be confirmed before continuing')
   await p.getByLabel(/Ich bin mindestens \d+ Jahre alt/).check()
   await p.getByRole('button', { name: 'Weiter' }).click()
 }

@@ -59,6 +59,7 @@ export function MapScreen() {
     const navTop = document.querySelector('nav')?.getBoundingClientRect().top ?? box.bottom
     const bottom = Math.min(box.height, navTop - box.top) - 12
     const pts = [...visible, ...(here ? [here] : [])]
+    if (!pts.length) return // an empty draft preview has no marker bounds to fit
     const [x0, x1] = [Math.min(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.x))]
     const [y0, y1] = [Math.min(...pts.map((p) => p.y)), Math.max(...pts.map((p) => p.y))]
     // markers keep their pixel size at any zoom: leave room for half a marker around the box

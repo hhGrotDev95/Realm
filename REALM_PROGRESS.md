@@ -349,4 +349,8 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - F14 Schriften lokal (keine Google-Verbindung mehr), F16 vollständige Snapshots inkl. Live-Änderungen und Bühnenattributen.
 - Welle 6b: F12 Löschfristen (Cron + `docs/DATA_RETENTION.md`), Profillöschung über alle Festivals. Migration `0017_guest_activity.sql`.
 - Welle 6c: F15 Zeitmodell (Festival-Zeitzone, einheitliche Nachtgrenze 06:00) und Erinnerungen über alle Tage; Konsole: Zeitzone unter „Status“. Migration `0018_festival_timezone.sql`.
+- Nacharbeit zu PR #32: Erinnerungs-Glocke mit `aria-pressed`; der Smoke-Test prüft den dauerhaften Zustand statt einer kurzlebigen Toast-Bestätigung. Der Firefox-Timeout im CI-Job 118529730476 wird damit an der Ursache im Test behoben. Lokal: Unit-Tests, Build, Smoke und a11y mit Chrome bestanden. Vollständige CI wird vor dem Merge erneut geprüft.
 - Nachtrag D08: Kartenübersicht auf 320 px (offener Teil aus Welle 0).
+- **Welle 7a – Abschlussprüfung (20.10.2026):** vorhandenen WIP-Stand mit D08 und #32 zusammengeführt. Der Festival-Chat benutzt bereits `name(visitor, 'Uma')`; der gemeinsame Helfer prüft jetzt zusätzlich, dass „Weiter“ vor der Altersbestätigung gesperrt ist. Lokal bestanden: Import/Unit, Build, Smoke, a11y, vollständiger Live-Test sowie 41 API-Tests und Migrationstest mit 19 Migrationen. Finale Rechtstexte und Betreiberentscheidungen bleiben offen; technische Bereitstellung ist keine rechtliche Freigabe.
+
+- PR #32 gemergt (`cfea513`, CI `39402205182` grün); D08 als PR #33 gemergt (`d40a6fc`, CI `39403712434` grün auf Head `6fb071b`). D08 enthält zusätzlich einen Schutz für leere Markerlisten.

@@ -234,7 +234,7 @@ function ActSheet({ id }: { id: string }) {
           <Navigation size={17} /> {walk === null ? t('Richtung zeigen') : t('ca. {n} Min.', { n: walk })}
         </button>
         {st !== 'past' && (
-          <button className={`icon-btn filled ${reminders[id] ? 'active' : ''}`} style={{ width: 44, height: 44 }} aria-label={t('Erinnerung')} onClick={() => toggleReminder(id)}>
+          <button className={`icon-btn filled ${reminders[id] ? 'active' : ''}`} style={{ width: 44, height: 44 }} aria-label={t('Erinnerung')} aria-pressed={!!reminders[id]} onClick={() => toggleReminder(id)}>
             {reminders[id] ? <BellRing size={19} /> : <Bell size={19} />}
           </button>
         )}
