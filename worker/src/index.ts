@@ -1468,8 +1468,8 @@ app.post('/api/admin/festivals/:slug/import', async (c) => {
   const db = c.env.DB
   const [days, stageRows, actRows] = await db.batch([
     db.prepare('SELECT idx FROM festival_days WHERE festival_id = ?').bind(f.id),
-    db.prepare('SELECT id, name FROM stages WHERE festival_id = ? ORDER BY sort').bind(f.id),
-    db.prepare('SELECT id, day, stage_id, artist, start_min, end_min, genre, bio FROM acts WHERE festival_id = ?').bind(f.id),
+    db.prepare('SELECT id, name, color, x, y, vibe, sort FROM stages WHERE festival_id = ? ORDER BY sort').bind(f.id),
+    db.prepare('SELECT id, day, stage_id, artist, start_min, end_min, genre, bio, popularity FROM acts WHERE festival_id = ?').bind(f.id),
   ])
   const dayIdx = new Set((days.results as { idx: number }[]).map((d) => d.idx))
   const stages = stageRows.results as { id: string; name: string }[]
@@ -1570,10 +1570,14 @@ app.post('/api/admin/festivals/:slug/import', async (c) => {
   let snapshotId: string | null = null
   const writes: D1PreparedStatement[] = []
   if (mode === 'replace') {
+    // the snapshot holds everything visitors see of the timetable: stages with their attributes, acts and
+    // live changes (audit F16); a replace import is a new base timetable, so old live changes go with it
     snapshotId = randomId('snap')
+    const changes = await db.prepare('SELECT * FROM timetable_changes WHERE festival_id = ?').bind(f.id).all()
     writes.push(
-      db.prepare('INSERT INTO import_snapshots (id, festival_id, created_at, note, data) VALUES (?, ?, ?, ?, ?)').bind(snapshotId, f.id, Date.now(), `Vor Import (${summary.rows} Zeilen)`, JSON.stringify({ stages, acts: actRows.results })),
+      db.prepare('INSERT INTO import_snapshots (id, festival_id, created_at, note, data) VALUES (?, ?, ?, ?, ?)').bind(snapshotId, f.id, Date.now(), `Vor Import (${summary.rows} Zeilen)`, JSON.stringify({ v: 2, stages, acts: actRows.results, changes: changes.results })),
       db.prepare('DELETE FROM acts WHERE festival_id = ? AND id NOT IN (SELECT value FROM json_each(?))').bind(f.id, JSON.stringify(acts.map((a) => a.id))),
+      db.prepare('DELETE FROM timetable_changes WHERE festival_id = ?').bind(f.id),
     )
   }
   newStages.forEach((s, i) =>
@@ -1603,15 +1607,33 @@ app.post('/api/admin/festivals/:slug/snapshots/:id/restore', async (c) => {
   const f = await festivalBySlug(c)
   const snap = await c.env.DB.prepare('SELECT data FROM import_snapshots WHERE id = ? AND festival_id = ?').bind(c.req.param('id'), f.id).first<{ data: string }>()
   if (!snap) throw new HttpError(404, 'Snapshot nicht gefunden')
-  const data = JSON.parse(snap.data) as { stages: { id: string; name: string }[]; acts: { id: string; day: number; stage_id: string; artist: string; start_min: number; end_min: number; genre: string; bio: string }[] }
+  type StageSnap = { id: string; name: string; color?: string; x?: number; y?: number; vibe?: string; sort?: number }
+  type ChangeSnap = ChangeRow
+  const data = JSON.parse(snap.data) as { v?: number; stages: StageSnap[]; acts: { id: string; day: number; stage_id: string; artist: string; start_min: number; end_min: number; genre: string; bio: string; popularity?: number }[]; changes?: ChangeSnap[] }
   const db = c.env.DB
+  const ids = JSON.stringify(data.acts.map((a) => a.id))
   await db.batch([
     db.prepare('DELETE FROM acts WHERE festival_id = ?').bind(f.id),
-    // stages removed since the snapshot come back so every restored act has its stage
-    ...data.stages.map((st, i) => db.prepare('INSERT OR IGNORE INTO stages (festival_id, id, name, color, x, y, vibe, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, st.id, st.name, PALETTE[i % PALETTE.length], 200 + (i % 4) * 180, 220 + Math.floor(i / 4) * 200, '', i)),
-    ...data.acts.map((a) =>
-      db.prepare('INSERT INTO acts (festival_id, id, day, stage_id, artist, start_min, end_min, genre, bio, popularity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.5)').bind(f.id, a.id, a.day, a.stage_id, a.artist, a.start_min, a.end_min, a.genre, a.bio),
+    // stages come back with their attributes as saved (older snapshots: name only, current attributes kept)
+    ...data.stages.map((st, i) =>
+      st.color === undefined
+        ? db.prepare('INSERT OR IGNORE INTO stages (festival_id, id, name, color, x, y, vibe, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, st.id, st.name, PALETTE[i % PALETTE.length], 200 + (i % 4) * 180, 220 + Math.floor(i / 4) * 200, '', i)
+        : db
+            .prepare('INSERT INTO stages (festival_id, id, name, color, x, y, vibe, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(festival_id, id) DO UPDATE SET name = excluded.name, color = excluded.color, x = excluded.x, y = excluded.y, vibe = excluded.vibe, sort = excluded.sort')
+            .bind(f.id, st.id, st.name, st.color, st.x ?? 0, st.y ?? 0, st.vibe ?? '', st.sort ?? i),
     ),
+    ...data.acts.map((a) =>
+      db.prepare('INSERT INTO acts (festival_id, id, day, stage_id, artist, start_min, end_min, genre, bio, popularity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, a.id, a.day, a.stage_id, a.artist, a.start_min, a.end_min, a.genre, a.bio, a.popularity ?? 0.5),
+    ),
+    // live changes exactly as they were (older snapshots without them: drop changes of acts that are gone)
+    ...(data.changes
+      ? [
+          db.prepare('DELETE FROM timetable_changes WHERE festival_id = ?').bind(f.id),
+          ...data.changes.map((ch) =>
+            db.prepare('INSERT INTO timetable_changes (festival_id, act_id, start_min, end_min, stage, cancelled, note, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, ch.act_id, ch.start_min, ch.end_min, ch.stage, ch.cancelled, ch.note, ch.updated_at),
+          ),
+        ]
+      : [db.prepare('DELETE FROM timetable_changes WHERE festival_id = ? AND act_id NOT IN (SELECT value FROM json_each(?))').bind(f.id, ids)]),
     touch(db, f.id),
   ])
   return c.json({ restored: data.acts.length })

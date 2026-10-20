@@ -476,14 +476,26 @@ try {
     assert.deepEqual((await api('GET', '/api/me', fan.token, undefined, slug)).data.plan, ['0-nachtfalter'])
 
     // replace removes acts missing from the file – after a snapshot that can be restored
+    // (audit F16: the snapshot covers the whole visible timetable – a live cancellation and stage attributes too)
+    assert.equal((await api('PUT', '/api/admin/timetable/0-morgentau', A, { cancelled: true, note: 'Krank' }, slug)).status, 200)
+    const visible = async () => {
+      const doc = (await api('GET', `/api/festivals/${slug}`, null, undefined, null)).data
+      const changes = (await api('GET', '/api/timetable/changes', null, undefined, slug)).data
+      return { acts: doc.acts.map((a) => a.id).sort(), stages: doc.stages.map((st) => [st.id, st.color]), changes: changes.map((ch) => [ch.actId, ch.cancelled, ch.note]) }
+    }
+    const before = await visible()
     const rep = (await api('POST', `/api/admin/festivals/${slug}/import`, A, { mode: 'replace', rows: [{ row: 2, artist: 'Nachtfalter', stage: 'Zelt', day: 0, start: 1470, end: 1560, genre: 'Techno' }] }, null)).data
+    // the old cancellation must not hang over the new timetable (it did before)
+    assert.deepEqual((await visible()).changes, [])
     assert.equal(rep.summary.removed, 3)
     assert.ok(rep.snapshotId)
     assert.equal((await api('GET', `/api/festivals/${slug}`, null, undefined, null)).data.acts.length, 1)
     const snaps = (await api('GET', `/api/admin/festivals/${slug}/snapshots`, A, undefined, null)).data
     assert.equal(snaps[0].id, rep.snapshotId)
+    // a stage attribute changed after the snapshot comes back as saved
+    await api('PUT', `/api/admin/festivals/${slug}/stages`, A, { stages: [{ id: 'wiese', name: 'Wiese', color: '#00ff88' }, { id: 'zelt', name: 'Zelt', color: '#123456' }, { id: 'strand', name: 'Strand' }] }, null)
     assert.equal((await api('POST', `/api/admin/festivals/${slug}/snapshots/${rep.snapshotId}/restore`, A, undefined, null)).data.restored, 4)
-    assert.equal((await api('GET', `/api/festivals/${slug}`, null, undefined, null)).data.acts.length, 4)
+    assert.deepEqual(await visible(), before, 'restore brings back exactly what visitors saw before the import')
     // stages that still have acts cannot be removed
     assert.equal((await api('PUT', `/api/admin/festivals/${slug}/stages`, A, { stages: [{ name: 'Wiese' }] }, null)).status, 409)
     // archive and reactivate
@@ -784,6 +796,9 @@ try {
     assert.deepEqual(results.filter((r) => r.status !== 201).map((r) => r.status), [], 'every visitor behind the shared IP gets a profile')
     // the old limit locked out visitor 21; now the first 60 need nothing at all
     // abuser on another address, scripting sign-ups without solving anything: stopped after the free quota
+    // the quota counts per fixed 10-minute window: start the abuse run well inside one, so a window change cannot reset it
+    const left = 10 * 60_000 - (Date.now() % (10 * 60_000))
+    if (left < 60_000) await new Promise((r) => setTimeout(r, left + 500))
     const abuse = []
     for (let i = 0; i < 70; i++) abuse.push((await signup('198.51.100.9', { nickname: 'Bot' })).status)
     assert.equal(abuse.filter((s) => s === 201).length, 60)
