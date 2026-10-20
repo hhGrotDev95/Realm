@@ -221,10 +221,29 @@ function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string
   const draft = FESTIVAL.status === 'draft'
   // the setup wizard only exists for drafts; once published the same place shows the status
   if (tab === 'setup' && !draft) tab = 'settings'
+  const visible = TABS.filter((t) => (!t.draftOnly || draft) && (!t.module || on(t.module)))
   return (
     <>
+      {/* narrow screens: one compact picker instead of five rows of tabs; going live stays one tap away (audit D09) */}
+      <div className="admin-picker row">
+        <label className="admin-field" style={{ marginBottom: 0 }}>
+          <span>Bereich</span>
+          <select className="field" value={tab} onChange={(e) => setTab(e.target.value as Tab)}>
+            {visible.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {tab !== 'settings' && tab !== 'setup' && (
+          <button type="button" className="btn secondary sm" style={{ alignSelf: 'flex-end', minHeight: 44 }} onClick={() => setTab(draft ? 'setup' : 'settings')}>
+            {draft ? 'Veröffentlichen' : 'Status'}
+          </button>
+        )}
+      </div>
       <nav className="admin-tabs" role="tablist" aria-label="Bereiche">
-        {TABS.filter((t) => (!t.draftOnly || draft) && (!t.module || on(t.module))).map((t) => (
+        {visible.map((t) => (
           <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'on' : ''} onClick={() => setTab(t.id)}>
             <t.icon size={17} /> {t.label}
           </button>

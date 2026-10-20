@@ -469,6 +469,11 @@ select.field { appearance: none; }
 .wizard-steps li.on span { background: var(--brand); color: var(--brand-ink); }
 .wizard-steps li.done span { background: var(--ok-soft); color: var(--ok); }
 .admin-tabs { flex-wrap: wrap; }
+.admin-picker { display: none; gap: 8px; margin-bottom: 16px; align-items: stretch; }
+@media (max-width: 720px) {
+  .admin-tabs { display: none; }
+  .admin-picker { display: flex; }
+}
 .import-result { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
 .import-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
 .import-summary .stat { padding: 10px; }

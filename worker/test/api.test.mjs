@@ -54,6 +54,9 @@ async function newGuest(nickname) {
   return res.json()
 }
 
+/** publish with every confirmation of the go-live checklist (audit D10) */
+const publish = (slug) => api('PATCH', `/api/admin/festivals/${slug}`, 'test-admin-token', { status: 'published', confirm: ['terrain', 'warnings', 'modules', 'moderation', 'preview'] }, null)
+
 let passed = 0
 const test = async (name, fn) => {
   await fn()
@@ -454,8 +457,18 @@ try {
     )
     assert.ok(b.stages.some((st) => st.id === 'strand'))
 
+    // going live (audit D10): what visitors rely on must exist, and the organizer confirms the rest
+    const refused = await api('PATCH', '/api/admin/festivals/' + slug, A, { status: 'published' }, null)
+    assert.equal(refused.status, 400)
+    assert.deepEqual(refused.data.checks.filter((x) => !x.ok).map((x) => x.id), ['entrance', 'medical', 'faq', 'terrain', 'warnings', 'modules', 'moderation', 'preview'])
+    assert.match(refused.data.checks.find((x) => x.id === 'modules').text, /Crew & Freunde, Crew-Chat/)
+    assert.equal((await api('PUT', `/api/admin/festivals/${slug}/map`, A, { pois: [{ id: 'ein', cat: 'entrance', name: 'Haupteingang', x: 100, y: 100 }, { id: 'san', cat: 'medical', name: 'Sanität', x: 200, y: 200 }] }, null)).status, 200)
+    await api('PUT', `/api/admin/festivals/${slug}/modules`, A, { faqbot: false }, null)
+    const partial = await api('PATCH', '/api/admin/festivals/' + slug, A, { status: 'published', confirm: ['terrain', 'preview'] }, null)
+    assert.deepEqual(partial.data.checks.filter((x) => !x.ok).map((x) => x.id), ['warnings', 'modules', 'moderation'])
+    assert.deepEqual((await api('GET', `/api/admin/festivals/${slug}/readiness`, A, undefined, null)).data.checks.filter((x) => x.kind === 'data').every((x) => x.ok), true)
+    assert.equal((await publish(slug)).status, 200)
     // a visitor favourites an act; re-importing with a new time keeps the id (and the favourite)
-    await api('PATCH', '/api/admin/festivals/' + slug, A, { status: 'published' }, null)
     const fan = (await api('POST', '/api/guests', null, { nickname: 'Fan' })).data
     assert.deepEqual((await api('PUT', '/api/me/plan', fan.token, { acts: ['0-nachtfalter'] }, slug)).data.acts, ['0-nachtfalter'])
     const re = (await api('POST', `/api/admin/festivals/${slug}/import`, A, { mode: 'merge', rows: [{ row: 2, artist: 'Nachtfalter', stage: 'Zelt', day: 0, start: 1470, end: 1560, genre: 'Techno' }] }, null)).data
@@ -476,7 +489,7 @@ try {
     // archive and reactivate
     assert.equal((await api('PATCH', `/api/admin/festivals/${slug}`, A, { status: 'archived' }, null)).data.status, 'archived')
     assert.equal((await api('PUT', '/api/me/plan', fan.token, { acts: [] }, slug)).status, 403)
-    assert.equal((await api('PATCH', `/api/admin/festivals/${slug}`, A, { status: 'published' }, null)).data.status, 'published')
+    assert.equal((await publish(slug)).data.status, 'published')
   })
 
   await test('branding: validated colour (WCAG), font and logo; published in the festival document', async () => {
@@ -670,7 +683,11 @@ try {
     assert.equal((await share(mate, false)).status, 200, 'share:false must work in an archived festival')
     assert.equal((await api('DELETE', '/api/me/steps', mate.token, undefined, N)).status, 204)
     assert.equal((await api('POST', `/api/crews/${c.id}/leave`, mate.token, undefined, N)).status, 204, 'leaving must work in an archived festival')
-    assert.equal((await api('PATCH', '/api/admin/festivals/nordlicht', A, { status: 'published' }, null)).status, 200)
+    // going live again needs the checklist (audit D10): earlier tests replaced Nordlicht's map, so restore its essentials
+    await api('PUT', '/api/admin/festivals/nordlicht/map', A, { pois: [{ id: 'en1', cat: 'entrance', name: 'Eingang Hafenspitze', x: 120, y: 120 }, { id: 'md1', cat: 'medical', name: 'Sanität am Hafentor', x: 160, y: 200 }] }, null)
+    await api('PUT', '/api/admin/festivals/nordlicht/faq/sanitaet', A, { question: 'Wo ist die Sanität?', answer: 'Am Hafentor, rund um die Uhr besetzt.', category: 'Sicherheit', status: 'published' }, null)
+    assert.equal((await publish('nordlicht')).status, 200)
+    await api('DELETE', '/api/admin/festivals/nordlicht/faq/sanitaet', A, undefined, null)
   })
 
   await test('crew safety (audit F05): a removed person cannot get back in with a fresh profile and the old code', async () => {

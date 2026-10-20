@@ -1,6 +1,6 @@
 import { Archive, Check, Eye, FileUp, Plus, RotateCcw, Rocket, Trash2, Upload } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { adminApi, ApiError, type ImportResult } from '../api'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { adminApi, type Readiness, ApiError, type ImportResult } from '../api'
 import { ACTS, DAYS, FESTIVAL, STAGES, fmt } from '../data'
 import { parseCsv, parseFile, parseTable, type ParseResult } from '../import/parse'
 
@@ -417,15 +417,27 @@ const STATUS_TEXT: Record<string, string> = {
   archived: 'Archiviert – sichtbar, aber schreibgeschützt',
 }
 
+/**
+ * Going live (audit D10): the server's checklist – data that must exist for what is switched on, and the
+ * confirmations only the organizer can give. Publishing stays locked until every line is ticked.
+ */
 export function Settings({ token, flash, slug, reload }: { token: string; flash: Flash; slug: string; reload: () => Promise<void> }) {
   const admin = useMemo(() => adminApi(token), [token])
   const [status, setStatus] = useState(FESTIVAL.status)
   const [busy, setBusy] = useState(false)
+  const [checks, setChecks] = useState<Readiness[] | null>(null)
+  const [confirmed, setConfirmed] = useState<string[]>([])
+  const [previewed, setPreviewed] = useState(false)
+  const check = useCallback(() => admin.readiness(slug).then((r) => setChecks(r.checks), (e) => flash('err', errText(e))), [admin, slug, flash])
+  useEffect(() => {
+    check()
+  }, [check, status])
   const set = async (next: 'draft' | 'published' | 'archived', okText: string) => {
     setBusy(true)
     try {
-      await admin.updateFestival(slug, { status: next })
+      await admin.updateFestival(slug, { status: next, ...(next === 'published' ? { confirm: confirmed } : {}) })
       setStatus(next)
+      setConfirmed([])
       await reload()
       flash('ok', okText)
     } catch (e) {
@@ -433,36 +445,65 @@ export function Settings({ token, flash, slug, reload }: { token: string; flash:
     }
     setBusy(false)
   }
-  const checks = [
-    { ok: STAGES.length > 0, text: `${STAGES.length} Bühnen` },
-    { ok: ACTS.length > 0, text: `${ACTS.length} Acts` },
-    { ok: DAYS.length > 0, text: `${DAYS.length} Tage (${DAYS[0]?.date ?? '–'} bis ${DAYS[DAYS.length - 1]?.date ?? '–'})` },
-  ]
+  const data = checks?.filter((c) => c.kind === 'data') ?? []
+  const confirms = checks?.filter((c) => c.kind === 'confirm') ?? []
+  const ready = !!checks && data.every((c) => c.ok) && confirms.every((c) => confirmed.includes(c.id))
+  const toggle = (id: string, on: boolean) => setConfirmed((cur) => (on ? [...new Set([...cur, id])] : cur.filter((x) => x !== id)))
   return (
     <div>
       <h2 className="admin-h">Prüfen & veröffentlichen</h2>
       <p className="small">
         Status: <b>{STATUS_TEXT[status] ?? status}</b>
       </p>
-      <ul className="list" style={{ margin: '8px 0 14px', padding: 0, listStyle: 'none' }}>
-        {checks.map((c) => (
-          <li key={c.text} className="list-item small">
-            {c.ok ? <Check size={16} style={{ color: 'var(--ok)' }} /> : <span style={{ color: 'var(--crit)' }}>✕</span>} {c.text}
-          </li>
-        ))}
-      </ul>
+      {status !== 'published' && (
+        <>
+          <div className="row" style={{ marginTop: 10, gap: 8 }}>
+            <div className="label grow">Was Besucher:innen brauchen</div>
+            <button type="button" className="btn ghost sm" onClick={check}>
+              Erneut prüfen
+            </button>
+          </div>
+          <ul className="list" aria-label="Datenprüfung" style={{ margin: '8px 0 14px', padding: 0, listStyle: 'none' }}>
+            {data.map((c) => (
+              <li key={c.id} className="list-item small">
+                {c.ok ? <Check size={16} style={{ color: 'var(--ok)' }} aria-label="erfüllt" /> : <span style={{ color: 'var(--crit)' }} aria-label="fehlt">✕</span>} {c.text}
+              </li>
+            ))}
+          </ul>
+          <div className="label">Das bestätigt ihr als Veranstalter</div>
+          <div className="list" style={{ margin: '8px 0 14px' }}>
+            {confirms.map((c) => (
+              <label key={c.id} className="list-item small" style={{ alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={confirmed.includes(c.id)}
+                  disabled={c.id === 'preview' && !previewed}
+                  onChange={(e) => toggle(c.id, e.target.checked)}
+                  style={{ marginTop: 3, width: 18, height: 18 }}
+                />
+                <span>
+                  {c.text}
+                  {c.id === 'preview' && !previewed && <span className="faint"> – erst „Vorschau öffnen“</span>}
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="tiny faint">Die Karte in der App ist ein schematischer Plan und ersetzt keine Beschilderung; Notfallkommunikation verantwortet ihr. Die Bestätigung wird mit eurem Namen im Änderungsprotokoll gespeichert.</p>
+        </>
+      )}
       <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
         <button
           className="btn secondary"
           onClick={() => {
             // the preview tab inherits this tab's sessionStorage (admin token), so drafts load there
             window.open(`/?f=${encodeURIComponent(slug)}&preview=1`, '_blank')
+            setPreviewed(true)
           }}
         >
           <Eye size={17} /> Vorschau öffnen
         </button>
         {status !== 'published' && (
-          <button className="btn primary" disabled={busy || !checks.every((c) => c.ok)} onClick={() => set('published', 'Festival ist veröffentlicht')}>
+          <button className="btn primary" disabled={busy || !ready} onClick={() => set('published', 'Festival ist veröffentlicht')}>
             <Rocket size={17} /> {status === 'archived' ? 'Reaktivieren' : 'Veröffentlichen'}
           </button>
         )}

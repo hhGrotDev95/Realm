@@ -341,3 +341,6 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 ## Prüfbericht-Behebung · Welle 5a (claude/realm-fix-wave5)
 - F01 Veranstalter-Konten: Einladung, Passwort, TOTP-Pflicht, Sitzungen, Festival-Bindung, Änderungsprotokoll; Konsolen-Tab „Zugang“. Migration `0015_admin_accounts.sql`.
 - Erstes Konto: mit dem Plattform-Schlüssel anmelden („Plattform-Schlüssel verwenden“) → Tab „Zugang“ → sich selbst einladen. Danach den Schlüssel nur noch für CLI/Notfall nutzen.
+
+## Prüfbericht-Behebung · Welle 5b (claude/realm-fix-wave5b)
+- D10 Freigabe-Checkliste (Server + Konsole), D09 kompakte Konsolen-Navigation ≤ 720 px. Migration `0016_demo_medical.sql`.
