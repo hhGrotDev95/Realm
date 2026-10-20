@@ -344,3 +344,6 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 
 ## Prüfbericht-Behebung · Welle 5b (claude/realm-fix-wave5b)
 - D10 Freigabe-Checkliste (Server + Konsole), D09 kompakte Konsolen-Navigation ≤ 720 px. Migration `0016_demo_medical.sql`.
+
+## Prüfbericht-Behebung · Welle 6a (claude/realm-fix-wave6)
+- F14 Schriften lokal (keine Google-Verbindung mehr), F16 vollständige Snapshots inkl. Live-Änderungen und Bühnenattributen.
