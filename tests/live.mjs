@@ -554,7 +554,10 @@ try {
     org.once('dialog', (d) => d.accept())
     await row.getByRole('button', { name: /löschen/ }).click()
     await org.getByText('Nachricht gelöscht').waitFor()
-    if (await org.getByText('Billige Tickets').count()) throw new Error('deleted message still listed')
+    // the toast can appear before the list re-renders: wait for the row to go, not a one-shot count
+    await row.waitFor({ state: 'detached', timeout: 10000 }).catch(() => {
+      throw new Error('deleted message still listed')
+    })
     // English content: an English visitor gets the organizer's English FAQ and announcement
     await org.getByRole('tab', { name: 'FAQ' }).click()
     await org.locator('.list-item', { hasText: 'Gibt es Schließfächer?' }).click()
