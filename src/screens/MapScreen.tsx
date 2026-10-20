@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { FESTIVAL, on, POIS, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
 import { useApp } from '../store'
 import { CAT_ICON } from './mapIcons'
+import { fullLabels, type Rect } from './mapLabels'
 import { Ground, MAP_H as H, MAP_W as W } from './MapGround'
 import { AppBar } from '../App'
 import { t } from '../i18n'
@@ -34,6 +35,9 @@ export function MapScreen() {
   const last = useRef<{ x: number; y: number; d?: number } | null>(null)
   const moved = useRef(0)
   const press = useRef(0)
+  // map size and the floating controls on top of it, in map-wrap coordinates (label layout, audit D08)
+  const [frame, setFrame] = useState<{ w: number; h: number; blocked: Rect[] }>({ w: 0, h: 0, blocked: [] })
+  const main = useRef<HTMLElement>(null)
 
   const center = useCallback((px: number, py: number, k?: number, offsetY = 0) => {
     const el = wrap.current
@@ -44,6 +48,23 @@ export function MapScreen() {
       return { k: kk, x: el.clientWidth / 2 - px * kk, y: el.clientHeight / 2 - py * kk - offsetY }
     })
     window.setTimeout(() => setAnimate(false), 450)
+  }, [])
+
+  useLayoutEffect(() => {
+    const el = wrap.current!
+    const measure = () => {
+      const o = el.getBoundingClientRect()
+      const rel = (n: Element): Rect => {
+        const r = n.getBoundingClientRect()
+        return { left: r.left - o.left, top: r.top - o.top, right: r.right - o.left, bottom: r.bottom - o.top }
+      }
+      const blocked = [...main.current!.querySelectorAll('.map-fabs, .map-search, .map-overlay-top .chips, .appbar')].map(rel)
+      setFrame({ w: el.clientWidth, h: el.clientHeight, blocked })
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
   }, [])
 
   useLayoutEffect(() => {
@@ -154,11 +175,26 @@ export function MapScreen() {
 
   const routePoi = route ? POIS.find((p) => p.id === route) : null
   const reports = updates.filter((u) => u.poi && u.source !== 'official' && votes[u.id] !== 'fixed')
+  // a community report is a badge on its place, not a second small button next to it (audit D08)
+  const reportAt = new Map<string, string>()
+  if (layers.reports && on('reports')) for (const u of reports) if (!reportAt.has(u.poi!)) reportAt.set(u.poi!, u.title)
+  const shown = [...visible, ...POIS.filter((p) => reportAt.has(p.id) && !visible.includes(p))]
   const inv = 1 / view.k
   const selectedPoi = sheet?.kind === 'poi' ? sheet.id : null
+  const labelled = fullLabels(
+    shown.map((p) => ({
+      id: p.id,
+      x: view.x + p.x * view.k,
+      y: view.y + p.y * view.k,
+      label: p.cat === 'stage' ? p.name : undefined,
+      pinned: selectedPoi === p.id || route === p.id,
+    })),
+    { left: 0, top: 0, right: frame.w, bottom: frame.h },
+    frame.blocked,
+  )
 
   return (
-    <main style={{ position: 'absolute', inset: 0 }} aria-label={t('Festivalkarte')}>
+    <main ref={main} style={{ position: 'absolute', inset: 0 }} aria-label={t('Festivalkarte')}>
       <div ref={wrap} className="map-wrap" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onWheel={onWheel}>
         <div
           style={{
@@ -189,24 +225,14 @@ export function MapScreen() {
               />
             </svg>
           )}
-          {visible.map((p) => (
-            <Marker key={p.id} p={p} inv={inv} selected={selectedPoi === p.id || route === p.id} onClick={() => select(p)} />
+          {shown.map((p) => (
+            <Marker key={p.id} p={p} inv={inv} selected={selectedPoi === p.id || route === p.id} full={labelled.has(p.id)} report={reportAt.get(p.id)} onClick={() => select(p)} />
           ))}
-          {layers.reports && on('reports') &&
-            reports.map((u) => {
-              const p = POIS.find((x) => x.id === u.poi)!
-              return (
-                <button key={u.id} className="map-pin" onClick={() => openSheet({ kind: 'poi', id: p.id })} style={pinStyle(p.x + 22, p.y - 22, inv)} aria-label={u.title}>
-                  <span style={{ width: 22, height: 22, borderRadius: 8, background: 'var(--warn)', color: '#2a1b00', display: 'grid', placeItems: 'center', boxShadow: '0 0 0 2px #0d0f12' }}>
-                    <TriangleAlert size={13} strokeWidth={2.6} />
-                  </span>
-                </button>
-              )
-            })}
           {layers.pins &&
             myPins.map((pin) => (
               <button
                 key={pin.id}
+                className="map-userpin"
                 style={pinStyle(pin.x, pin.y, inv)}
                 aria-label={pin.name}
                 onClick={() => toast(pin.name, { label: t('Entfernen'), run: () => set('myPins', myPins.filter((x) => x.id !== pin.id)) })}
@@ -347,12 +373,14 @@ function pinStyle(x: number, y: number, inv: number): React.CSSProperties {
 
 
 
-function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: boolean; onClick: () => void }) {
+function Marker({ p, inv, selected, full, report, onClick }: { p: Poi; inv: number; selected: boolean; full: boolean; report?: string; onClick: () => void }) {
   const I = CAT_ICON[p.cat]
   const stage = p.cat === 'stage' ? stageById[p.id.replace('stage-', '') as keyof typeof stageById] : null
   const closed = p.status === 'closed'
+  // a stage whose name would cover a neighbour or slide under a control shows only its icon
+  const pill = stage && full
   return (
-    <button onClick={onClick} style={{ ...pinStyle(p.x, p.y, inv), zIndex: selected ? 4 : stage ? 3 : 2 }} aria-label={p.name}>
+    <button className="map-marker" onClick={onClick} style={{ ...pinStyle(p.x, p.y, inv), zIndex: selected ? 4 : stage ? 3 : 2 }} aria-label={report ? t('{place} – Meldung: {title}', { place: p.name, title: report }) : p.name}>
       <motion.span
         animate={{ scale: selected ? 1.18 : 1 }}
         transition={{ type: 'spring', stiffness: 500, damping: 25 }}
@@ -360,9 +388,9 @@ function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: 
           display: 'flex',
           alignItems: 'center',
           gap: 6,
-          padding: stage ? '6px 12px 6px 6px' : 0,
-          width: stage ? undefined : 32,
-          height: stage ? undefined : 32,
+          padding: pill ? '6px 12px 6px 6px' : 0,
+          width: pill ? undefined : stage ? 34 : 32,
+          height: pill ? undefined : stage ? 34 : 32,
           justifyContent: 'center',
           borderRadius: stage ? 99 : 11,
           background: stage ? '#111116' : closed ? '#2a2a34' : '#f4f3f8',
@@ -378,12 +406,17 @@ function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: 
             <span style={{ width: 22, height: 22, borderRadius: 99, background: stage.color, color: '#111', display: 'grid', placeItems: 'center' }}>
               <I size={12} strokeWidth={2.6} />
             </span>
-            {stage.name}
+            {pill && stage.name}
           </>
         ) : (
           <I size={17} strokeWidth={2.2} />
         )}
       </motion.span>
+      {report && (
+        <span className="map-badge" aria-hidden>
+          <TriangleAlert size={11} strokeWidth={2.8} />
+        </span>
+      )}
     </button>
   )
 }

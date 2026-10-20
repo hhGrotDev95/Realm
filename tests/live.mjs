@@ -420,8 +420,12 @@ try {
     await org.getByText('Branding gespeichert').waitFor()
     await visitor.reload()
     await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
-    const brand = await visitor.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--brand').trim())
-    if (brand !== '#4fd1c5') throw new Error('brand colour not applied: ' + brand)
+    // the app starts from its offline copy and applies the fresh festival in the background – wait for it
+    await visitor
+      .waitForFunction(() => getComputedStyle(document.documentElement).getPropertyValue('--brand').trim() === '#4fd1c5', null, { timeout: 15000 })
+      .catch(async () => {
+        throw new Error('brand colour not applied: ' + (await visitor.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--brand').trim())))
+      })
     const display = await visitor.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--display'))
     if (!display.includes('Space Grotesk')) throw new Error('font not applied: ' + display)
     await visitor.locator('.appbar img.logo-img').waitFor()

@@ -194,6 +194,7 @@ export const EN_SCREENS: Record<string, string> = {
   "Richtung · ca. {n} Min.": "Direction · approx. {n} min",
   "Willkommen bei {name}.": "Welcome to {name}.",
   "Dein gewählter Standort: {place}": "Your chosen location: {place}",
+  "{place} – Meldung: {title}": "{place} – report: {title}",
   "Mein Standort: {place}": "My location: {place}",
   "Richtung {place}": "Towards {place}",
   "Standort wählen": "Choose location",
