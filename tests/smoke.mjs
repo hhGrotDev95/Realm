@@ -138,6 +138,7 @@ try {
     await p.getByRole('button', { name: 'Profile & settings' }).click()
     // switching the language reloads the page; let lazy chunks finish first, or WebKit reports
     // the request the reload cancels ("Importing a module script failed") as a page error
+    await p.waitForFunction(() => performance.getEntriesByType('resource').some((e) => e.name.includes('motionFeatures') && e.responseEnd > 0))
     await p.waitForLoadState('networkidle')
     await p.getByRole('button', { name: 'Deutsch' }).click()
     await p.getByText('Als Nächstes').waitFor() // reloaded in German, choice remembered over the browser language
