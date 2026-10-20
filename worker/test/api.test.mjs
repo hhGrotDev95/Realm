@@ -505,6 +505,39 @@ try {
     assert.equal(cleared.pois.length, after.pois.length)
   })
 
+  await test('analytics: plan interest, community counts and FAQ-bot gaps – aggregated, small groups withheld', async () => {
+    const A = 'test-admin-token'
+    const N = 'nordlicht'
+    const stats = () => api('GET', '/api/admin/festivals/nordlicht/analytics', A, undefined, null).then((r) => r.data)
+    assert.equal((await api('GET', '/api/admin/festivals/nordlicht/analytics', lea.token, undefined, null)).status, 401)
+    const before = await stats()
+    // three visitors plan the same act, one plans another: only the first is reported
+    const fans = []
+    for (const name of ['Ana', 'Ben', 'Cem']) fans.push((await api('POST', '/api/guests', null, { nickname: name })).data)
+    for (const g of fans) assert.equal((await api('PUT', '/api/me/plan', g.token, { acts: ['1-north-signal'] }, N)).status, 200)
+    await api('PUT', '/api/me/plan', fans[0].token, { acts: ['1-north-signal', '0-tidewater'] }, N)
+    const s = await stats()
+    assert.equal(s.minGroup, 3)
+    assert.deepEqual(s.acts.find((a) => a.id === '1-north-signal'), { id: '1-north-signal', plans: 3 })
+    assert.equal(s.acts.find((a) => a.id === '0-tidewater'), undefined, 'a single planner must not be visible')
+    assert.ok(s.withheldActs >= 1)
+    assert.ok(s.profiles >= 3 && s.profiles >= before.profiles)
+    // FAQ bot: anonymous events, no session; misses only show once several people asked the same
+    const ev = (body) => api('POST', '/api/faq/events', null, body, N)
+    assert.equal((await ev({ kind: 'miss', question: 'x' })).status, 400)
+    assert.equal((await ev({ kind: 'hit', faqId: 'does-not-exist' })).status, 404)
+    for (const q of ['Gibt es Duschen?', 'gibt es  duschen', 'GIBT ES DUSCHEN?!']) assert.equal((await ev({ kind: 'miss', question: q })).status, 204)
+    assert.equal((await ev({ kind: 'miss', question: 'Wo finde ich Max Mustermann?' })).status, 204)
+    const f = await stats()
+    assert.deepEqual(f.faq.misses.map((m) => [m.question, m.n]), [['gibt es duschen', 3]])
+    assert.equal((await api('DELETE', '/api/admin/festivals/nordlicht/analytics/faq-misses', A, { question: 'Gibt es Duschen?' }, null)).status, 204)
+    assert.deepEqual((await stats()).faq.misses, [])
+    // the module switch also covers the bot statistics
+    await api('PUT', '/api/admin/festivals/nordlicht/modules', A, { faqbot: false }, null)
+    assert.equal((await ev({ kind: 'miss', question: 'Gibt es Duschen?' })).status, 403)
+    await api('PUT', '/api/admin/festivals/nordlicht/modules', A, { faqbot: true }, null)
+  })
+
   await test('modules: switched-off features are refused by the API, dependencies enforced', async () => {
     const A = 'test-admin-token'
     const N = 'nordlicht'
