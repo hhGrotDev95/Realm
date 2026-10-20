@@ -1,7 +1,8 @@
 import { m as motion } from 'framer-motion'
 import { CalendarPlus, ChevronRight, Megaphone, Footprints, Heart, LogOut, MapPin, MessageCircle, Navigation, Share2, UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
-import { on, ACTS, fmt, stageById, ME, walkMinutes, type StageId } from '../data'
+import { on, ACTS, fmt, POIS, stageById, ME, walkMinutes, type PoiCat, type StageId } from '../data'
+import { fairMeetingPoint } from '../meet'
 import { isMeetupActive, useApp } from '../store'
 import { status } from '../time'
 import { AvatarStack, StageDot, Switch, stagger } from '../ui'
@@ -128,6 +129,7 @@ function CrewHome() {
               </div>
             )}
           </div>
+          <FairPoint />
         </motion.section>
         )}
 
@@ -262,6 +264,53 @@ function CrewHome() {
         </motion.section>
       </div>
     </main>
+  )
+}
+
+const MEET_AT: PoiCat[] = ['stage', 'bar', 'food', 'info', 'water', 'entrance']
+
+/** Suggests the place where the longest walk for anyone in the crew is shortest. */
+function FairPoint() {
+  const { crew, setFocusPoi, setTab, openSheet, requireIdentity } = useApp()
+  const people = [ME, ...crew.members.filter((m) => m.at && m.at !== 'camp' && stageById[m.at as StageId]).map((m) => stageById[m.at as StageId])]
+  const best = fairMeetingPoint(
+    people,
+    POIS.filter((p) => MEET_AT.includes(p.cat) && p.status !== 'closed'),
+  )
+  if (!best) return null
+  return (
+    <div className="card fair" style={{ marginTop: 10 }}>
+      <div className="row" style={{ gap: 12 }}>
+        <span className="tile-icon" style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>
+          <Users size={20} />
+        </span>
+        <span className="grow">
+          <span className="tiny faint" style={{ display: 'block' }}>
+            {t('Fairer Treffpunkt für alle')}
+          </span>
+          <span style={{ fontWeight: 600 }}>{best.spot.name}</span>
+          <span className="small faint" style={{ display: 'block' }}>
+            {t('Höchstens {n} Min. Weg für jede:n', { n: best.max })}
+          </span>
+        </span>
+      </div>
+      <div className="row" style={{ gap: 8, marginTop: 12 }}>
+        <button
+          className="btn secondary sm"
+          onClick={() => {
+            setFocusPoi('route:' + best.spot.id)
+            setTab('map')
+          }}
+        >
+          <Navigation size={15} /> {t('Route')}
+        </button>
+        {on('crew') && (
+          <button className="btn ghost sm" onClick={() => requireIdentity(t('Damit deine Crew weiß, wer einlädt.'), () => openSheet({ kind: 'newMeetup', poi: best.spot.id, place: best.spot.name }))}>
+            <CalendarPlus size={15} /> {t('Hier treffen')}
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 

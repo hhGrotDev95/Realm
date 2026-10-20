@@ -306,6 +306,9 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - Kalender-Export (.ics): ganzer Plan („Plan in den Kalender“) oder einzelner Act (Act-Sheet); Erinnerung 15 Min. vorher, stabile UIDs (erneuter Import aktualisiert statt zu verdoppeln), Sets nach Mitternacht am richtigen Datum, RFC-5545-Escaping und Zeilenumbruch.
 - Tests: `tests/ics.test.mts` (14 Prüfungen), Smoke-Schritt lädt die Datei wirklich herunter und prüft sie; i18n-Wächter fing die neuen Texte ab (474 Texte).
 
+## Runde: Fairer Treffpunkt / Gruppenroute (Schritt 10b, claude/realm-group-route)
+- Crew → unter „Wo ist meine Crew?“: Vorschlag „Fairer Treffpunkt für alle“ – der offene Ort (Stage, Bar, Food, Info, Wasser, Eingang), an dem der längste Weg aller Crew-Mitglieder mit geteiltem Standort am kürzesten ist (Minimax, bei Gleichstand kleinste Gesamtstrecke). Direkt „Route“ oder „Hier treffen“ (Meetup).
+- `src/meet.ts` rein und getestet (`tests/meet.test.mts`, 7 Prüfungen); Smoke-Schritt folgt der Route bis zum Banner.
 ## Runde: Festival-Chat (Schritt 10c, claude/realm-festival-chat)
 - Neues Opt-in-Modul „Festival-Chat“: öffentlicher Chat für alle Besucher eines Festivals, standardmäßig **aus**. Modul-Register kennt jetzt Opt-in-Module (`off: true`); gespeichert wird jede Abweichung vom Standard (vorher nur „aus“ – ein eingeschaltetes Opt-in-Modul wäre verloren gegangen).
 - Moderation: Name nötig zum Schreiben, 300 Zeichen, 10 Nachrichten/Min.; 3 Meldungen blenden aus (Autor sieht weiter); Konsole „Chat-Moderation“ (nur wenn Modul an): ausgeblendete zuerst, Wiederherstellen oder Löschen. Nachrichten verfallen 30 Tage nach der letzten Änderung.
