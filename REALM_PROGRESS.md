@@ -333,4 +333,7 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 
 ## Prüfbericht-Behebung · Welle 3 (claude/realm-fix-wave3)
 - F05 Beitrittsfreigabe + Code-Erneuerung beim Entfernen, F09 Übergabe der Verantwortung, F11 Festival im Einladungslink, F06 ehrliche Zählung von Community-Meldungen + Freigabe durch Veranstalter, D05 Soforthilfe im Meldeformular. Migration `0013_crew_safety.sql`. Details in `docs/AUDIT.md`.
-- Bekannt für Welle 4: das Gast-Limit (20 Profile/IP/Std.) – die API-Tests geben späteren Gästen deshalb eigene Test-IPs.
+- Die API-Tests geben späteren Gästen eigene Test-IPs (seit Welle 4 nur noch Komfort).
+
+## Prüfbericht-Behebung · Welle 4 (claude/realm-fix-wave4)
+- F08 Anmeldung hinter Festival-WLAN (Proof of Work statt Sperre), F17 Timeouts, adaptives Polling, Kapazitätsziel + lokales Lastskript (`docs/CAPACITY.md`). Migration `0014_signup_challenges.sql`. Staging-Lasttest bleibt offen bis zum Deployment.

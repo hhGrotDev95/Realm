@@ -149,6 +149,35 @@ try {
     await ben.keyboard.press('Escape')
   })
 
+  await step('a hanging request times out and does not block the outbox (audit F17)', async () => {
+    // the first send hangs forever (a stalled festival network); the old client waited endlessly and sent nothing after it
+    let hung = false
+    await ben.route('**/api/crews/*/messages', (route) => {
+      if (route.request().method() === 'POST' && !hung) {
+        hung = true
+        return // never answered
+      }
+      return route.continue()
+    })
+    await ben.getByRole('button', { name: /^Crew-Chat/ }).click()
+    for (const text of ['Hängt das?', 'Und danach']) {
+      await ben.getByPlaceholder(/Nachricht/).fill(text)
+      await ben.getByRole('button', { name: 'Senden' }).click()
+    }
+    await ben.locator('.bubble.me:not(.pending)', { hasText: 'Und danach' }).waitFor({ timeout: 45000 })
+    await ben.locator('.bubble.me:not(.pending)', { hasText: 'Hängt das?' }).waitFor()
+    await ben.unroute('**/api/crews/*/messages')
+    await ben.keyboard.press('Escape')
+    await lea.reload()
+    await nav(lea, 'Crew')
+    await lea.getByRole('button', { name: /^Crew-Chat/ }).click()
+    const texts = await lea.locator('.bubble.them').allInnerTexts()
+    const a = texts.findIndex((x) => x.includes('Hängt das?'))
+    const b = texts.findIndex((x) => x.includes('Und danach'))
+    if (a < 0 || b < a) throw new Error('messages missing or out of order: ' + JSON.stringify(texts.slice(-4)))
+    await lea.keyboard.press('Escape')
+  })
+
   await step('privacy (audit F02): a location share switched off while offline ends on the server after reconnect – without reload', async () => {
     const stored = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:realm-open-air') ?? '{}'))
     const { session, crewRef } = await stored(lea)
@@ -656,6 +685,21 @@ try {
     await other.getByRole('button', { name: 'Beitreten' }).first().click()
     await name(other, 'Ben2')
     await other.getByText('Einladung nicht gefunden').waitFor()
+  })
+
+  await step('busy festival WLAN (audit F08): past the free quota the app solves the sign-up challenge on its own', async () => {
+    // fill this address's free quota from the test (same address as the browser: localhost)
+    for (let i = 0; i < 80; i++) {
+      const r = await fetch(`${API}/api/guests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+      if (r.status === 429) break
+    }
+    const late = await user()
+    await late.goto(WEB)
+    await nav(late, 'Crew')
+    await late.getByLabel('Crew-Name').fill('Späte Crew')
+    await late.getByRole('button', { name: 'Crew gründen' }).click()
+    await name(late, 'Spät')
+    await late.getByText(/Person.* · Code/).waitFor({ timeout: 20000 })
   })
 
   if (process.env.SHOTS) {

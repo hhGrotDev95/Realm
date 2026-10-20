@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { defaultOn, isEnabled, MODULE_KEYS, moduleConflicts, MODULES, type ModuleKey, type ModuleState } from '../../src/modules'
 import { checkBrand, HEX } from '../../src/theme/contrast'
+import { powBits, verify } from '../../src/pow'
 import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v } from './util'
 
 export interface Env {
@@ -35,7 +36,7 @@ app.use('/api/*', async (c, next) => {
 })
 
 app.onError((err, c) => {
-  if (err instanceof HttpError) return c.json({ error: err.message }, err.status)
+  if (err instanceof HttpError) return c.json({ ...err.data, error: err.message }, err.status)
   console.error(err)
   return c.json({ error: 'Interner Fehler' }, 500)
 })
@@ -61,13 +62,41 @@ const body = async (c: Context) => {
   }
 }
 
-async function rateLimit(db: D1Database, key: string, limit: number, windowMs: number) {
+/** Counts one request for `key` in the current window and returns the count so far. */
+async function bump(db: D1Database, key: string, windowMs: number) {
   const win = Math.floor(Date.now() / windowMs) * windowMs
   const row = await db
     .prepare('INSERT INTO rate (key, window, count) VALUES (?1, ?2, 1) ON CONFLICT(key) DO UPDATE SET count = CASE WHEN window = ?2 THEN count + 1 ELSE 1 END, window = ?2 RETURNING count')
     .bind(key, win)
     .first<{ count: number }>()
-  if (row && row.count > limit) throw new HttpError(429, 'Zu viele Anfragen – bitte kurz warten')
+  return row?.count ?? 0
+}
+
+async function rateLimit(db: D1Database, key: string, limit: number, windowMs: number) {
+  if ((await bump(db, key, windowMs)) > limit) throw new HttpError(429, 'Zu viele Anfragen – bitte kurz warten')
+}
+
+/**
+ * Sign-ups behind one shared IP (audit F08): a festival WLAN or carrier NAT puts hundreds of visitors behind
+ * one address, so the IP is only one signal. Up to SIGNUPS_FREE per 10 minutes need nothing; beyond that each
+ * sign-up solves a one-time proof-of-work challenge that gets harder with volume; SIGNUPS_MAX is the hard cap.
+ */
+const SIGNUPS_FREE = 60
+const SIGNUPS_MAX = 3000
+const CHALLENGE_TTL = 10 * MIN
+
+async function requireProofOfWork(c: Context<App>, signups: number, answer: unknown) {
+  const db = c.env.DB
+  const a = answer as { id?: unknown; nonce?: unknown } | undefined
+  if (a && typeof a.id === 'string' && typeof a.nonce === 'number') {
+    // one-time: the challenge is consumed whether or not the answer is right
+    const ch = await db.prepare('DELETE FROM challenges WHERE id = ? AND created_at > ? RETURNING bits').bind(a.id, Date.now() - CHALLENGE_TTL).first<{ bits: number }>()
+    if (ch && (await verify(a.id, a.nonce, ch.bits))) return
+  }
+  const id = randomToken()
+  const bits = powBits(signups, SIGNUPS_FREE)
+  await db.prepare('INSERT INTO challenges (id, bits, created_at) VALUES (?, ?, ?)').bind(id, bits, Date.now()).run()
+  throw new HttpError(429, 'Viele Anmeldungen über dieses Netz – dein Gerät bestätigt kurz, dass es echt ist', { challenge: { id, bits } })
 }
 
 // Bearer auth for everything except guest creation, restore and health.
@@ -220,8 +249,10 @@ app.get('/api/festivals/:slug', async (c) => {
 
 app.post('/api/guests', async (c) => {
   const ip = c.req.header('CF-Connecting-IP') ?? 'local'
-  await rateLimit(c.env.DB, 'guest:' + ip, 20, 60 * MIN)
+  await rateLimit(c.env.DB, 'guesth:' + ip, SIGNUPS_MAX, 60 * MIN)
   const b = await body(c).catch(() => ({}) as Record<string, unknown>)
+  const signups = await bump(c.env.DB, 'guest:' + ip, 10 * MIN)
+  if (signups > SIGNUPS_FREE) await requireProofOfWork(c, signups, b.challenge)
   const nickname = v.str(b.nickname, 'Name', { max: 20, optional: true }) ?? null
   const color = v.color(b.color) ?? '#A58CFF'
   const id = randomId('g')
@@ -1445,6 +1476,7 @@ export default {
       env.DB.prepare('DELETE FROM reports WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
       env.DB.prepare('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?').bind(now - 24 * 60 * MIN),
       env.DB.prepare('DELETE FROM rate WHERE window < ?').bind(now - 2 * 60 * MIN),
+      env.DB.prepare('DELETE FROM challenges WHERE created_at < ?').bind(now - CHALLENGE_TTL),
       // expired location shares are ended for good, not just hidden
       env.DB.prepare('UPDATE crew_members SET share_location = 0, location = NULL, location_at = NULL WHERE share_location = 1 AND location_at < ?').bind(now - LOCATION_TTL),
       // the public chat is ephemeral: 30 days after the last change

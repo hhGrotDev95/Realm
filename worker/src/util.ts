@@ -32,6 +32,8 @@ export class HttpError extends Error {
   constructor(
     public status: 400 | 401 | 403 | 404 | 409 | 429,
     message: string,
+    /** extra fields for the error body, e.g. a sign-up challenge */
+    public data?: Record<string, unknown>,
   ) {
     super(message)
   }
