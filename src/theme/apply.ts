@@ -7,29 +7,29 @@ export interface Theme {
   logo?: string // data: URL (png, webp, jpeg or svg)
 }
 
-/** Curated display fonts (Google Fonts). Body text stays Inter for legibility. */
+/**
+ * Curated display fonts, shipped with the app (SIL Open Font License, via Fontsource) – no connection to
+ * a font service (audit F14). Body text stays Inter for legibility. Each font loads only when a festival uses it.
+ */
 export const FONTS = {
-  bricolage: { label: 'Bricolage Grotesque', family: 'Bricolage Grotesque', css: 'Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800' },
-  space: { label: 'Space Grotesk', family: 'Space Grotesk', css: 'Space+Grotesk:wght@600;700' },
-  unbounded: { label: 'Unbounded', family: 'Unbounded', css: 'Unbounded:wght@600;800' },
-  fraunces: { label: 'Fraunces (Serif)', family: 'Fraunces', css: 'Fraunces:opsz,wght@9..144,700;9..144,800' },
-  archivo: { label: 'Archivo Black', family: 'Archivo Black', css: 'Archivo+Black' },
+  bricolage: { label: 'Bricolage Grotesque', family: 'Bricolage Grotesque Variable', load: () => import('@fontsource-variable/bricolage-grotesque') },
+  space: { label: 'Space Grotesk', family: 'Space Grotesk Variable', load: () => import('@fontsource-variable/space-grotesk') },
+  unbounded: { label: 'Unbounded', family: 'Unbounded Variable', load: () => import('@fontsource-variable/unbounded') },
+  fraunces: { label: 'Fraunces (Serif)', family: 'Fraunces Variable', load: () => import('@fontsource-variable/fraunces') },
+  archivo: { label: 'Archivo Black', family: 'Archivo Black', load: () => import('@fontsource/archivo-black') },
 } as const
 export type FontKey = keyof typeof FONTS
 
 export const DEFAULT_BRAND = '#a58cff'
 
+const loaded = new Set<FontKey>()
 function loadFont(key: FontKey) {
   const f = FONTS[key]
-  const id = `font-${key}`
-  if (!document.getElementById(id)) {
-    const link = document.createElement('link')
-    link.id = id
-    link.rel = 'stylesheet'
-    link.href = `https://fonts.googleapis.com/css2?family=${f.css}&display=swap`
-    document.head.appendChild(link)
+  if (!loaded.has(key)) {
+    loaded.add(key)
+    f.load().catch(() => loaded.delete(key)) // offline before first use: the fallback font shows
   }
-  return `'${f.family}', 'Inter', system-ui, sans-serif`
+  return `'${f.family}', 'Inter Variable', system-ui, sans-serif`
 }
 
 /**

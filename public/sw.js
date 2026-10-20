@@ -39,8 +39,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return
   const url = new URL(req.url)
   const sameOrigin = url.origin === self.location.origin
-  const fonts = url.hostname.endsWith('fonts.googleapis.com') || url.hostname.endsWith('fonts.gstatic.com')
-  if (!sameOrigin && !fonts) return // API and everything else: straight to the network
+  if (!sameOrigin) return // API and everything else: straight to the network (fonts ship with the app)
   if (req.mode === 'navigate') {
     e.respondWith(
       fetch(req)

@@ -15,6 +15,12 @@
     "test:import": "node --experimental-strip-types --no-warnings tests/import.test.mts && node --experimental-strip-types --no-warnings tests/theme.test.mts && node --experimental-strip-types --no-warnings tests/modules.test.mts && node --experimental-strip-types --no-warnings tests/faq.test.mts && node --experimental-strip-types --no-warnings tests/i18n.test.mts && node --experimental-strip-types --no-warnings tests/ics.test.mts && node --experimental-strip-types --no-warnings tests/meet.test.mts && node --experimental-strip-types --no-warnings tests/effects.test.mts && node --experimental-strip-types --no-warnings tests/aging.test.mts && node --experimental-strip-types --no-warnings tests/pow.test.mts && node --experimental-strip-types --no-warnings tests/sync.test.mts && node --experimental-strip-types --no-warnings tests/accounts.test.mts"
   },
   "dependencies": {
+    "@fontsource-variable/bricolage-grotesque": "^5.3.0",
+    "@fontsource-variable/fraunces": "^5.3.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
+    "@fontsource-variable/unbounded": "^5.3.0",
+    "@fontsource/archivo-black": "^5.3.0",
     "framer-motion": "^14.4.0",
     "lucide-react": "^1.59.0",
     "react": "^19.3.1",

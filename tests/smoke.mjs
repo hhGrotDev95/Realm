@@ -28,7 +28,13 @@ const watch = (pg, tag) => {
     errors.push({ message: e.message, at: Date.now(), where: `${currentStep} [${tag}]` })
   })
   pg.on('requestfailed', (r) => failed.push(`${currentStep} [${tag}] ${r.url()} – ${r.failure()?.errorText}`))
+  // no third-party connections at all, fonts included (audit F14)
+  pg.on('request', (r) => {
+    const u = new URL(r.url())
+    if (/^https?:$/.test(u.protocol) && u.hostname !== 'localhost') external.push(`${currentStep} [${tag}] ${r.url()}`)
+  })
 }
+const external = []
 const failed = []
 watch(page, 'main')
 const step = async (name, fn) => {
@@ -200,6 +206,7 @@ try {
   // excuse it only when that same step and page really had a module load cancelled
   const cancelled = (e) => /Importing a module script failed/.test(e.message) && failed.some((f) => f.startsWith(e.where + ' ') && /\.js – Load request cancelled/.test(f))
   errors.splice(0, errors.length, ...errors.filter((e) => !(e.at >= serverDownAt && network.test(e.message)) && !cancelled(e)))
+  if (external.length) throw new Error('third-party requests (audit F14):\n' + [...new Set(external)].join('\n'))
   if (errors.length) throw new Error('Page errors:\n' + errors.map((e) => `${e.where}: ${e.message}`).join('\n') + '\nFailed requests:\n' + failed.join('\n'))
   console.log('All smoke tests passed')
 } catch (e) {
