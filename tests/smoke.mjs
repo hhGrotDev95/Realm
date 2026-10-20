@@ -188,6 +188,12 @@ try {
     watch(p, 'reminders')
     await p.clock.install({ time: new Date('2027-07-16T19:30:00Z') })
     await p.goto(url)
+    await p.evaluate(() => {
+      window.__reminderEvents = []
+      for (const type of ['pointerdown', 'pointerup', 'click']) document.addEventListener(type, (e) => {
+        window.__reminderEvents.push({ type, target: e.target.outerHTML?.slice(0, 300), time: Date.now() })
+      }, true)
+    })
     await p.getByRole('button', { name: 'Profil & Einstellungen' }).click()
     await p.locator('.sheet').getByText('Echtzeit').click()
     await p.keyboard.press('Escape')
@@ -196,8 +202,20 @@ try {
       await p.getByRole('tab', { name: 'Alle', exact: true }).click()
       await p.locator('.act', { hasText: artist }).first().click()
       await p.locator('.sheet').getByRole('heading', { name: artist }).waitFor()
-      await p.locator('.sheet').getByRole('button', { name: 'Erinnerung' }).click()
-      await p.locator('.sheet').getByRole('button', { name: 'Erinnerung', pressed }).waitFor()
+      const button = p.locator('.sheet').getByRole('button', { name: 'Erinnerung' })
+      // Assert the initial state as well, so an unintended reset cannot look like a successful toggle.
+      await p.locator('.sheet').getByRole('button', { name: 'Erinnerung', pressed: !pressed }).waitFor()
+      await button.click()
+      try {
+        await p.locator('.sheet').getByRole('button', { name: 'Erinnerung', pressed }).waitFor()
+      } catch (error) {
+        console.error('Reminder interaction', artist, pressed, await p.evaluate(() => ({
+          events: window.__reminderEvents,
+          sheet: document.querySelector('.sheet')?.outerHTML,
+          reminders: localStorage.getItem('realm'),
+        })))
+        throw error
+      }
       await p.keyboard.press('Escape')
       await p.locator('.sheet').waitFor({ state: 'detached' })
     }
