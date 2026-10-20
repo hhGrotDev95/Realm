@@ -13,7 +13,9 @@ function swManifest(): Plugin {
     name: 'realm-sw-manifest',
     apply: 'build',
     generateBundle(_, bundle) {
-      const files = Object.keys(bundle).filter((f) => !f.endsWith('.map'))
+      // fonts: only the Latin subsets as woff2 up front; other scripts and legacy .woff load on demand
+      const font = (f: string) => /\.woff2?$/.test(f)
+      const files = Object.keys(bundle).filter((f) => !f.endsWith('.map') && (!font(f) || (/\.woff2$/.test(f) && /-latin(-ext)?-/.test(f))))
       const version = createHash('sha256').update(files.sort().join('|')).digest('hex').slice(0, 12)
       this.emitFile({ type: 'asset', fileName: 'sw-assets.json', source: JSON.stringify({ version, files: ['icon.svg', 'manifest.webmanifest', ...files] }) })
     },

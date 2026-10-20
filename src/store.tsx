@@ -139,6 +139,15 @@ function load(): Persisted {
   return state
 }
 
+/** the guest session stored in one festival's local state, if any */
+function safeSession(key: string): string | null {
+  try {
+    return (JSON.parse(localStorage.getItem(key) ?? 'null') as Persisted | null)?.session?.token ?? null
+  } catch {
+    return null
+  }
+}
+
 const MAX_BACKOFF_MS = 120_000
 
 /** The position the app may use: the place the visitor picked; in the demo a marked demo position. */
@@ -747,9 +756,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       deleteProfile: async () => {
         try {
-          if (s.session) await api.deleteMe()
+          // every local copy of an identity goes: the state of each festival this browser visited, and the
+          // server profile behind each session found there (audit F12)
+          const keys = Object.keys(localStorage).filter((k) => k === LEGACY_KEY || k.startsWith(LEGACY_KEY + ':'))
+          const tokens = new Set([s.session?.token, ...keys.map((k) => safeSession(k))].filter((x): x is string => !!x))
+          for (const tok of tokens) {
+            setToken(tok)
+            await api.deleteMe().catch((e) => {
+              if (!(e instanceof ApiError && e.status === 401)) throw e // already gone is fine
+            })
+          }
           setToken(null)
-          localStorage.removeItem(storageKey())
+          for (const k of keys) localStorage.removeItem(k)
           setS(fresh())
           setStack([])
           setTabRaw('home')

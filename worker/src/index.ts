@@ -20,6 +20,25 @@ type Admin = { id: string; name: string; role: 'platform' | 'organizer'; festiva
 type App = { Bindings: Env; Variables: { guest: Guest; festival: Festival; admin: Admin | null } }
 
 const MIN = 60_000
+const DAY = 24 * 60 * MIN
+
+/**
+ * How long data is kept (audit F12, see docs/DATA_RETENTION.md). The hourly cron enforces every line.
+ * Deleting a guest cascades to plans, steps, crew memberships, messages, meetups, votes and flags.
+ */
+const RETENTION = {
+  guestInactive: 180 * DAY,
+  crewMessages: 60 * DAY,
+  meetups: 60 * DAY,
+  steps: 60 * DAY,
+  festivalChat: 30 * DAY,
+  reports: 1 * DAY, // after expiry
+  announcements: 1 * DAY, // after expiry
+  faqEvents: 365 * DAY,
+  importSnapshots: 180 * DAY,
+  auditLog: 730 * DAY,
+  adminSessions: 1 * DAY, // after expiry
+}
 const FLAGS_TO_HIDE = 2
 /** The public festival chat needs more voices to hide a message than a crew of friends. */
 const PUBLIC_FLAGS_TO_HIDE = 3
@@ -106,8 +125,11 @@ async function requireProofOfWork(c: Context<App>, signups: number, answer: unkn
 const auth = async (c: Context<App>, next: () => Promise<void>) => {
   const token = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '')
   if (!token) throw new HttpError(401, 'Nicht angemeldet')
-  const g = await c.env.DB.prepare('SELECT id, nickname, color FROM guests WHERE token_hash = ?').bind(await sha256(token)).first<Guest>()
-  if (!g) throw new HttpError(401, 'Sitzung ungültig')
+  const row = await c.env.DB.prepare('SELECT id, nickname, color, last_seen FROM guests WHERE token_hash = ?').bind(await sha256(token)).first<Guest & { last_seen: number | null }>()
+  if (!row) throw new HttpError(401, 'Sitzung ungültig')
+  const { last_seen, ...g } = row
+  // activity counts for the retention period (audit F12); written at most once a day
+  if (!last_seen || last_seen < Date.now() - DAY) await c.env.DB.prepare('UPDATE guests SET last_seen = ? WHERE id = ?').bind(Date.now(), g.id).run()
   c.set('guest', g)
   await next()
 }
@@ -1468,8 +1490,8 @@ app.post('/api/admin/festivals/:slug/import', async (c) => {
   const db = c.env.DB
   const [days, stageRows, actRows] = await db.batch([
     db.prepare('SELECT idx FROM festival_days WHERE festival_id = ?').bind(f.id),
-    db.prepare('SELECT id, name FROM stages WHERE festival_id = ? ORDER BY sort').bind(f.id),
-    db.prepare('SELECT id, day, stage_id, artist, start_min, end_min, genre, bio FROM acts WHERE festival_id = ?').bind(f.id),
+    db.prepare('SELECT id, name, color, x, y, vibe, sort FROM stages WHERE festival_id = ? ORDER BY sort').bind(f.id),
+    db.prepare('SELECT id, day, stage_id, artist, start_min, end_min, genre, bio, popularity FROM acts WHERE festival_id = ?').bind(f.id),
   ])
   const dayIdx = new Set((days.results as { idx: number }[]).map((d) => d.idx))
   const stages = stageRows.results as { id: string; name: string }[]
@@ -1570,10 +1592,14 @@ app.post('/api/admin/festivals/:slug/import', async (c) => {
   let snapshotId: string | null = null
   const writes: D1PreparedStatement[] = []
   if (mode === 'replace') {
+    // the snapshot holds everything visitors see of the timetable: stages with their attributes, acts and
+    // live changes (audit F16); a replace import is a new base timetable, so old live changes go with it
     snapshotId = randomId('snap')
+    const changes = await db.prepare('SELECT * FROM timetable_changes WHERE festival_id = ?').bind(f.id).all()
     writes.push(
-      db.prepare('INSERT INTO import_snapshots (id, festival_id, created_at, note, data) VALUES (?, ?, ?, ?, ?)').bind(snapshotId, f.id, Date.now(), `Vor Import (${summary.rows} Zeilen)`, JSON.stringify({ stages, acts: actRows.results })),
+      db.prepare('INSERT INTO import_snapshots (id, festival_id, created_at, note, data) VALUES (?, ?, ?, ?, ?)').bind(snapshotId, f.id, Date.now(), `Vor Import (${summary.rows} Zeilen)`, JSON.stringify({ v: 2, stages, acts: actRows.results, changes: changes.results })),
       db.prepare('DELETE FROM acts WHERE festival_id = ? AND id NOT IN (SELECT value FROM json_each(?))').bind(f.id, JSON.stringify(acts.map((a) => a.id))),
+      db.prepare('DELETE FROM timetable_changes WHERE festival_id = ?').bind(f.id),
     )
   }
   newStages.forEach((s, i) =>
@@ -1603,15 +1629,33 @@ app.post('/api/admin/festivals/:slug/snapshots/:id/restore', async (c) => {
   const f = await festivalBySlug(c)
   const snap = await c.env.DB.prepare('SELECT data FROM import_snapshots WHERE id = ? AND festival_id = ?').bind(c.req.param('id'), f.id).first<{ data: string }>()
   if (!snap) throw new HttpError(404, 'Snapshot nicht gefunden')
-  const data = JSON.parse(snap.data) as { stages: { id: string; name: string }[]; acts: { id: string; day: number; stage_id: string; artist: string; start_min: number; end_min: number; genre: string; bio: string }[] }
+  type StageSnap = { id: string; name: string; color?: string; x?: number; y?: number; vibe?: string; sort?: number }
+  type ChangeSnap = ChangeRow
+  const data = JSON.parse(snap.data) as { v?: number; stages: StageSnap[]; acts: { id: string; day: number; stage_id: string; artist: string; start_min: number; end_min: number; genre: string; bio: string; popularity?: number }[]; changes?: ChangeSnap[] }
   const db = c.env.DB
+  const ids = JSON.stringify(data.acts.map((a) => a.id))
   await db.batch([
     db.prepare('DELETE FROM acts WHERE festival_id = ?').bind(f.id),
-    // stages removed since the snapshot come back so every restored act has its stage
-    ...data.stages.map((st, i) => db.prepare('INSERT OR IGNORE INTO stages (festival_id, id, name, color, x, y, vibe, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, st.id, st.name, PALETTE[i % PALETTE.length], 200 + (i % 4) * 180, 220 + Math.floor(i / 4) * 200, '', i)),
-    ...data.acts.map((a) =>
-      db.prepare('INSERT INTO acts (festival_id, id, day, stage_id, artist, start_min, end_min, genre, bio, popularity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.5)').bind(f.id, a.id, a.day, a.stage_id, a.artist, a.start_min, a.end_min, a.genre, a.bio),
+    // stages come back with their attributes as saved (older snapshots: name only, current attributes kept)
+    ...data.stages.map((st, i) =>
+      st.color === undefined
+        ? db.prepare('INSERT OR IGNORE INTO stages (festival_id, id, name, color, x, y, vibe, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, st.id, st.name, PALETTE[i % PALETTE.length], 200 + (i % 4) * 180, 220 + Math.floor(i / 4) * 200, '', i)
+        : db
+            .prepare('INSERT INTO stages (festival_id, id, name, color, x, y, vibe, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(festival_id, id) DO UPDATE SET name = excluded.name, color = excluded.color, x = excluded.x, y = excluded.y, vibe = excluded.vibe, sort = excluded.sort')
+            .bind(f.id, st.id, st.name, st.color, st.x ?? 0, st.y ?? 0, st.vibe ?? '', st.sort ?? i),
     ),
+    ...data.acts.map((a) =>
+      db.prepare('INSERT INTO acts (festival_id, id, day, stage_id, artist, start_min, end_min, genre, bio, popularity) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, a.id, a.day, a.stage_id, a.artist, a.start_min, a.end_min, a.genre, a.bio, a.popularity ?? 0.5),
+    ),
+    // live changes exactly as they were (older snapshots without them: drop changes of acts that are gone)
+    ...(data.changes
+      ? [
+          db.prepare('DELETE FROM timetable_changes WHERE festival_id = ?').bind(f.id),
+          ...data.changes.map((ch) =>
+            db.prepare('INSERT INTO timetable_changes (festival_id, act_id, start_min, end_min, stage, cancelled, note, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, ch.act_id, ch.start_min, ch.end_min, ch.stage, ch.cancelled, ch.note, ch.updated_at),
+          ),
+        ]
+      : [db.prepare('DELETE FROM timetable_changes WHERE festival_id = ? AND act_id NOT IN (SELECT value FROM json_each(?))').bind(f.id, ids)]),
     touch(db, f.id),
   ])
   return c.json({ restored: data.acts.length })
@@ -1766,25 +1810,35 @@ app.delete('/api/admin/festivals/:slug/reports/:id', async (c) => {
   return c.body(null, 204)
 })
 
+/** Hourly housekeeping: every retention period in RETENTION, expired shares, rate windows, challenges. */
+async function housekeeping(db: D1Database, now: number) {
+  const R = RETENTION
+  await db.batch([
+    db.prepare('DELETE FROM guests WHERE COALESCE(last_seen, created_at) < ?').bind(now - R.guestInactive),
+    db.prepare('DELETE FROM messages WHERE created_at < ?').bind(now - R.crewMessages),
+    db.prepare('DELETE FROM meetups WHERE created_at < ?').bind(now - R.meetups),
+    db.prepare('DELETE FROM steps WHERE synced_at < ?').bind(now - R.steps),
+    // crews nobody belongs to any more
+    db.prepare('DELETE FROM crews WHERE NOT EXISTS (SELECT 1 FROM crew_members m WHERE m.crew_id = crews.id)'),
+    db.prepare('DELETE FROM reports WHERE expires_at < ?').bind(now - R.reports),
+    db.prepare('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?').bind(now - R.announcements),
+    db.prepare('DELETE FROM festival_messages WHERE updated_at < ?').bind(now - R.festivalChat),
+    db.prepare('DELETE FROM faq_events WHERE created_at < ?').bind(now - R.faqEvents),
+    db.prepare('DELETE FROM import_snapshots WHERE created_at < ?').bind(now - R.importSnapshots),
+    db.prepare('DELETE FROM audit_log WHERE created_at < ?').bind(now - R.auditLog),
+    db.prepare('DELETE FROM admin_sessions WHERE expires_at < ?').bind(now - R.adminSessions),
+    db.prepare('DELETE FROM admin_invites WHERE expires_at < ?').bind(now - R.adminSessions),
+    db.prepare('DELETE FROM rate WHERE window < ?').bind(now - 2 * 60 * MIN),
+    db.prepare('DELETE FROM challenges WHERE created_at < ?').bind(now - CHALLENGE_TTL),
+    // expired location shares are ended for good, not just hidden
+    db.prepare('UPDATE crew_members SET share_location = 0, location = NULL, location_at = NULL WHERE share_location = 1 AND location_at < ?').bind(now - LOCATION_TTL),
+  ])
+}
+
 export default {
   fetch: app.fetch,
-  // hourly housekeeping: drop long-expired reports/announcements and stale rate windows
   async scheduled(_: ScheduledController, env: Env) {
-    const now = Date.now()
-    await env.DB.batch([
-      env.DB.prepare('DELETE FROM reports WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
-      env.DB.prepare('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?').bind(now - 24 * 60 * MIN),
-      env.DB.prepare('DELETE FROM rate WHERE window < ?').bind(now - 2 * 60 * MIN),
-      env.DB.prepare('DELETE FROM challenges WHERE created_at < ?').bind(now - CHALLENGE_TTL),
-      env.DB.prepare('DELETE FROM admin_sessions WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
-      env.DB.prepare('DELETE FROM admin_invites WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
-      // expired location shares are ended for good, not just hidden
-      env.DB.prepare('UPDATE crew_members SET share_location = 0, location = NULL, location_at = NULL WHERE share_location = 1 AND location_at < ?').bind(now - LOCATION_TTL),
-      // the public chat is ephemeral: 30 days after the last change
-      env.DB.prepare('DELETE FROM festival_messages WHERE updated_at < ?').bind(now - 30 * 24 * 60 * MIN),
-      // FAQ-bot statistics are kept for one festival cycle
-      env.DB.prepare('DELETE FROM faq_events WHERE created_at < ?').bind(now - 365 * 24 * 60 * MIN),
-    ])
+    await housekeeping(env.DB, Date.now())
   },
 }
 

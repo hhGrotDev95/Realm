@@ -20,7 +20,7 @@ await run([
   'd1', 'execute', 'realm', '--local', '--persist-to', persist, '--command',
   "INSERT INTO festivals (id, slug, name, status, created_at, updated_at) VALUES ('fdraft', 'geheim', 'Geheimfestival', 'draft', 0, 0), ('farch', 'vorbei', 'Vorbei Fest', 'archived', 0, 0)",
 ])
-const server = spawn('npx', ['wrangler', 'dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', 'ADMIN_TOKEN:test-admin-token'], { stdio: 'ignore', detached: true })
+const server = spawn('npx', ['wrangler', 'dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', 'ADMIN_TOKEN:test-admin-token', '--test-scheduled'], { stdio: 'ignore', detached: true })
 
 for (let i = 0; ; i++) {
   try {
@@ -476,14 +476,26 @@ try {
     assert.deepEqual((await api('GET', '/api/me', fan.token, undefined, slug)).data.plan, ['0-nachtfalter'])
 
     // replace removes acts missing from the file – after a snapshot that can be restored
+    // (audit F16: the snapshot covers the whole visible timetable – a live cancellation and stage attributes too)
+    assert.equal((await api('PUT', '/api/admin/timetable/0-morgentau', A, { cancelled: true, note: 'Krank' }, slug)).status, 200)
+    const visible = async () => {
+      const doc = (await api('GET', `/api/festivals/${slug}`, null, undefined, null)).data
+      const changes = (await api('GET', '/api/timetable/changes', null, undefined, slug)).data
+      return { acts: doc.acts.map((a) => a.id).sort(), stages: doc.stages.map((st) => [st.id, st.color]), changes: changes.map((ch) => [ch.actId, ch.cancelled, ch.note]) }
+    }
+    const before = await visible()
     const rep = (await api('POST', `/api/admin/festivals/${slug}/import`, A, { mode: 'replace', rows: [{ row: 2, artist: 'Nachtfalter', stage: 'Zelt', day: 0, start: 1470, end: 1560, genre: 'Techno' }] }, null)).data
+    // the old cancellation must not hang over the new timetable (it did before)
+    assert.deepEqual((await visible()).changes, [])
     assert.equal(rep.summary.removed, 3)
     assert.ok(rep.snapshotId)
     assert.equal((await api('GET', `/api/festivals/${slug}`, null, undefined, null)).data.acts.length, 1)
     const snaps = (await api('GET', `/api/admin/festivals/${slug}/snapshots`, A, undefined, null)).data
     assert.equal(snaps[0].id, rep.snapshotId)
+    // a stage attribute changed after the snapshot comes back as saved
+    await api('PUT', `/api/admin/festivals/${slug}/stages`, A, { stages: [{ id: 'wiese', name: 'Wiese', color: '#00ff88' }, { id: 'zelt', name: 'Zelt', color: '#123456' }, { id: 'strand', name: 'Strand' }] }, null)
     assert.equal((await api('POST', `/api/admin/festivals/${slug}/snapshots/${rep.snapshotId}/restore`, A, undefined, null)).data.restored, 4)
-    assert.equal((await api('GET', `/api/festivals/${slug}`, null, undefined, null)).data.acts.length, 4)
+    assert.deepEqual(await visible(), before, 'restore brings back exactly what visitors saw before the import')
     // stages that still have acts cannot be removed
     assert.equal((await api('PUT', `/api/admin/festivals/${slug}/stages`, A, { stages: [{ name: 'Wiese' }] }, null)).status, 409)
     // archive and reactivate
@@ -784,6 +796,9 @@ try {
     assert.deepEqual(results.filter((r) => r.status !== 201).map((r) => r.status), [], 'every visitor behind the shared IP gets a profile')
     // the old limit locked out visitor 21; now the first 60 need nothing at all
     // abuser on another address, scripting sign-ups without solving anything: stopped after the free quota
+    // the quota counts per fixed 10-minute window: start the abuse run well inside one, so a window change cannot reset it
+    const left = 10 * 60_000 - (Date.now() % (10 * 60_000))
+    if (left < 60_000) await new Promise((r) => setTimeout(r, left + 500))
     const abuse = []
     for (let i = 0; i < 70; i++) abuse.push((await signup('198.51.100.9', { nickname: 'Bot' })).status)
     assert.equal(abuse.filter((s) => s === 201).length, 60)
@@ -861,6 +876,38 @@ try {
     assert.equal((await api('DELETE', `/api/admin/accounts/${olaId}`, A, undefined, null)).status, 204)
     assert.equal((await api('GET', '/api/admin/me', ola, undefined, null)).status, 401)
     assert.equal((await api('POST', '/api/auth/login', null, { email: 'ola@realm.de', password: 'ein-sehr-langes-passwort' }, null)).status, 401)
+  })
+
+  await test('data lifecycle (audit F12): retention periods are enforced by the hourly job; activity keeps a profile', async () => {
+    const N = 'nordlicht'
+    const sql = (q) => run(['d1', 'execute', 'realm', '--local', '--persist-to', persist, '--command', q])
+    const [old, active, mate] = [await newGuest('Alt'), await newGuest('Aktiv'), await newGuest('Mate')]
+    const c = (await api('POST', '/api/crews', active.token, { name: 'Fristen' }, N)).data
+    await joinApproved(active, mate, c, N)
+    const solo = (await api('POST', '/api/crews', old.token, { name: 'Verlassen' }, N)).data
+    const oldMsg = (await api('POST', `/api/crews/${c.id}/messages`, mate.token, { text: 'vor langer Zeit' }, N)).data
+    const newMsg = (await api('POST', `/api/crews/${c.id}/messages`, mate.token, { text: 'gerade eben' }, N)).data
+    await api('POST', `/api/crews/${c.id}/meetups`, active.token, { place: 'Kai', day: 0, min: 1200, note: 'alt' }, N)
+    await api('PUT', '/api/me/steps', mate.token, { day: 0, total: 5000 }, N)
+    const day = 86_400_000
+    const now = Date.now()
+    // 181 days without activity for "Alt" and – so far – for "Aktiv"; 61-day-old message, meetup and steps
+    await sql(`UPDATE guests SET last_seen = ${now - 181 * day} WHERE id IN ('${old.id}', '${active.id}')`)
+    await sql(`UPDATE messages SET created_at = ${now - 61 * day} WHERE id = '${oldMsg.id}'`)
+    await sql(`UPDATE meetups SET created_at = ${now - 61 * day} WHERE crew_id = '${c.id}'`)
+    await sql(`UPDATE steps SET synced_at = ${now - 61 * day} WHERE guest_id = '${mate.id}'`)
+    // "Aktiv" opens the app once: that counts as activity and keeps the profile
+    assert.equal((await api('GET', '/api/me', active.token, undefined, N)).status, 200)
+    assert.equal((await fetch(`${BASE}/__scheduled?cron=17+*+*+*+*`)).status, 200)
+    assert.equal((await api('GET', '/api/me', old.token, undefined, N)).status, 401, 'inactive profile deleted')
+    assert.equal((await api('GET', '/api/me', active.token, undefined, N)).status, 200, 'active profile kept')
+    const st = (await api('GET', `/api/crews/${c.id}`, active.token, undefined, N)).data
+    assert.deepEqual(st.messages.map((m) => m.id), [newMsg.id], 'only the old message is gone')
+    assert.deepEqual(st.meetups, [])
+    assert.deepEqual(st.members.find((m) => m.id === mate.id).steps, [])
+    // the crew that only "Alt" belonged to went with the profile
+    const rows = await fetch(`${BASE}/api/crews/join`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Festival': N, Authorization: 'Bearer ' + mate.token }, body: JSON.stringify({ code: solo.code }) })
+    assert.equal(rows.status, 404)
   })
 
   await test('privacy: a location share expires on the server 2 h after it was last confirmed', async () => {

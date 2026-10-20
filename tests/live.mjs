@@ -759,6 +759,33 @@ try {
     await late.getByText(/Person.* · Code/).waitFor({ timeout: 20000 })
   })
 
+  await step('deleting the profile removes every local copy and every server profile, across festivals (audit F12)', async () => {
+    const p = await user()
+    const found = async (url, crew, nick) => {
+      await p.goto(url)
+      await nav(p, 'Crew')
+      await p.getByLabel('Crew-Name').fill(crew)
+      await p.getByRole('button', { name: 'Crew gründen' }).click()
+      if (nick) await name(p, nick)
+      await p.getByText(/Person.* · Code/).waitFor({ timeout: 20000 })
+    }
+    await found(WEB, 'Erstes Festival', 'Lösch')
+    await found(`${WEB}/?f=nordlicht`, 'Zweites Festival', 'Lösch2')
+    const stored = () => p.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('realm.v2')).map((k) => [k, JSON.parse(localStorage.getItem(k)).session?.token ?? null]))
+    const tokens = (await stored()).map(([, t]) => t).filter(Boolean)
+    if (tokens.length < 2) throw new Error('expected a session per festival: ' + JSON.stringify(await stored()))
+    await p.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    await p.getByRole('button', { name: 'Profil löschen' }).click()
+    await p.getByRole('button', { name: 'Löschen', exact: true }).click()
+    await p.getByText('Profil und alle Daten gelöscht').waitFor()
+    const left = (await stored()).filter(([, t]) => t)
+    if (left.length) throw new Error('identity copies left in the browser: ' + JSON.stringify(left))
+    for (const t of tokens) {
+      const r = await fetch(`${API}/api/me`, { headers: { Authorization: 'Bearer ' + t, 'X-Festival': 'realm-open-air' } })
+      if (r.status !== 401) throw new Error('server profile still exists: ' + r.status)
+    }
+  })
+
   if (process.env.SHOTS) {
     await lea.reload()
     await nav(lea, 'Crew')

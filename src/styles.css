@@ -22,8 +22,8 @@
   --r-sm: 10px;
   --r-md: 16px;
   --r-lg: 24px;
-  --display: 'Bricolage Grotesque', 'Inter', system-ui, sans-serif;
-  --sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --display: 'Bricolage Grotesque Variable', 'Inter Variable', system-ui, sans-serif;
+  --sans: 'Inter Variable', system-ui, -apple-system, sans-serif;
   --nav-h: 64px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);

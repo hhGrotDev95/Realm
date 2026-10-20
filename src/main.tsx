@@ -4,6 +4,8 @@ import { createRoot } from 'react-dom/client'
 import App from './App'
 import { bootFestival } from './festival'
 import { AppProvider } from './store'
+import '@fontsource-variable/inter'
+import '@fontsource-variable/bricolage-grotesque'
 import './styles.css'
 import { t } from './i18n'
 
