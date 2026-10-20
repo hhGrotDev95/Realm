@@ -196,7 +196,10 @@ try {
   // a request failing once the server is down is expected (wording differs per engine: Chromium,
   // Firefox, WebKit incl. a lazy module that could not be fetched); before that, every error counts
   const network = /Failed to fetch|NetworkError|Load failed|Importing a module script failed/
-  errors.splice(0, errors.length, ...errors.filter((e) => !(e.at >= serverDownAt && network.test(e.message))))
+  // WebKit can report the rejected import of a reload-cancelled module late, after the reload finished:
+  // excuse it only when that same step and page really had a module load cancelled
+  const cancelled = (e) => /Importing a module script failed/.test(e.message) && failed.some((f) => f.startsWith(e.where + ' ') && /\.js – Load request cancelled/.test(f))
+  errors.splice(0, errors.length, ...errors.filter((e) => !(e.at >= serverDownAt && network.test(e.message)) && !cancelled(e)))
   if (errors.length) throw new Error('Page errors:\n' + errors.map((e) => `${e.where}: ${e.message}`).join('\n') + '\nFailed requests:\n' + failed.join('\n'))
   console.log('All smoke tests passed')
 } catch (e) {
