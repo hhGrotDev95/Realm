@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, ApiError, execute, online, opId, privacyKey, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
 import { lang, t } from './i18n'
 import { ageSince } from './aging'
+import { pollDelay, POLL_ACTIVE_MS } from './sync'
 import { DEFAULT_FESTIVAL } from './festival'
 import { on, ACTS, fmt, POIS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
@@ -138,7 +139,6 @@ function load(): Persisted {
   return state
 }
 
-const POLL_MS = 8000
 const MAX_BACKOFF_MS = 120_000
 
 /** The position the app may use: the place the visitor picked; in the demo a marked demo position. */
@@ -407,35 +407,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.session?.id])
 
-  // polling while visible: every 8 s, backing off exponentially (up to 2 min) while requests fail
+  // polling while visible: every ~8 s while in use, rarer when untouched (audit F17), backing off
+  // exponentially (up to 2 min) while requests fail; hidden tabs do not poll at all
   useEffect(() => {
     if (!online || !s.session) return
     let timer = 0
-    let delay = POLL_MS
+    let failing = 0
     let stopped = false
+    let lastInput = Date.now()
     const tick = async () => {
       if (stopped) return
       if (document.visibilityState === 'visible') {
         await flush()
-        delay = (await refresh()) ? POLL_MS : Math.min(delay * 2, MAX_BACKOFF_MS)
+        failing = (await refresh()) ? 0 : failing + 1
       }
+      const delay = failing ? Math.min(POLL_ACTIVE_MS * 2 ** failing, MAX_BACKOFF_MS) : pollDelay(Date.now() - lastInput)
       if (!stopped) timer = window.setTimeout(tick, delay)
     }
     const wake = () => {
       // coming back (tab visible or network up) syncs immediately and resets the backoff
       if (document.visibilityState !== 'visible') return
       window.clearTimeout(timer)
-      delay = POLL_MS
+      failing = 0
+      lastInput = Date.now()
       tick()
+    }
+    const input = () => {
+      const wasIdle = Date.now() - lastInput > 2 * 60_000
+      lastInput = Date.now()
+      // picking the phone up again after a while: fetch now instead of waiting out the long interval
+      if (wasIdle && !failing) wake()
     }
     tick()
     document.addEventListener('visibilitychange', wake)
     window.addEventListener('online', wake)
+    window.addEventListener('pointerdown', input)
+    window.addEventListener('keydown', input)
     return () => {
       stopped = true
       window.clearTimeout(timer)
       document.removeEventListener('visibilitychange', wake)
       window.removeEventListener('online', wake)
+      window.removeEventListener('pointerdown', input)
+      window.removeEventListener('keydown', input)
     }
   }, [s.session?.id, s.crewRef?.id, refresh, flush])
 

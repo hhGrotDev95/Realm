@@ -1,5 +1,7 @@
 // Thin client for the Realm API (worker/). Without VITE_API_URL the app runs in demo mode.
 import type { FestivalBundle, Poi, TimetableChange } from './data'
+import { solve } from './pow'
+import { REQUEST_TIMEOUT_MS } from './sync'
 
 export const API_URL: string | undefined = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || undefined
 export const online = !!API_URL
@@ -35,9 +37,11 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
       method,
       headers: { ...festivalHeader(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
+      // a hanging request gives up and counts as a network error, so it is retried and never blocks the outbox
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
-  } catch {
-    throw new ApiError(0, 'Keine Verbindung – bitte später erneut versuchen')
+  } catch (e) {
+    throw new ApiError(0, e instanceof DOMException && e.name === 'TimeoutError' ? 'Server antwortet nicht – wird später erneut versucht' : 'Keine Verbindung – bitte später erneut versuchen')
   }
   if (res.status === 204) return undefined as T
   return readJson<T>(res)
@@ -147,7 +151,16 @@ export type CrewPending = { pending: true; crew: { id: string; name: string; cod
 export const api = {
   festivals: () => call<{ slug: string; name: string; location: string | null }[]>('GET', '/api/festivals'),
   festival: (slug: string) => call<FestivalBundle>('GET', `/api/festivals/${encodeURIComponent(slug)}`),
-  createGuest: (nickname: string | null, color: string) => call<Session>('POST', '/api/guests', { nickname, color }),
+  /** behind a busy shared network the server asks for a small proof of work first (audit F08) */
+  createGuest: async (nickname: string | null, color: string) => {
+    try {
+      return await call<Session>('POST', '/api/guests', { nickname, color })
+    } catch (e) {
+      const ch = e instanceof ApiError && e.status === 429 ? (e.data as { challenge?: { id: string; bits: number } } | undefined)?.challenge : undefined
+      if (!ch) throw e
+      return call<Session>('POST', '/api/guests', { nickname, color, challenge: { id: ch.id, nonce: await solve(ch.id, ch.bits) } })
+    }
+  },
   me: () => call<{ id: string; nickname: string | null; color: string; secured: boolean; crews: CrewRef[]; plan: string[] }>('GET', '/api/me'),
   updateMe: (nickname: string, color: string) => call('PATCH', '/api/me', { nickname, color }),
   deleteMe: () => call<void>('DELETE', '/api/me'),
@@ -262,9 +275,11 @@ export const adminApi = (adminToken: string) => {
         method,
         headers: { ...festivalHeader(), Authorization: 'Bearer ' + adminToken, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body),
+        // imports and images take longer than app requests
+        signal: AbortSignal.timeout(4 * REQUEST_TIMEOUT_MS),
       })
-    } catch {
-      throw new ApiError(0, 'Keine Verbindung zum Server')
+    } catch (e) {
+      throw new ApiError(0, e instanceof DOMException && e.name === 'TimeoutError' ? 'Server antwortet nicht' : 'Keine Verbindung zum Server')
     }
     if (res.status === 204) return undefined as T
     return readJson<T>(res)

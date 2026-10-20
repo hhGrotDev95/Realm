@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 
 const PORT = 8799
 const BASE = `http://127.0.0.1:${PORT}`
@@ -749,6 +750,34 @@ try {
     assert.deepEqual(list.find((z) => z.id === r.id).verified, true)
     assert.equal((await api('DELETE', `/api/admin/festivals/nordlicht/reports/${r.id}`, A, undefined, null)).status, 204)
     assert.equal(await get(), undefined)
+  })
+
+  await test('festival WLAN (audit F08): 300 visitors behind one IP all get a profile; an abuser without proof of work is stopped', async () => {
+    const signup = (ip, body) => fetch(BASE + '/api/guests', { method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip }, body: JSON.stringify(body) }).then(async (r) => ({ status: r.status, data: await r.json() }))
+    const zero = (buf) => { let n = 0; for (const b of buf) { if (b === 0) { n += 8; continue } return n + Math.clz32(b) - 24 } return n }
+    const solve = ({ id, bits }) => { for (let nonce = 0; ; nonce++) if (zero(createHash('sha256').update(`${id}:${nonce}`).digest()) >= bits) return nonce }
+    // like the app: sign up, and if the network is busy, solve the challenge and send again
+    const visitor = async (ip, n) => {
+      let r = await signup(ip, { nickname: 'V' + n })
+      if (r.status === 429 && r.data.challenge) r = await signup(ip, { nickname: 'V' + n, challenge: { id: r.data.challenge.id, nonce: solve(r.data.challenge) } })
+      return r
+    }
+    const results = []
+    for (let i = 0; i < 300; i += 25) results.push(...(await Promise.all(Array.from({ length: 25 }, (_, k) => visitor('203.0.113.7', i + k)))))
+    assert.deepEqual(results.filter((r) => r.status !== 201).map((r) => r.status), [], 'every visitor behind the shared IP gets a profile')
+    // the old limit locked out visitor 21; now the first 60 need nothing at all
+    // abuser on another address, scripting sign-ups without solving anything: stopped after the free quota
+    const abuse = []
+    for (let i = 0; i < 70; i++) abuse.push((await signup('198.51.100.9', { nickname: 'Bot' })).status)
+    assert.equal(abuse.filter((s) => s === 201).length, 60)
+    assert.ok(abuse.slice(60).every((s) => s === 429))
+    // a wrong answer or a reused challenge does not count
+    const ch = (await signup('198.51.100.9', {})).data.challenge
+    assert.ok(ch.bits >= 12)
+    assert.equal((await signup('198.51.100.9', { challenge: { id: ch.id, nonce: -1 } })).status, 429)
+    assert.equal((await signup('198.51.100.9', { challenge: { id: ch.id, nonce: solve(ch) } })).status, 429, 'a challenge is single-use')
+    // the visitors behind the WLAN were not affected by the abuser
+    assert.equal((await visitor('203.0.113.7', 999)).status, 201)
   })
 
   await test('privacy: a location share expires on the server 2 h after it was last confirmed', async () => {
