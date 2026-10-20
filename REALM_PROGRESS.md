@@ -270,3 +270,10 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 1. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen) – der Build warnt.
 2. P6: Karteneditor (eigener Geländeplan, Marker mit relativen Koordinaten).
 3. P7: Sprachen DE/EN.
+
+## Runde: App-Paket & echtes Offline (claude/realm-bundle)
+- Startpaket von 521 kB (gzip 165) auf 300 kB Haupt-Chunk (gzip 92) gesenkt: framer-motion über `LazyMotion` + nachgeladene `domMax`-Features, Karte/Crew/Wrapped/FAQ als Lazy-Chunks. Keine >500-kB-Warnung mehr.
+- Echter Fehler gefunden: Der Service Worker cachte nur `/` – die App war nach einem Besuch **nicht** offline nutzbar. Jetzt: Build-Manifest `sw-assets.json` (Vite-Plugin), vollständiges Precaching, `ignoreVary` (Assets mit `Vary: Origin`).
+- `LazyBoundary`: ein fehlgeschlagener Chunk-Load zeigt „Erneut versuchen“ statt die App abstürzen zu lassen.
+- Smoke-Test prüft Offline jetzt ehrlich (Server wird beendet, da `setOffline` Service-Worker-Fetches nicht abdeckt).
+- Geprüft: typecheck, test:import, build, test:e2e, test:a11y, test:live – alles grün.

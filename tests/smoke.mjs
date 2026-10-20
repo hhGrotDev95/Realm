@@ -94,6 +94,33 @@ try {
     const days = Math.ceil((new Date(2027, 6, 15, 10).getTime() - Date.now()) / 86_400_000)
     if (days > 0) await page.getByText(`Noch ${days} Tage`).waitFor()
   })
+  await step('offline: after ONE online visit the app and lazily loaded screens open with the server down', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 400, height: 860 } })
+    const p = await ctx.newPage()
+    p.on('pageerror', (e) => errors.push(e.message))
+    await p.goto(url)
+    await p.getByText('Als Nächstes').waitFor()
+    await p.evaluate(() => navigator.serviceWorker.ready)
+    await p.waitForTimeout(1500) // let the service worker finish installing (it caches the whole build)
+    // Playwright's setOffline does not cover service-worker fetches, so take the server down instead:
+    // from here on there is really no network, only what the service worker cached.
+    try {
+      process.kill(-server.pid)
+    } catch {}
+    await new Promise((r) => setTimeout(r, 500))
+    if (process.env.DEBUG_OFFLINE) p.on('requestfailed', (r) => console.log('  failed offline:', r.url().replace(url, '')))
+    await p.reload()
+    await p.getByText('Als Nächstes').waitFor()
+    await p.locator('nav').getByText('Map').click()
+    await p.getByPlaceholder(/Suchen/).waitFor()
+    await p.locator('nav').getByText('Crew').click()
+    await p.getByText('Wo ist meine Crew?').waitFor()
+    await p.getByRole('button', { name: 'Infos & FAQ' }).click()
+    await p.getByLabel('Frage an den Festival-Bot').waitFor()
+    await ctx.close()
+  })
+  // a fetch failing while the server is down is expected; real page errors are not
+  errors.splice(0, errors.length, ...errors.filter((e) => !/Failed to fetch|NetworkError|Load failed/.test(e)))
   if (errors.length) throw new Error('Page errors:\n' + errors.join('\n'))
   console.log('All smoke tests passed')
 } catch (e) {

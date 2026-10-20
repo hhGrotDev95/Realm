@@ -1,3 +1,4 @@
+import { LazyMotion } from 'framer-motion'
 import { lazy, StrictMode, Suspense } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
@@ -8,6 +9,7 @@ import './styles.css'
 // The organizer console lives at /#admin and is loaded only there.
 const Admin = lazy(() => import('./admin/Admin'))
 const isAdmin = () => location.hash.startsWith('#admin')
+const loadMotion = () => import('./motionFeatures').then((m) => m.default)
 const root = createRoot(document.getElementById('root')!)
 
 function BootError({ error }: { error: string }) {
@@ -29,9 +31,11 @@ function BootError({ error }: { error: string }) {
 if (isAdmin()) {
   root.render(
     <StrictMode>
-      <Suspense fallback={null}>
-        <Admin />
-      </Suspense>
+      <LazyMotion features={loadMotion} strict>
+        <Suspense fallback={null}>
+          <Admin />
+        </Suspense>
+      </LazyMotion>
     </StrictMode>,
   )
 } else {
@@ -41,9 +45,11 @@ if (isAdmin()) {
     boot.fresh.then((changed) => changed && window.dispatchEvent(new Event('realm:festival-updated')))
     root.render(
       <StrictMode>
-        <AppProvider>
-          <App />
-        </AppProvider>
+        <LazyMotion features={loadMotion} strict>
+          <AppProvider>
+            <App />
+          </AppProvider>
+        </LazyMotion>
       </StrictMode>,
     )
   })

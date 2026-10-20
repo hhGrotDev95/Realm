@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, m as motion } from 'framer-motion'
 import { Bot, ChevronDown, Info, Search, Send } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { FAQS, on, POIS } from './data'

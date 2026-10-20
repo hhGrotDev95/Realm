@@ -1,6 +1,6 @@
-import { AnimatePresence, motion, useDragControls, type PanInfo } from 'framer-motion'
+import { AnimatePresence, m as motion, useDragControls, type PanInfo } from 'framer-motion'
 import { Heart } from 'lucide-react'
-import { useEffect, useRef, type ReactNode } from 'react'
+import { Component, useEffect, useRef, type ReactNode } from 'react'
 import { stageById, type StageId, type UpdateSource } from './data'
 import { useApp } from './store'
 
@@ -147,4 +147,29 @@ export const fadeUp = {
 
 export function stagger(i: number) {
   return { ...fadeUp, transition: { delay: 0.04 * i, duration: 0.45, ease: [0.22, 1, 0.36, 1] as const } }
+}
+
+/**
+ * Catches a lazily loaded part that fails to load (e.g. offline before it was ever cached)
+ * so the rest of the app keeps working, and offers a retry.
+ */
+export class LazyBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  render() {
+    if (!this.state.failed) return this.props.children
+    return (
+      <div className="empty" role="alert">
+        <b>Gerade nicht verfügbar</b>
+        Dieser Bereich konnte ohne Netz nicht geladen werden.
+        <div style={{ marginTop: 14 }}>
+          <button className="btn secondary sm" onClick={() => this.setState({ failed: false })}>
+            Erneut versuchen
+          </button>
+        </div>
+      </div>
+    )
+  }
 }

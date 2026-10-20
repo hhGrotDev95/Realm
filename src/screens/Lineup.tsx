@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, m as motion } from 'framer-motion'
 import { GanttChart, Heart, LayoutList, Search, SlidersHorizontal, TriangleAlert, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { ACTS, DAYS, fmt, STAGES, stageById, type Act, type StageId } from '../data'
