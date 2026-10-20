@@ -6,6 +6,7 @@ const FaqSheet = lazy(() => import('./FaqSheet').then((m) => ({ default: m.FaqSh
 import { api } from './api'
 import { on, FESTIVAL, ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
 import { CAT_ICON } from './screens/mapIcons'
+import { downloadIcs } from './calendar/download'
 import { ActRow } from './screens/Lineup'
 import { useApp, type SheetState } from './store'
 import { status, untilLabel } from './time'
@@ -156,6 +157,11 @@ function ActSheet({ id }: { id: string }) {
         {st !== 'past' && (
           <button className={`icon-btn filled ${reminders[id] ? 'active' : ''}`} style={{ width: 44, height: 44 }} aria-label={t('Erinnerung')} onClick={() => toggleReminder(id)}>
             {reminders[id] ? <BellRing size={19} /> : <Bell size={19} />}
+          </button>
+        )}
+        {st !== 'past' && !a.change?.cancelled && (
+          <button className="icon-btn filled" style={{ width: 44, height: 44 }} aria-label={t('In den Kalender')} onClick={() => downloadIcs([a], a.artist)}>
+            <CalendarPlus size={19} />
           </button>
         )}
       </div>

@@ -293,3 +293,8 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - Nebenbei behoben: Tagesumschalter zeigte den Monat fest als „.07.“; Wrapped behauptete immer „Drei Tage. Fünf Stages.“ und „3 Tage“ – jetzt aus den echten Festivaldaten.
 - Tests laufen jetzt explizit mit `locale: 'de-DE'` (Playwright-Standard ist Englisch); neuer Smoke-Schritt prüft die englische App und den Sprachwechsel.
 - Geprüft: typecheck, test:import (inkl. i18n), build, e2e, a11y, live.
+
+## Runde: Mein Tag & Kalender-Export (Schritt 10a, claude/realm-agenda)
+- „Mein Plan“ zeigt zwischen zwei Sets die freie Zeit und den Laufweg zur nächsten Stage; reicht die Zeit nicht für den Weg, wird es als „Knapp“ markiert.
+- Kalender-Export (.ics): ganzer Plan („Plan in den Kalender“) oder einzelner Act (Act-Sheet); Erinnerung 15 Min. vorher, stabile UIDs (erneuter Import aktualisiert statt zu verdoppeln), Sets nach Mitternacht am richtigen Datum, RFC-5545-Escaping und Zeilenumbruch.
+- Tests: `tests/ics.test.mts` (14 Prüfungen), Smoke-Schritt lädt die Datei wirklich herunter und prüft sie; i18n-Wächter fing die neuen Texte ab (474 Texte).

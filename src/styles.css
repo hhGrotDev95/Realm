@@ -496,3 +496,7 @@ select.field { appearance: none; }
 .ed-pin.on circle, .ed-pin:focus-visible circle { stroke: var(--brand); stroke-width: 6; }
 .ed-label { fill: #e9ecf1; font: 600 22px Inter, system-ui, sans-serif; paint-order: stroke; stroke: #0d0f12; stroke-width: 5px; pointer-events: none; }
 .admin-sep { border: 0; border-top: 1px solid var(--line, #262b33); margin: 16px 0; }
+
+/* gaps between planned sets */
+.gap { display: flex; align-items: center; gap: 8px; padding: 2px 0 2px 64px; font-size: 12px; color: var(--text-3); }
+.gap.tight { color: var(--warn); }
