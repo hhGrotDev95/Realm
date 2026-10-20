@@ -23,7 +23,8 @@ export function FaqEditor({ token, flash, slug, reload }: { token: string; flash
   const probeResult = probe.trim() ? ask(probe, published) : null
   const isNew = edit !== null && !items?.some((i) => i.id === edit.id)
   const id = edit ? edit.id || idFrom(edit.question) : ''
-  const valid = !!edit && edit.question.trim().length >= 3 && edit.answer.trim().length >= 3 && /^[a-z0-9-]{1,60}$/.test(id)
+  const enHalf = !!edit?.en && !edit.en.question.trim() !== !edit.en.answer.trim()
+  const valid = !!edit && edit.question.trim().length >= 3 && edit.answer.trim().length >= 3 && /^[a-z0-9-]{1,60}$/.test(id) && !enHalf
 
   return (
     <div className="admin-grid">
@@ -113,6 +114,29 @@ export function FaqEditor({ token, flash, slug, reload }: { token: string; flash
               <span>Stichworte für den Bot (Alltagswörter, kommagetrennt)</span>
               <input className="field" value={edit.keywords} maxLength={300} onChange={(e) => setEdit({ ...edit, keywords: e.target.value })} placeholder="z. B. klo, dixi, toilette" />
             </label>
+            <details className="admin-en" open={!!edit.en?.question}>
+              <summary>Englische Fassung (optional)</summary>
+              <p className="tiny faint" style={{ margin: '6px 0 10px' }}>
+                Besucher:innen mit englischer App-Sprache sehen diese Fassung, sonst die deutsche. Der Bot versteht dann auch englische Fragen.
+              </p>
+              <label className="admin-field">
+                <span>Frage (Englisch)</span>
+                <input className="field" lang="en" value={edit.en?.question ?? ''} maxLength={200} onChange={(e) => setEdit({ ...edit, en: { question: e.target.value, answer: edit.en?.answer ?? '', keywords: edit.en?.keywords ?? '' } })} />
+              </label>
+              <label className="admin-field">
+                <span>Antwort (Englisch)</span>
+                <textarea className="field" lang="en" style={{ height: 100 }} value={edit.en?.answer ?? ''} maxLength={2000} onChange={(e) => setEdit({ ...edit, en: { question: edit.en?.question ?? '', answer: e.target.value, keywords: edit.en?.keywords ?? '' } })} />
+              </label>
+              <label className="admin-field">
+                <span>Stichworte (Englisch)</span>
+                <input className="field" lang="en" value={edit.en?.keywords ?? ''} maxLength={300} onChange={(e) => setEdit({ ...edit, en: { question: edit.en?.question ?? '', answer: edit.en?.answer ?? '', keywords: e.target.value } })} placeholder="e.g. loo, toilet, restroom" />
+              </label>
+              {enHalf && (
+                <p className="small" role="alert" style={{ color: 'var(--warn)', marginTop: 0 }}>
+                  Bitte englische Frage und Antwort angeben – oder beides leer lassen.
+                </p>
+              )}
+            </details>
             <label className="row small" style={{ gap: 10, minHeight: 44, marginBottom: 12 }}>
               <input type="checkbox" checked={edit.status === 'published'} onChange={(e) => setEdit({ ...edit, status: e.target.checked ? 'published' : 'draft' })} style={{ width: 22, height: 22 }} />
               Freigeben (in App und Bot sichtbar)

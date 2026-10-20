@@ -118,6 +118,7 @@ export interface Announcement {
   severity: 'info' | 'warning' | 'critical'
   ageMin: number
   validMin: number | null
+  en?: { title: string; body: string | null }
 }
 export type Session = { id: string; token: string; nickname: string | null; color: string }
 type CrewRef = { id: string; name: string; code: string }
@@ -191,6 +192,7 @@ export interface AdminFaq {
   status: 'draft' | 'published'
   sort: number
   updatedAt: number
+  en?: { question: string; answer: string; keywords?: string }
 }
 
 export interface Analytics {
@@ -250,7 +252,7 @@ export const adminApi = (adminToken: string) => {
     dismissFaqMiss: (slug: string, question: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/analytics/faq-misses`, { question }),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
     restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),
-    announce: (a: { title: string; body?: string; place?: string; severity: Announcement['severity']; validMin?: number }) => req<Announcement>('POST', '/api/admin/announcements', a),
+    announce: (a: { title: string; body?: string; titleEn?: string; bodyEn?: string; place?: string; severity: Announcement['severity']; validMin?: number }) => req<Announcement>('POST', '/api/admin/announcements', a),
     removeAnnouncement: (id: string) => req<void>('DELETE', `/api/admin/announcements/${id}`),
     setChange: (actId: string, c: { start?: number; end?: number; stage?: string; cancelled?: boolean; note?: string }) => req<TimetableChange>('PUT', `/api/admin/timetable/${actId}`, c),
     revertChange: (actId: string) => req<void>('DELETE', `/api/admin/timetable/${actId}`),

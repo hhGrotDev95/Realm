@@ -309,3 +309,9 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 ## Runde: Fairer Treffpunkt / Gruppenroute (Schritt 10b, claude/realm-group-route)
 - Crew → unter „Wo ist meine Crew?“: Vorschlag „Fairer Treffpunkt für alle“ – der offene Ort (Stage, Bar, Food, Info, Wasser, Eingang), an dem der längste Weg aller Crew-Mitglieder mit geteiltem Standort am kürzesten ist (Minimax, bei Gleichstand kleinste Gesamtstrecke). Direkt „Route“ oder „Hier treffen“ (Meetup).
 - `src/meet.ts` rein und getestet (`tests/meet.test.mts`, 7 Prüfungen); Smoke-Schritt folgt der Route bis zum Banner.
+
+## Runde: Englische Veranstalter-Inhalte (claude/realm-content-en)
+- FAQ und Meldungen haben eine optionale englische Fassung (Konsole: „Englische Fassung (optional)“). Englische Besucher:innen sehen sie, sonst die deutsche; der FAQ-Bot versteht dann englische Fragen (deutsche Stichworte bleiben zusätzlich durchsuchbar).
+- API: `en`-Objekt in FAQ (`en: { question, answer, keywords }`) und Meldungen (`titleEn`, `bodyEn` → `en: { title, body }`); halbe Fassungen (Frage ohne Antwort) werden abgelehnt – auch schon in der Konsole. Migration 0012.
+- Grenze: Kategorie-Namen, Act-Bios und Ortsnamen bleiben wie eingegeben.
+- Geprüft: Worker-API (neuer Test), Migration, test:import, e2e, a11y, live (neuer Schritt: englische Fassung pflegen → englischer Besucher sieht FAQ und Meldung auf Englisch, Bot beantwortet englische Frage).

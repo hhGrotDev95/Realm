@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, execute, online, opId, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
-import { t } from './i18n'
+import { lang, t } from './i18n'
 import { DEFAULT_FESTIVAL } from './festival'
 import { on, ACTS, fmt, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
@@ -521,8 +521,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .map((a) => ({
         id: a.id,
         source: 'official' as const,
-        title: a.title,
-        body: a.body ?? undefined,
+        // the organizer's English version for English visitors, if there is one
+        title: lang === 'en' && a.en ? a.en.title : a.title,
+        body: (lang === 'en' && a.en ? a.en.body : a.body) ?? undefined,
         place: a.place ?? undefined,
         poi: a.poi ?? undefined,
         severity: a.severity,

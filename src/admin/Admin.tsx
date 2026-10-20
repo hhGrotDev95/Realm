@@ -284,14 +284,14 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : 'Fehler')
 function Announcements({ token, flash }: { token: string; flash: (k: 'ok' | 'err', t: string) => void }) {
   const admin = useMemo(() => adminApi(token), [token])
   const [items, setItems] = useState<Announcement[] | null>(null)
-  const [form, setForm] = useState({ title: '', body: '', place: '', severity: 'info' as Announcement['severity'], valid: '' })
+  const [form, setForm] = useState({ title: '', body: '', titleEn: '', bodyEn: '', place: '', severity: 'info' as Announcement['severity'], valid: '' })
   const [busy, setBusy] = useState(false)
   const load = useCallback(() => admin.announcements().then(setItems, (e) => flash('err', errText(e))), [admin, flash])
   useEffect(() => {
     load()
   }, [load])
   const validMin = form.valid ? Number(form.valid) : undefined
-  const invalid = form.title.trim().length < 3 || (validMin !== undefined && (!Number.isInteger(validMin) || validMin < 1))
+  const invalid = form.title.trim().length < 3 || (!!form.titleEn.trim() && form.titleEn.trim().length < 3) || (!!form.bodyEn.trim() && !form.titleEn.trim()) || (validMin !== undefined && (!Number.isInteger(validMin) || validMin < 1))
   return (
     <div className="admin-grid">
       <form
@@ -300,8 +300,8 @@ function Announcements({ token, flash }: { token: string; flash: (k: 'ok' | 'err
           e.preventDefault()
           setBusy(true)
           try {
-            await admin.announce({ title: form.title.trim(), body: form.body.trim() || undefined, place: form.place.trim() || undefined, severity: form.severity, validMin })
-            setForm({ title: '', body: '', place: '', severity: 'info', valid: '' })
+            await admin.announce({ title: form.title.trim(), body: form.body.trim() || undefined, titleEn: form.titleEn.trim() || undefined, bodyEn: form.bodyEn.trim() || undefined, place: form.place.trim() || undefined, severity: form.severity, validMin })
+            setForm({ title: '', body: '', titleEn: '', bodyEn: '', place: '', severity: 'info', valid: '' })
             flash('ok', 'Meldung veröffentlicht')
             load()
           } catch (e) {
@@ -319,6 +319,17 @@ function Announcements({ token, flash }: { token: string; flash: (k: 'ok' | 'err
           <span>Text (optional)</span>
           <textarea className="field" value={form.body} maxLength={1000} onChange={(e) => setForm({ ...form, body: e.target.value })} />
         </label>
+        <details className="admin-en">
+          <summary>Englische Fassung (optional)</summary>
+          <label className="admin-field" style={{ marginTop: 8 }}>
+            <span>Titel (Englisch)</span>
+            <input className="field" lang="en" value={form.titleEn} maxLength={120} onChange={(e) => setForm({ ...form, titleEn: e.target.value })} placeholder="e.g. Thunderstorm warning from 22:30" />
+          </label>
+          <label className="admin-field">
+            <span>Text (Englisch, optional)</span>
+            <textarea className="field" lang="en" value={form.bodyEn} maxLength={1000} onChange={(e) => setForm({ ...form, bodyEn: e.target.value })} />
+          </label>
+        </details>
         <div className="admin-row">
           <label className="admin-field">
             <span>Ort (optional)</span>
