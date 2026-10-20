@@ -1,7 +1,7 @@
 import { AnimatePresence, m as motion } from 'framer-motion'
 import { Check, Layers, LocateFixed, Search, X, MapPin, TriangleAlert, Users, Satellite, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { FESTIVAL, on, ME, POIS, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { FESTIVAL, on, POIS, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
 import { useApp } from '../store'
 import { CAT_ICON } from './mapIcons'
 import { Ground, MAP_H as H, MAP_W as W } from './MapGround'
@@ -21,7 +21,7 @@ type View = { x: number; y: number; k: number }
 
 export function MapScreen() {
   const { crew } = useApp()
-  const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, updates, votes, sheet, set, toast, requireIdentity } = useApp()
+  const { here, openSheet, focusPoi, setFocusPoi, shareLocation, myPins, updates, votes, sheet, set, toast, requireIdentity } = useApp()
   const wrap = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 0.5 })
   const [animate, setAnimate] = useState(false)
@@ -49,7 +49,8 @@ export function MapScreen() {
   useLayoutEffect(() => {
     const el = wrap.current!
     const k = Math.max(el.clientWidth / W, (el.clientHeight * 0.8) / H) * 1.05
-    setView({ k, x: el.clientWidth / 2 - ME.x * k, y: el.clientHeight / 2 - ME.y * k })
+    const c = here ?? { x: W / 2, y: H / 2 }
+    setView({ k, x: el.clientWidth / 2 - c.x * k, y: el.clientHeight / 2 - c.y * k })
   }, [])
 
   // handle deep links from other screens: "route:<poi>" or "poi:<poi>"
@@ -60,26 +61,28 @@ export function MapScreen() {
     setFocusPoi(null)
     if (!p) return
     if (mode === 'route') {
+      // a direction needs a starting point the visitor chose; without one, ask (audit F04)
+      if (!here) return openSheet({ kind: 'place', then: p.id })
       setRoute(p.id)
-      center((p.x + ME.x) / 2, (p.y + ME.y) / 2, undefined, -40)
+      center((p.x + here.x) / 2, (p.y + here.y) / 2, undefined, -40)
     } else {
       center(p.x, p.y, undefined, -120)
       openSheet({ kind: 'poi', id: p.id })
     }
-  }, [focusPoi, center, openSheet, setFocusPoi])
+  }, [focusPoi, center, openSheet, setFocusPoi, here])
 
   // the poi sheet can request a route via store focus; also listen to route events from sheets
   useEffect(() => {
     const h = (e: Event) => {
       const id = (e as CustomEvent<string>).detail
       const p = POIS.find((x) => x.id === id)
-      if (!p) return
+      if (!p || !here) return
       setRoute(id)
-      center((p.x + ME.x) / 2, (p.y + ME.y) / 2, undefined, -40)
+      center((p.x + here.x) / 2, (p.y + here.y) / 2, undefined, -40)
     }
     window.addEventListener('realm:route', h)
     return () => window.removeEventListener('realm:route', h)
-  }, [center])
+  }, [center, here])
 
   const visible = useMemo(() => {
     if (cat) return POIS.filter((p) => p.cat === cat)
@@ -170,10 +173,11 @@ export function MapScreen() {
           }}
         >
           <Ground satellite={layers.satellite} siteMap={FESTIVAL.siteMap} />
-          {routePoi && (
+          {routePoi && here && (
             <svg width={W} height={H} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+              {/* a straight direction, not a path: the plan does not know walkable ways or closures */}
               <motion.path
-                d={routePath(ME, routePoi)}
+                d={`M${here.x},${here.y} L${routePoi.x},${routePoi.y}`}
                 fill="none"
                 stroke="var(--brand)"
                 strokeWidth={6 * Math.max(1, inv * 0.6)}
@@ -225,9 +229,11 @@ export function MapScreen() {
                 </div>
               )
             })}
-          <div style={{ ...pinStyle(ME.x, ME.y, inv), pointerEvents: 'none' }}>
-            <span className="me-dot" />
-          </div>
+          {here && (
+            <div style={{ ...pinStyle(here.x, here.y, inv), pointerEvents: 'none' }} role="img" aria-label={t('Dein gewählter Standort: {place}', { place: here.label })}>
+              <span className="me-dot" />
+            </div>
+          )}
         </div>
       </div>
 
@@ -255,7 +261,8 @@ export function MapScreen() {
                     <span className="grow">
                       <span style={{ fontWeight: 600 }}>{p.name}</span>
                       <span className="tiny faint" style={{ display: 'block' }}>
-                        {t('{n} Min.', { n: walkMinutes(ME.x, ME.y, p.x, p.y) })} · {p.detail}
+                        {here ? `${t('ca. {n} Min.', { n: walkMinutes(here.x, here.y, p.x, p.y) })} · ` : ''}
+                        {p.detail}
                       </span>
                     </span>
                   </button>
@@ -279,11 +286,11 @@ export function MapScreen() {
       </div>
 
       <AnimatePresence>
-        {routePoi && (
+        {routePoi && here && (
           <motion.div className="route-banner" initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}>
             <span className="grow">
-              <span style={{ display: 'block', fontSize: 17 }}>{t('{n} Min. zu Fuß', { n: walkMinutes(ME.x, ME.y, routePoi.x, routePoi.y) })}</span>
-              <span style={{ fontSize: 13, opacity: 0.75 }}>{t('bis {place}', { place: routePoi.name })}</span>
+              <span style={{ display: 'block', fontSize: 17 }}>{t('Richtung {place}', { place: routePoi.name })}</span>
+              <span style={{ fontSize: 13, opacity: 0.8 }}>{t('ca. {n} Min. Luftlinie · folge Wegen und Schildern', { n: walkMinutes(here.x, here.y, routePoi.x, routePoi.y) })}</span>
             </span>
             <button className="icon-btn" style={{ color: 'var(--brand-ink)' }} onClick={() => setRoute(null)} aria-label={t('Route beenden')}>
               <X size={20} />
@@ -326,7 +333,7 @@ export function MapScreen() {
         <button className="fab" aria-label={t('Herauszoomen')} onClick={() => zoomAt(1 / 1.3, wrap.current!.clientWidth / 2, wrap.current!.clientHeight / 2)}>
           <Minus size={20} />
         </button>
-        <button className="fab active" aria-label={t('Mein Standort')} onClick={() => center(ME.x, ME.y, Math.max(view.k, 0.9))}>
+        <button className={`fab ${here ? 'active' : ''}`} aria-label={here ? t('Mein Standort: {place}', { place: here.label }) : t('Standort wählen')} onClick={() => (here ? center(here.x, here.y, Math.max(view.k, 0.9)) : openSheet({ kind: 'place' }))}>
           <LocateFixed size={21} />
         </button>
       </div>
@@ -338,11 +345,7 @@ function pinStyle(x: number, y: number, inv: number): React.CSSProperties {
   return { position: 'absolute', left: x, top: y, transform: `translate(-50%, -50%) scale(${inv})`, zIndex: 2 }
 }
 
-function routePath(a: { x: number; y: number }, b: { x: number; y: number }) {
-  // follow the main paths: go via the plaza
-  const mid = { x: (a.x + b.x) / 2 + (b.y - a.y) * 0.15, y: (a.y + b.y) / 2 - (b.x - a.x) * 0.15 }
-  return `M${a.x},${a.y} Q${mid.x},${mid.y} ${b.x},${b.y}`
-}
+
 
 function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: boolean; onClick: () => void }) {
   const I = CAT_ICON[p.cat]

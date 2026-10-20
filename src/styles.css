@@ -529,3 +529,7 @@ select.field { appearance: none; }
   .toolbar { gap: 0; }
   .toolbar .icon-btn { width: 40px; height: 40px; }
 }
+
+/* inline text button */
+.link { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; font: inherit; padding: 0; min-height: 0; }
+.demo-tag { margin-left: 8px; vertical-align: middle; font-size: 10px; background: var(--warn-soft); color: var(--warn); }

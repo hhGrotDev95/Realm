@@ -25,7 +25,7 @@ const TABS: { id: Tab; label: string; icon: typeof House }[] = [
 ]
 
 export function AppBar({ floating }: { floating?: boolean }) {
-  const { phase, now, openSheet, clockMode, msToStart } = useApp()
+  const { phase, now, openSheet, clockMode, msToStart, online } = useApp()
   const sub =
     phase === 'during' || phase === 'arrival'
       ? `${DAYS[now.day]?.label ?? ''} · ${fmt(now.min)}`
@@ -46,7 +46,11 @@ export function AppBar({ floating }: { floating?: boolean }) {
         </div>
       )}
       <div className="title">
-        <h1 className="appbar-h">{FESTIVAL.name}</h1>
+        <h1 className="appbar-h">
+          {FESTIVAL.name}
+          {/* the demo is labelled on every screen, also on phones (audit D01) */}
+          {!online && <span className="tag demo-tag">{t('Demo')}</span>}
+        </h1>
         <span>{sub}</span>
       </div>
       {on('faq') && (

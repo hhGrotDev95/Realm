@@ -68,7 +68,6 @@ export const EN_CORE: Record<string, string> = {
   "Abgesagt": "Cancelled",
   "Hier treffen": "Meet here",
   "Entfernen": "Remove",
-  "{n} Min.": "{n} min",
   "Du": "You",
   "Unbestätigt": "Unconfirmed",
   "Meldungen brauchen einen Namen, damit Missbrauch erkennbar bleibt.": "Reports need a name so misuse stays traceable.",
@@ -128,4 +127,6 @@ export const EN_CORE: Record<string, string> = {
   "Von mehreren gemeldet – für andere ausgeblendet": "Reported by several people – hidden from others",
   "Für alle auf dem Festival · moderiert": "For everyone at the festival · moderated",
   "Frag die anderen Besucher:innen – moderiert": "Ask other festival-goers – moderated",
+  "Demo-Standort": "Demo location",
+  "Demo": "Demo",
 }
