@@ -1,7 +1,7 @@
 import { m as motion } from 'framer-motion'
 import { CalendarPlus, ChevronRight, Megaphone, Footprints, Heart, LogOut, MapPin, MessageCircle, Navigation, Share2, UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
-import { on, ACTS, fmt, POIS, stageById, ME, walkMinutes, type PoiCat, type StageId } from '../data'
+import { on, ACTS, fmt, POIS, stageById, walkMinutes, type PoiCat, type StageId } from '../data'
 import { fairMeetingPoint } from '../meet'
 import { isMeetupActive, useApp } from '../store'
 import { status } from '../time'
@@ -17,7 +17,7 @@ export function Crew() {
 
 function CrewHome() {
   const { crew, inviteLink, toast, leaveCrew, online } = useApp()
-  const { now, plan, meetups, declined, openSheet, setTab, setFocusPoi, shareLocation, set, guest, requireIdentity, stepsOptIn, chat, phase, pendingPrivacy } = useApp()
+  const { now, plan, meetups, declined, openSheet, setTab, setFocusPoi, shareLocation, set, guest, requireIdentity, stepsOptIn, chat, phase, pendingPrivacy, here } = useApp()
   const ref = useScrollTop()
 
   const groups = Object.entries(
@@ -116,9 +116,9 @@ function CrewHome() {
                     </span>
                     <span className="small faint row" style={{ gap: 6 }}>
                       <StageDot id={s.id} />
-                      {t('{n} Min. entfernt', { n: walkMinutes(ME.x, ME.y, s.x, s.y) })}
+                      {here && t('ca. {n} Min. entfernt', { n: walkMinutes(here.x, here.y, s.x, s.y) })}
                       <span style={stale ? { color: 'var(--warn)' } : undefined}>
-                        · {age <= 1 ? t('Stand: gerade eben') : stale ? t('Stand vor {n} Min. · veraltet', { n: age }) : t('Stand vor {n} Min.', { n: age })}
+                        {here ? '· ' : ''}{age <= 1 ? t('Stand: gerade eben') : stale ? t('Stand vor {n} Min. · veraltet', { n: age }) : t('Stand vor {n} Min.', { n: age })}
                       </span>
                     </span>
                   </span>
@@ -281,8 +281,9 @@ const MEET_AT: PoiCat[] = ['stage', 'bar', 'food', 'info', 'water', 'entrance']
 
 /** Suggests the place where the longest walk for anyone in the crew is shortest. */
 function FairPoint() {
-  const { crew, setFocusPoi, setTab, openSheet, requireIdentity } = useApp()
-  const people = [ME, ...crew.members.filter((m) => m.at && m.at !== 'camp' && stageById[m.at as StageId]).map((m) => stageById[m.at as StageId])]
+  const { crew, setFocusPoi, setTab, openSheet, requireIdentity, here } = useApp()
+  // only positions people actually gave: the visitor's chosen place (if any) and crew members' shared stages
+  const people = [...(here ? [here] : []), ...crew.members.filter((m) => m.at && m.at !== 'camp' && stageById[m.at as StageId]).map((m) => stageById[m.at as StageId])]
   const best = fairMeetingPoint(
     people,
     POIS.filter((p) => MEET_AT.includes(p.cat) && p.status !== 'closed'),
@@ -312,7 +313,7 @@ function FairPoint() {
             setTab('map')
           }}
         >
-          <Navigation size={15} /> {t('Route')}
+          <Navigation size={15} /> {t('Richtung')}
         </button>
         {on('crew') && (
           <button className="btn ghost sm" onClick={() => requireIdentity(t('Damit deine Crew weiß, wer einlädt.'), () => openSheet({ kind: 'newMeetup', poi: best.spot.id, place: best.spot.name }))}>

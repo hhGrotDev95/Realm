@@ -1,7 +1,7 @@
 import { m as motion } from 'framer-motion'
 import { CalendarClock, Megaphone, Users, ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { on, dateRange, FESTIVAL, ACTS, actById, DAYS, fmt, stageById, walkMinutes, ME } from '../data'
+import { on, dateRange, FESTIVAL, ACTS, actById, DAYS, fmt, POIS, stageById, walkMinutes } from '../data'
 import { conflictClusters, isMeetupActive, useApp } from '../store'
 import { t } from '../i18n'
 import { nowNext, planFor, status, untilLabel } from '../time'
@@ -23,6 +23,8 @@ export function Home() {
   return (
     <main className="screen" ref={ref}>
       <motion.div key={phase} className="stack" initial="initial" animate="animate">
+        {/* official warnings come first in every phase, not only during the festival (audit D03) */}
+        <Urgent />
         {phase === 'before' && <Before />}
         {phase === 'arrival' && <Arrival />}
         {phase === 'during' && <During />}
@@ -93,7 +95,7 @@ function UpdatesModule({ i, exclude }: { i: number; exclude?: string }) {
 
 function NowNextHero() {
   const { crew } = useApp()
-  const { plan, now, openSheet, setTab, setFocusPoi } = useApp()
+  const { plan, now, openSheet, setTab, setFocusPoi, here } = useApp()
   const { live, next } = nowNext(plan, now)
   const focus = next ?? live
   if (!focus) {
@@ -113,7 +115,7 @@ function NowNextHero() {
   const isLive = status(focus, now) === 'live'
   const friends = crew.friendsFor(focus.id)
   const stage = stageById[focus.stage]
-  const walk = walkMinutes(ME.x, ME.y, stage.x, stage.y)
+  const walk = here ? walkMinutes(here.x, here.y, stage.x, stage.y) : null
   const pct = isLive ? ((now.min - focus.start) / (focus.end - focus.start)) * 100 : 0
   return (
     <motion.div {...stagger(1)} className="hero">
@@ -153,7 +155,7 @@ function NowNextHero() {
             setTab('map')
           }}
         >
-          <Navigation size={17} /> {t('Route · {n} Min.', { n: walk })}
+          <Navigation size={17} /> {walk === null ? t('Richtung zeigen') : t('Richtung · ca. {n} Min.', { n: walk })}
         </button>
         <button className="btn secondary" onClick={() => openSheet({ kind: 'act', id: focus.id })}>
           {t('Details')}
@@ -302,7 +304,6 @@ function During() {
   const { urgent } = useRelevantUpdates()
   return (
     <>
-      <Urgent />
       <PlanChanges i={0} />
       <NowNextHero />
       {on('crew') && <MeetupModule i={2} />}
@@ -431,6 +432,37 @@ function InfoTile({ icon: Icon, title, sub, onClick, i, tone }: { icon: typeof B
 }
 
 function Arrival() {
+  const { online } = useApp()
+  return online ? <ArrivalLive /> : <ArrivalDemo />
+}
+
+/** Live: only what the festival actually published – first set, entrances, official notices (audit D01). */
+function ArrivalLive() {
+  const { openSheet } = useApp()
+  const first = ACTS.filter((a) => a.day === 0 && !a.change?.cancelled).sort((a, b) => a.start - b.start)[0]
+  const entrances = POIS.filter((p) => p.cat === 'entrance')
+  const service = POIS.filter((p) => p.cat === 'info' || p.cat === 'shuttle' || p.cat === 'camping')
+  return (
+    <>
+      <motion.div {...stagger(0)} className="hero">
+        <span className="label next">{t('Anreise · Tag 1')}</span>
+        <h1>{t('Willkommen bei {name}.', { name: FESTIVAL.name })}</h1>
+        {first && <p className="meta">{t('Erster Act: {artist} um {time} · {stage}', { artist: first.artist, time: fmt(first.start), stage: stageById[first.stage].name })}</p>}
+      </motion.div>
+      {[...entrances, ...service].length > 0 && (
+        <div className="list" style={{ gap: 8 }}>
+          {[...entrances, ...service].map((p, i) => (
+            <InfoTile key={p.id} i={i + 1} icon={p.cat === 'entrance' ? DoorOpen : p.cat === 'shuttle' ? Bus : p.cat === 'camping' ? Tent : Ticket} title={p.name} sub={p.detail} onClick={() => openSheet({ kind: 'poi', id: p.id })} />
+          ))}
+        </div>
+      )}
+      <UpdatesModule i={5} />
+    </>
+  )
+}
+
+/** Demo only: invented example cards, visibly marked as such. */
+function ArrivalDemo() {
   const { setTab, setFocusPoi, openSheet } = useApp()
   const go = (poi: string) => {
     setFocusPoi('route:' + poi)
@@ -439,7 +471,7 @@ function Arrival() {
   return (
     <>
       <motion.div {...stagger(0)} className="hero">
-        <span className="label next">{t('Anreise · Tag 1')}</span>
+        <span className="label next">{t('Anreise · Tag 1')} · {t('Demo-Beispiel')}</span>
         <h1>{t('Willkommen, die Tore sind offen.')}</h1>
         <p className="meta">{t('Erster Act: Sol Arcadia um 15:00 · Lagoon')}</p>
         <div className="actions">
@@ -463,11 +495,38 @@ function Arrival() {
 }
 
 function Departure() {
-  const { setTab, setFocusPoi, openSheet } = useApp()
+  const { online } = useApp()
+  return online ? <DepartureLive /> : <DepartureDemo />
+}
+
+function DepartureLive() {
+  const { openSheet } = useApp()
+  const service = POIS.filter((p) => p.cat === 'shuttle' || p.cat === 'info')
   return (
     <>
       <motion.div {...stagger(0)} className="hero">
         <span className="label next">{t('Abreise')}</span>
+        <h1>{t('Komm gut nach Hause.')}</h1>
+      </motion.div>
+      {service.length > 0 && (
+        <div className="list" style={{ gap: 8 }}>
+          {service.map((p, i) => (
+            <InfoTile key={p.id} i={i + 1} icon={p.cat === 'shuttle' ? Bus : PackageSearch} title={p.name} sub={p.detail} onClick={() => openSheet({ kind: 'poi', id: p.id })} />
+          ))}
+        </div>
+      )}
+      <UpdatesModule i={4} />
+      <AttendPrompt i={5} />
+    </>
+  )
+}
+
+function DepartureDemo() {
+  const { setTab, setFocusPoi, openSheet } = useApp()
+  return (
+    <>
+      <motion.div {...stagger(0)} className="hero">
+        <span className="label next">{t('Abreise')} · {t('Demo-Beispiel')}</span>
         <h1>{t('Komm gut nach Hause.')}</h1>
         <p className="meta">{t('Letztes Shuttle zum Bahnhof: 18:30')}</p>
         <div className="actions">

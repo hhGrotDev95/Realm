@@ -3,7 +3,7 @@ import { api, ApiError, execute, online, opId, privacyKey, retryable, setToken, 
 import { lang, t } from './i18n'
 import { ageSince } from './aging'
 import { DEFAULT_FESTIVAL } from './festival'
-import { on, ACTS, fmt, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
+import { on, ACTS, fmt, POIS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
   id: string
@@ -40,6 +40,8 @@ interface Persisted {
   myUpdates: FestivalUpdate[]
   chat: ChatMsg[]
   shareLocation: boolean
+  /** where the visitor said they are (a POI id) – the app never invents a position (audit F04) */
+  myPlace: string | null
   stepsOptIn: boolean
   myPins: { id: string; name: string; x: number; y: number }[]
   dismissed: string[]
@@ -89,6 +91,7 @@ function initial(): Persisted {
     myUpdates: [],
     chat: CHAT,
     shareLocation: true,
+    myPlace: null,
     stepsOptIn: false,
     myPins: [{ id: 'pin1', name: 'Unser Banner', x: 600, y: 170 }],
     dismissed: [],
@@ -134,7 +137,14 @@ function load(): Persisted {
 const POLL_MS = 8000
 const MAX_BACKOFF_MS = 120_000
 
-const nearestStage = (): StageId => STAGES.reduce((a, b) => (Math.hypot(a.x - ME.x, a.y - ME.y) < Math.hypot(b.x - ME.x, b.y - ME.y) ? a : b)).id
+/** The position the app may use: the place the visitor picked; in the demo a marked demo position. */
+export type Here = { x: number; y: number; label: string; demo: boolean }
+function hereFor(myPlace: string | null): Here | null {
+  if (!online) return { ...ME, label: t('Demo-Standort'), demo: true }
+  const p = myPlace ? POIS.find((x) => x.id === myPlace) : undefined
+  return p ? { x: p.x, y: p.y, label: p.name, demo: false } : null
+}
+const nearestStage = (h: Here): StageId => STAGES.reduce((a, b) => (Math.hypot(a.x - h.x, a.y - h.y) < Math.hypot(b.x - h.x, b.y - h.y) ? a : b)).id
 
 function minuteOfDay(ts: number) {
   const d = new Date(ts)
@@ -162,6 +172,8 @@ export type SheetState =
   | { kind: 'faq'; q?: string }
   | { kind: 'steps' }
   | { kind: 'festivalChat' }
+  /** "Where are you?" – `then` routes to that POI once a place is chosen */
+  | { kind: 'place'; then?: string }
   | null
 
 interface Ctx extends Persisted {
@@ -181,6 +193,8 @@ interface Ctx extends Persisted {
   setNickname: (n: string, color: string) => void
   secure: (how: 'passkey' | 'code') => string | undefined | Promise<string | undefined>
   requireIdentity: (reason: string, then: () => void) => void
+  /** the visitor's chosen place (null = unknown); never a guessed position */
+  here: Here | null
   /** privacy decisions the server has not confirmed yet */
   pendingPrivacy: { location: 'on' | 'off' | null; steps: boolean }
   addMeetup: (m: Omit<Meetup, 'id' | 'going' | 'createdBy'>) => void
@@ -462,14 +476,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const crewId = s.crewRef.id
     const was = sharedBefore.current
     sharedBefore.current = s.shareLocation
-    const send = () => enqueuePrivacy({ id: opId('loc'), kind: 'location', crewId, share: s.shareLocation, location: s.shareLocation ? nearestStage() : null })
+    const send = () => enqueuePrivacy({ id: opId('loc'), kind: 'location', crewId, share: s.shareLocation, location: s.shareLocation && hereFor(s.myPlace) ? nearestStage(hereFor(s.myPlace)!) : null })
     // sharing: (re)confirm now; not sharing: only a real change is a withdrawal worth sending
     // (an unsent withdrawal survives reloads in the persisted outbox)
     if (s.shareLocation || was) send()
     if (!s.shareLocation) return
     const timer = window.setInterval(send, 30 * 60_000)
     return () => window.clearInterval(timer)
-  }, [s.shareLocation, s.crewRef?.id, s.session?.id])
+  }, [s.shareLocation, s.crewRef?.id, s.session?.id, s.myPlace])
 
   // a switched-off module ends the local share as well (the server already ended it)
   useEffect(() => {
@@ -594,6 +608,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     return {
       ...s,
+      here: hereFor(s.myPlace),
       pendingPrivacy,
       phase,
       msToStart,

@@ -240,6 +240,42 @@ try {
     await lea.keyboard.press('Escape')
   })
 
+  await step('honest navigation (audit F04/D02): no invented position, no route without a chosen place, no guidance to help points', async () => {
+    await nav(lea, 'Map')
+    if (await lea.locator('.me-dot').count()) throw new Error('map shows a position nobody gave')
+    await lea.getByRole('button', { name: 'Standort wählen' }).waitFor()
+    await lea.getByRole('button', { name: 'Bars' }).click()
+    await lea.getByRole('button', { name: 'Red Bull Bar' }).click()
+    await lea.locator('.sheet').getByText('Entfernung: erst Standort wählen').waitFor()
+    await lea.locator('.sheet').getByRole('button', { name: 'Richtung', exact: true }).click()
+    // no position known: the app asks instead of guessing, then continues to the direction
+    await lea.locator('.sheet').getByRole('heading', { name: 'Wo bist du gerade?' }).waitFor()
+    await lea.locator('.sheet').getByRole('button', { name: 'Food Court' }).click()
+    await lea.locator('.route-banner').getByText('Richtung Red Bull Bar').waitFor()
+    await lea.locator('.route-banner').getByText(/Luftlinie · folge Wegen und Schildern/).waitFor()
+    await lea.locator('.me-dot').waitFor()
+    await lea.getByRole('button', { name: 'Route beenden' }).click()
+    // the medical tent: emergency number and staff, no pseudo-precise way
+    await lea.getByRole('button', { name: 'Medical' }).click()
+    await lea.getByRole('button', { name: 'Sanitätszelt' }).click()
+    await lea.locator('.sheet').getByText('Im Notfall: 112').waitFor()
+    if (await lea.locator('.sheet').getByRole('button', { name: 'Richtung', exact: true }).count()) throw new Error('help point offers a direction')
+    await lea.keyboard.press('Escape')
+  })
+
+  await step('live content (audit D01/D03): arrival shows only published data, the official warning stays on top', async () => {
+    await lea.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    await lea.locator('.sheet').getByText('Demo · Anreise').click()
+    await lea.getByRole('heading', { name: 'Willkommen bei Realm Open Air.' }).waitFor()
+    for (const invented of ['Shuttle ab Bahnhof', '24° und sonnig', 'Camping B · Reihe 14', 'Eingang Nord · ca. 25 Min.', 'Demo-Beispiel'])
+      if (await lea.getByText(invented).count()) throw new Error('invented demo card in live mode: ' + invented)
+    const first = lea.locator('.stack > *').first()
+    if (!(await first.evaluate((el) => el.classList.contains('alert')))) throw new Error('official warning is not the first thing on Home during arrival')
+    await first.getByText('Bühne Lagoon pausiert wegen Wind').waitFor()
+    await lea.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    await lea.locator('.sheet').getByText('Demo · Festival').click()
+  })
+
   await step('organizer cancels an act: plan alert and struck-through row', async () => {
     const res = await fetch(`${API}/api/admin/timetable/1-maduk`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer e2e-admin', 'X-Festival': 'realm-open-air' }, body: JSON.stringify({ cancelled: true, note: 'Krankheit' }) })
     if (!res.ok) throw new Error('admin PUT failed ' + res.status)

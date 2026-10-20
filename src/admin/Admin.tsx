@@ -359,7 +359,7 @@ function Announcements({ token, flash }: { token: string; flash: (k: 'ok' | 'err
               </button>
             ))}
           </div>
-          <span className="tiny faint">Warnung und Kritisch erscheinen oben auf dem Home-Screen aller Besucher.</span>
+          <span className="tiny faint">Warnung und Kritisch erscheinen in jeder Festivalphase ganz oben auf dem Home-Screen aller Besucher – Info nur in der Update-Liste.</span>
         </fieldset>
         <button className="btn primary block" disabled={busy || invalid}>
           {busy ? 'Veröffentliche …' : 'Veröffentlichen'}

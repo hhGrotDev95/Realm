@@ -327,3 +327,6 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 
 ## Prüfbericht-Behebung · Welle 1 (claude/realm-fix-wave1)
 - F02, F03, F10, F13, D04 und feste Schrittwerte – Details und Tests in `docs/AUDIT.md`. Neue Migration nicht nötig; Server: `isPrivacyAction`, Standort-TTL 2 h (+ Cron), Modul-/Archiv-Abschaltung beendet Freigaben.
+
+## Prüfbericht-Behebung · Welle 2 (claude/realm-fix-wave2)
+- F04/D02 ehrliche Navigation, D01 keine Demo-Inhalte im Live-Modus + Demo-Kennzeichen, D03 Warnungen in jeder Phase oben. Details in `docs/AUDIT.md`. Nebenbei gefunden und behoben: nach der Standortwahl startete die angeforderte Richtung nicht (Karte kannte den Ort noch nicht).

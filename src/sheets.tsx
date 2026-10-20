@@ -5,7 +5,7 @@ import { switchFestival } from './festival'
 const FaqSheet = lazy(() => import('./FaqSheet').then((m) => ({ default: m.FaqSheet })))
 const FestivalChat = lazy(() => import('./FestivalChat').then((m) => ({ default: m.FestivalChat })))
 import { api } from './api'
-import { on, FESTIVAL, ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
+import { on, FESTIVAL, ACTS, actById, DAYS, fmt, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
 import { CAT_ICON } from './screens/mapIcons'
 import { downloadIcs } from './calendar/download'
 import { ActRow } from './screens/Lineup'
@@ -50,6 +50,7 @@ export function Sheets() {
             </LazyBoundary>
           )}
           {s?.kind === 'steps' && <Steps />}
+          {s?.kind === 'place' && <PlacePicker then={s.then} />}
           {s?.kind === 'festivalChat' && (
             <LazyBoundary>
               <Suspense fallback={<p className="muted small">{t('Lade …')}</p>}>
@@ -99,12 +100,77 @@ function sheetLabel(s: SheetState): string {
       return t('Step-Challenge')
     case 'festivalChat':
       return t('Festival-Chat')
+    case 'place':
+      return t('Wo bist du gerade?')
     default:
       return t('Dialog')
   }
 }
 
+/** The visitor names their position; the app never guesses one. */
+function PlacePicker({ then }: { then?: string }) {
+  const app = useApp()
+  const { set, myPlace, closeSheet, toast } = app
+  const [q, setQ] = useState('')
+  const places = POIS.filter((p) => (p.cat === 'stage' || p.important || p.cat === 'entrance' || p.cat === 'camping') && (!q || p.name.toLowerCase().includes(q.toLowerCase())))
+  return (
+    <>
+      <div className="sheet-head">
+        <div className="grow">
+          <h2>{t('Wo bist du gerade?')}</h2>
+          <div className="small muted">{t('Wähle den Ort, an dem du bist. Die App ermittelt keinen Standort – Entfernungen sind grobe Luftlinien.')}</div>
+        </div>
+      </div>
+      <div className="search" style={{ marginBottom: 10 }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Ort suchen')} aria-label={t('Ort suchen')} />
+      </div>
+      <div className="list">
+        {places.map((p) => {
+          const I = CAT_ICON[p.cat]
+          return (
+            <button
+              key={p.id}
+              className="list-item"
+              aria-pressed={myPlace === p.id}
+              onClick={() => {
+                set('myPlace', p.id)
+                toast(t('Standort: {place}', { place: p.name }))
+                closeSheet()
+                // continue to the requested direction; the map picks it up together with the new place
+                if (then) {
+                  app.setFocusPoi('route:' + then)
+                  app.setTab('map')
+                }
+              }}
+            >
+              <I size={18} className="faint" />
+              <span className="grow" style={{ fontWeight: 600 }}>
+                {p.name}
+              </span>
+              {myPlace === p.id && <Check size={18} style={{ color: 'var(--brand)' }} />}
+            </button>
+          )
+        })}
+      </div>
+      {myPlace && (
+        <button
+          className="btn ghost sm"
+          style={{ marginTop: 12 }}
+          onClick={() => {
+            set('myPlace', null)
+            closeSheet()
+          }}
+        >
+          {t('Standort vergessen')}
+        </button>
+      )}
+    </>
+  )
+}
+
 function goRoute(poi: string, app: ReturnType<typeof useApp>) {
+  // no known position, no route: ask first, then continue (audit F04)
+  if (!app.here) return app.openSheet({ kind: 'place', then: poi })
   app.closeSheet()
   if (app.tab === 'map') window.dispatchEvent(new CustomEvent('realm:route', { detail: poi }))
   else {
@@ -124,7 +190,7 @@ function ActSheet({ id }: { id: string }) {
   const inPlan = plan.includes(id)
   const friends = crew.friendsFor(id)
   const tendency = Math.round(a.popularity * 100)
-  const walk = walkMinutes(ME.x, ME.y, s.x, s.y)
+  const walk = app.here ? walkMinutes(app.here.x, app.here.y, s.x, s.y) : null
   return (
     <>
       <div className="sheet-head">
@@ -162,7 +228,7 @@ function ActSheet({ id }: { id: string }) {
           )}
         </button>
         <button className="btn secondary" onClick={() => goRoute('stage-' + a.stage, app)}>
-          <Navigation size={17} /> {t('{n} Min.', { n: walk })}
+          <Navigation size={17} /> {walk === null ? t('Richtung zeigen') : t('ca. {n} Min.', { n: walk })}
         </button>
         {st !== 'past' && (
           <button className={`icon-btn filled ${reminders[id] ? 'active' : ''}`} style={{ width: 44, height: 44 }} aria-label={t('Erinnerung')} onClick={() => toggleReminder(id)}>
@@ -253,7 +319,9 @@ function PoiSheet({ id }: { id: string }) {
   const { openSheet, requireIdentity, now, updates, votes, vote, plan } = app
   const p = POIS.find((x) => x.id === id)!
   const I = CAT_ICON[p.cat]
-  const walk = walkMinutes(ME.x, ME.y, p.x, p.y)
+  const walk = app.here ? walkMinutes(app.here.x, app.here.y, p.x, p.y) : null
+  // help points get no pseudo-precise guidance: in an emergency people need staff and signs (audit F04/D02)
+  const safety = p.cat === 'medical' || p.cat === 'entrance'
   const reports = updates.filter((u) => u.poi === id && votes[u.id] !== 'fixed')
   const stageId = p.cat === 'stage' ? (p.id.replace('stage-', '') as keyof typeof stageById) : null
   const stageActs = stageId ? ACTS.filter((a) => a.stage === stageId && a.day === Math.max(0, Math.min(DAYS.length - 1, now.day)) && status(a, now) !== 'past').slice(0, 3) : []
@@ -272,15 +340,36 @@ function PoiSheet({ id }: { id: string }) {
             {!statusText && p.detail}
           </div>
           <div className="small faint" style={{ marginTop: 2 }}>
-            {walk === 1 ? t('1 Minute entfernt') : t('{n} Minuten entfernt', { n: walk })}
+            {walk === null ? (
+              <button className="link" onClick={() => openSheet({ kind: 'place' })}>
+                {t('Entfernung: erst Standort wählen')}
+              </button>
+            ) : (
+              t('ca. {n} Min. Luftlinie von {place}', { n: walk, place: app.here!.label })
+            )}
             {statusText ? ` · ${p.detail}` : ''}
           </div>
         </div>
       </div>
+      {p.cat === 'medical' && (
+        <div className="alert critical" role="note" style={{ marginBottom: 14 }}>
+          <TriangleAlert className="a-ic" size={20} />
+          <span className="grow">
+            <strong>{t('Im Notfall: 112')}</strong>
+            <span className="small muted">{t('Sprich Personal oder Security direkt an und folge der Beschilderung vor Ort. Die Karte ist nur ein schematischer Plan.')}</span>
+          </span>
+        </div>
+      )}
       <div className="sheet-actions">
-        <button className="btn primary" onClick={() => goRoute(p.id, app)}>
-          <Navigation size={17} /> {t('Route')}
-        </button>
+        {safety ? (
+          <button className="btn primary" onClick={() => (app.closeSheet(), app.setFocusPoi('poi:' + p.id), app.setTab('map'))}>
+            <Navigation size={17} /> {t('Auf der Karte zeigen')}
+          </button>
+        ) : (
+          <button className="btn primary" onClick={() => goRoute(p.id, app)}>
+            <Navigation size={17} /> {t('Richtung')}
+          </button>
+        )}
         {on('crew') && (
           <button className="btn secondary" onClick={() => requireIdentity(t('Damit deine Crew weiß, wer einlädt.'), () => openSheet({ kind: 'newMeetup', poi: p.id, place: p.name }))}>
             <Users size={17} /> {t('Hier treffen')}
@@ -325,7 +414,7 @@ function PoiSheet({ id }: { id: string }) {
 /* ---------------- Conflict resolver ---------------- */
 function Resolver({ ids, k }: { ids: string[]; k: string }) {
   const { crew } = useApp()
-  const { resolve, closeSheet } = useApp()
+  const { resolve, closeSheet, here } = useApp()
   const acts = ids.map((i) => actById[i])
   const [pick, setPick] = useState<string | null>(null)
   const [battle, setBattle] = useState(false)
@@ -384,7 +473,7 @@ function Resolver({ ids, k }: { ids: string[]; k: string }) {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 14 }} className="tiny">
                     <Metric label={t('Crew')} value={`${f.length}`} pct={f.length / maxFriends} />
-                    <Metric label={t('Laufweg')} value={t('{n} Min.', { n: walkMinutes(ME.x, ME.y, s.x, s.y) })} pct={1 - walkMinutes(ME.x, ME.y, s.x, s.y) / 12} />
+                    <Metric label={t('Laufweg')} value={here ? t('ca. {n} Min.', { n: walkMinutes(here.x, here.y, s.x, s.y) }) : '–'} pct={here ? 1 - walkMinutes(here.x, here.y, s.x, s.y) / 12 : 0} />
                     <Metric label={t('Community')} value={`${Math.round((a.popularity / totalPop) * 100)}%`} pct={a.popularity / totalPop} />
                   </div>
                 </button>
