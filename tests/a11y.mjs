@@ -17,7 +17,7 @@ for (let i = 0; i < 100; i++) {
 }
 
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
-const page = await browser.newPage({ viewport: { width: 400, height: 860 }, reducedMotion: 'reduce' })
+const page = await browser.newPage({ viewport: { width: 400, height: 860 }, reducedMotion: 'reduce', locale: 'de-DE' })
 const results = []
 async function audit(name) {
   await page.waitForTimeout(500)

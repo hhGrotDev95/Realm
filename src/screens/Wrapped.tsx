@@ -3,6 +3,7 @@ import { Share2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { FESTIVAL, actById, DAYS, fmt, stageById, STAGES, type StageId } from '../data'
 import { useApp } from '../store'
+import { num, t } from '../i18n'
 
 const DURATION = 5200
 
@@ -33,8 +34,8 @@ export function Wrapped() {
           <div className="label" style={{ color: 'rgba(255,255,255,.7)' }}>
             {FESTIVAL.name}
           </div>
-          <h3 style={{ fontSize: 48 }}>{guest.nickname ? `${guest.nickname},` : 'Hey,'} das war dein Festival.</h3>
-          <p style={{ opacity: 0.8 }}>Drei Tage. Fünf Stages. Eine Crew.</p>
+          <h3 style={{ fontSize: 48 }}>{guest.nickname ? t('{name}, das war dein Festival.', { name: guest.nickname }) : t('Hey, das war dein Festival.')}</h3>
+          <p style={{ opacity: 0.8 }}>{t('{days} Tage. {stages} Stages. Eine Crew.', { days: DAYS.length, stages: STAGES.length })}</p>
         </>
       ),
     },
@@ -42,11 +43,11 @@ export function Wrapped() {
       bg: 'linear-gradient(160deg,#ff6b5a,#4a0f1b)',
       body: (
         <>
-          <p style={{ opacity: 0.8 }}>Du hast gesehen</p>
-          <div className="big">{data.seen.length} Sets</div>
-          <h3>{Math.round(data.minutes / 60)} Stunden Musik.</h3>
+          <p style={{ opacity: 0.8 }}>{t('Du hast gesehen')}</p>
+          <div className="big">{t('{n} Sets', { n: data.seen.length })}</div>
+          <h3>{t('{n} Stunden Musik.', { n: Math.round(data.minutes / 60) })}</h3>
           <p style={{ opacity: 0.7, fontSize: 14 }}>
-            {data.confirmed} davon hast du bestätigt, der Rest stand in deinem Plan.
+            {t('{n} davon hast du bestätigt, der Rest stand in deinem Plan.', { n: data.confirmed })}
           </p>
         </>
       ),
@@ -55,7 +56,7 @@ export function Wrapped() {
       bg: `linear-gradient(160deg, ${stageById[data.fav].color}, #101014 80%)`,
       body: (
         <>
-          <p style={{ opacity: 0.8 }}>Dein Zuhause war die</p>
+          <p style={{ opacity: 0.8 }}>{t('Dein Zuhause war die')}</p>
           <div className="big" style={{ fontSize: 64 }}>
             {stageById[data.fav].name}
           </div>
@@ -75,7 +76,7 @@ export function Wrapped() {
       bg: 'linear-gradient(160deg,#0f3a4a,#0a0a0d)',
       body: (
         <>
-          <p style={{ opacity: 0.8 }}>Früh dran & lang wach</p>
+          <p style={{ opacity: 0.8 }}>{t('Früh dran & lang wach')}</p>
           {data.earliest && (
             <h3>
               {fmt(data.earliest.start)} · {data.earliest.artist}
@@ -86,7 +87,7 @@ export function Wrapped() {
               {fmt(data.latest.end)}
             </div>
           )}
-          <p style={{ opacity: 0.8 }}>{data.latest ? `Letzter Ton bei ${data.latest.artist}, ${DAYS[data.latest.day].label}.` : ''}</p>
+          <p style={{ opacity: 0.8 }}>{data.latest ? t('Letzter Ton bei {artist}, {day}.', { artist: data.latest.artist, day: DAYS[data.latest.day].label }) : ''}</p>
         </>
       ),
     },
@@ -94,10 +95,10 @@ export function Wrapped() {
       bg: `linear-gradient(160deg, ${data.buddy.f.color}, #101014 85%)`,
       body: (
         <>
-          <p style={{ opacity: 0.8 }}>Dein Festival-Buddy</p>
+          <p style={{ opacity: 0.8 }}>{t('Dein Festival-Buddy')}</p>
           <div className="big">{data.buddy?.f.name}</div>
-          <h3>{data.buddy?.n} gemeinsame Sets.</h3>
-          {!online && <p style={{ opacity: 0.8 }}>Und {(12840 * 3 + 4200).toLocaleString('de-DE')} Schritte von dir – Platz 3 in der Crew.</p>}
+          <h3>{t('{n} gemeinsame Sets.', { n: data.buddy?.n ?? 0 })}</h3>
+          {!online && <p style={{ opacity: 0.8 }}>{t('Und {n} Schritte von dir – Platz 3 in der Crew.', { n: num(12840 * 3 + 4200) })}</p>}
         </>
       ),
     },
@@ -105,22 +106,22 @@ export function Wrapped() {
       bg: 'linear-gradient(160deg, var(--brand), #ff6b5a)',
       body: (
         <>
-          <h3 style={{ fontSize: 40 }}>Bis nächstes Jahr.</h3>
-          <p style={{ opacity: 0.85 }}>Teile deinen Rückblick mit deiner Crew.</p>
+          <h3 style={{ fontSize: 40 }}>{t('Bis nächstes Jahr.')}</h3>
+          <p style={{ opacity: 0.85 }}>{t('Teile deinen Rückblick mit deiner Crew.')}</p>
           <button
             className="btn"
             style={{ background: '#fff', color: '#111', alignSelf: 'flex-start', marginTop: 12 }}
             onClick={(e) => {
               e.stopPropagation()
-              const text = `Mein ${FESTIVAL.name}: ${data.seen.length} Sets, Lieblingsstage ${stageById[data.fav]?.name ?? '–'}.`
+              const text = t('Mein {name}: {n} Sets, Lieblingsstage {stage}.', { name: FESTIVAL.name, n: data.seen.length, stage: stageById[data.fav]?.name ?? '–' })
               if (navigator.share) navigator.share({ text }).catch(() => {})
               else {
                 navigator.clipboard?.writeText(text).catch(() => {})
-                toast('In die Zwischenablage kopiert')
+                toast(t('In die Zwischenablage kopiert'))
               }
             }}
           >
-            <Share2 size={17} /> Teilen
+            <Share2 size={17} /> {t('Teilen')}
           </button>
         </>
       ),
@@ -146,7 +147,7 @@ export function Wrapped() {
           </i>
         ))}
       </div>
-      <button className="icon-btn" style={{ position: 'absolute', top: 30, right: 10, zIndex: 3, color: '#fff' }} onClick={closeSheet} aria-label="Schließen">
+      <button className="icon-btn" style={{ position: 'absolute', top: 30, right: 10, zIndex: 3, color: '#fff' }} onClick={closeSheet} aria-label={t('Schließen')}>
         <X size={22} />
       </button>
       <div

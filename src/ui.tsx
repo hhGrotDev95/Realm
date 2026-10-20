@@ -3,12 +3,13 @@ import { Heart } from 'lucide-react'
 import { Component, useEffect, useRef, type ReactNode } from 'react'
 import { stageById, type StageId, type UpdateSource } from './data'
 import { useApp } from './store'
+import { t } from './i18n'
 
 export const spring = { type: 'spring', stiffness: 420, damping: 36 } as const
 
 export function Avatar({ id, size }: { id: string; size?: 'lg' | 'xl' }) {
   const { guest, crew } = useApp()
-  const f = id === 'me' ? { name: guest.nickname ?? 'Du', color: guest.color } : (crew.byId[id] ?? { name: '?', color: '#55545f' })
+  const f = id === 'me' ? { name: guest.nickname ?? t('Du'), color: guest.color } : (crew.byId[id] ?? { name: '?', color: '#55545f' })
   return (
     <span className={`avatar ${size ?? ''}`} style={{ background: f.color }} title={f.name}>
       {f.name[0]}
@@ -20,7 +21,7 @@ export function AvatarStack({ ids, max = 3 }: { ids: string[]; max?: number }) {
   if (!ids.length) return null
   const shown = ids.slice(0, max)
   return (
-    <span className="avatars" aria-label={`${ids.length} aus deiner Crew`}>
+    <span className="avatars" aria-label={t('{n} aus deiner Crew', { n: ids.length })}>
       {shown.map((id) => (
         <Avatar key={id} id={id} />
       ))}
@@ -53,7 +54,7 @@ export function FavButton({ id }: { id: string }) {
     <button
       className={`fav ${on ? 'on' : ''}`}
       aria-pressed={on}
-      aria-label={on ? 'Aus Plan entfernen' : 'Zum Plan hinzufügen'}
+      aria-label={on ? t('Aus Plan entfernen') : t('Zum Plan hinzufügen')}
       onClick={(e) => {
         e.stopPropagation()
         toggleFav(id)
@@ -67,20 +68,20 @@ export function FavButton({ id }: { id: string }) {
 }
 
 const SOURCE: Record<UpdateSource, string> = {
-  official: 'Offiziell',
-  confirmed: 'Community bestätigt',
-  unconfirmed: 'Unbestätigt',
-  app: 'App-Hinweis',
+  official: t('Offiziell'),
+  confirmed: t('Community bestätigt'),
+  unconfirmed: t('Unbestätigt'),
+  app: t('App-Hinweis'),
 }
 export function SourceTag({ source }: { source: UpdateSource }) {
   return <span className={`tag ${source}`}>{SOURCE[source]}</span>
 }
 
 export function ago(min: number) {
-  if (min < 1) return 'gerade eben'
-  if (min < 60) return `vor ${min} Min.`
-  if (min < 60 * 24) return `vor ${Math.round(min / 60)} Std.`
-  return `vor ${Math.round(min / 1440)} T.`
+  if (min < 1) return t('gerade eben')
+  if (min < 60) return t('vor {n} Min.', { n: min })
+  if (min < 60 * 24) return t('vor {n} Std.', { n: Math.round(min / 60) })
+  return t('vor {n} T.', { n: Math.round(min / 1440) })
 }
 
 export function Sheet({ open, onClose, children, full, label }: { open: boolean; onClose: () => void; children: ReactNode; full?: boolean; label: string }) {
@@ -90,11 +91,11 @@ export function Sheet({ open, onClose, children, full, label }: { open: boolean;
   useEffect(() => {
     if (!open) return
     const prev = document.activeElement as HTMLElement | null
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       if (!ref.current?.contains(document.activeElement)) ref.current?.focus({ preventScroll: true })
     }, 50)
     return () => {
-      window.clearTimeout(t)
+      window.clearTimeout(timer)
       prev?.focus?.({ preventScroll: true })
     }
   }, [open])
@@ -162,11 +163,11 @@ export class LazyBoundary extends Component<{ children: ReactNode }, { failed: b
     if (!this.state.failed) return this.props.children
     return (
       <div className="empty" role="alert">
-        <b>Gerade nicht verfügbar</b>
-        Dieser Bereich konnte ohne Netz nicht geladen werden.
+        <b>{t('Gerade nicht verfügbar')}</b>
+        {t('Dieser Bereich konnte ohne Netz nicht geladen werden.')}
         <div style={{ marginTop: 14 }}>
           <button className="btn secondary sm" onClick={() => this.setState({ failed: false })}>
-            Erneut versuchen
+            {t('Erneut versuchen')}
           </button>
         </div>
       </div>

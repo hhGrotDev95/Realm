@@ -1,4 +1,5 @@
 import type { Theme } from './theme/apply'
+import { lang, locale, t } from './i18n/index.ts'
 import { isEnabled, type ModuleKey, type ModuleState } from './modules.ts'
 import type { Faq } from './faq/match'
 // Realm — demo dataset for "Realm Open Air 2027".
@@ -277,11 +278,11 @@ export const CHAT: ChatMsg[] = [
 ]
 
 export const PHASES: { id: Phase; label: string; hint: string }[] = [
-  { id: 'before', label: 'Vorher', hint: '9 Tage bis zum Festival' },
-  { id: 'arrival', label: 'Anreise', hint: 'Donnerstag, 11:40' },
-  { id: 'during', label: 'Festival', hint: 'Freitag, 19:52' },
-  { id: 'departure', label: 'Abreise', hint: 'Sonntag, 11:15' },
-  { id: 'after', label: 'Danach', hint: 'Eine Woche später' },
+  { id: 'before', label: t('Vorher'), hint: t('9 Tage bis zum Festival') },
+  { id: 'arrival', label: t('Anreise'), hint: t('Donnerstag, 11:40') },
+  { id: 'during', label: t('Festival'), hint: t('Freitag, 19:52') },
+  { id: 'departure', label: t('Abreise'), hint: t('Sonntag, 11:15') },
+  { id: 'after', label: t('Danach'), hint: t('Eine Woche später') },
 ]
 
 /** Simulated clock per phase: [day index, minute of day]. */
@@ -378,6 +379,20 @@ export function applyTimetableChanges(changes: TimetableChange[]) {
   ACTS.sort((x, y) => x.day - y.day || x.start - y.start)
 }
 
+/**
+ * Day names come from the organizer in German; in other languages they are derived from the
+ * date so "Freitag" reads "Friday" (custom labels stay as written in German).
+ */
+function localizeDays() {
+  if (lang === 'de') return
+  for (const d of DAYS) {
+    const date = new Date(d.date + 'T12:00:00')
+    d.label = date.toLocaleDateString(locale(), { weekday: 'long' })
+    d.short = date.toLocaleDateString(locale(), { weekday: 'short' }).slice(0, 3)
+  }
+}
+localizeDays()
+
 /** The public festival document served by GET /api/festivals/:slug. */
 export interface FestivalBundle {
   festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; siteMap?: string | null; updatedAt: number }
@@ -407,6 +422,7 @@ export function loadFestivalBundle(b: FestivalBundle) {
   refill(actById, ACTS.map((a) => [a.id, a]))
   replace(POIS, b.pois)
   replace(FAQS, b.faq ?? [])
+  localizeDays()
   ORIGINAL.clear()
   for (const a of ACTS) ORIGINAL.set(a.id, { start: a.start, end: a.end, stage: a.stage })
   applied = ''
@@ -415,13 +431,9 @@ export function loadFestivalBundle(b: FestivalBundle) {
 /** "15.–17. Juli 2027" from the festival days. */
 export function dateRange() {
   if (!DAYS.length) return ''
-  const fmtDay = (iso: string) => new Date(iso + 'T12:00:00')
-  const a = fmtDay(DAYS[0].date)
-  const b = fmtDay(DAYS[DAYS.length - 1].date)
-  const month = (d: Date) => d.toLocaleDateString('de-DE', { month: 'long' })
-  return a.getMonth() === b.getMonth()
-    ? `${a.getDate()}.–${b.getDate()}. ${month(b)} ${b.getFullYear()}`
-    : `${a.getDate()}. ${month(a)} – ${b.getDate()}. ${month(b)} ${b.getFullYear()}`
+  const day = (iso: string) => new Date(iso + 'T12:00:00')
+  // "15.–17. Juli 2027" / "15–17 July 2027"
+  return new Intl.DateTimeFormat(locale(), { day: 'numeric', month: 'long', year: 'numeric' }).formatRange(day(DAYS[0].date), day(DAYS[DAYS.length - 1].date))
 }
 
 /** Demo FAQ (also seeded for the demo festival in migration 0008). */

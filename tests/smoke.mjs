@@ -13,7 +13,7 @@ for (let i = 0; i < 50; i++) {
 }
 
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
-const page = await browser.newPage({ viewport: { width: 400, height: 860 } })
+const page = await browser.newPage({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
 const errors = []
 page.on('pageerror', (e) => errors.push(e.message))
 const step = async (name, fn) => {
@@ -94,8 +94,26 @@ try {
     const days = Math.ceil((new Date(2027, 6, 15, 10).getTime() - Date.now()) / 86_400_000)
     if (days > 0) await page.getByText(`Noch ${days} Tage`).waitFor()
   })
+  await step('English browser gets the English app; the language can be switched in the profile', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'en-US' })
+    const p = await ctx.newPage()
+    p.on('pageerror', (e) => errors.push(e.message))
+    await p.goto(url)
+    await p.getByText('Up next').waitFor()
+    if ((await p.evaluate(() => document.documentElement.lang)) !== 'en') throw new Error('html lang not set to en')
+    await p.locator('nav').getByText('Line-up').click()
+    await p.getByRole('tab', { name: 'All', exact: true }).click()
+    await p.locator('.day-btn', { hasText: 'Fri' }).waitFor() // day names derived from the date
+    await p.locator('.act', { hasText: 'Arcturus' }).getByText('Now 22:30 instead of 22:15').waitFor()
+    await p.getByRole('button', { name: 'Profile & settings' }).click()
+    await p.getByRole('button', { name: 'Deutsch' }).click()
+    await p.getByText('Als Nächstes').waitFor() // reloaded in German, choice remembered over the browser language
+    await p.reload()
+    await p.getByText('Als Nächstes').waitFor()
+    await ctx.close()
+  })
   await step('offline: after ONE online visit the app and lazily loaded screens open with the server down', async () => {
-    const ctx = await browser.newContext({ viewport: { width: 400, height: 860 } })
+    const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
     const p = await ctx.newPage()
     p.on('pageerror', (e) => errors.push(e.message))
     await p.goto(url)

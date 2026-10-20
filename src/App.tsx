@@ -7,6 +7,7 @@ import { Lineup } from './screens/Lineup'
 import { Sheets } from './sheets'
 import { useApp, type Tab } from './store'
 import { Avatar, LazyBoundary } from './ui'
+import { t } from './i18n'
 
 // Less-used screens load on demand; the service worker caches them at install, so they also open offline.
 const loadMap = () => import('./screens/MapScreen')
@@ -17,10 +18,10 @@ const Crew = lazy(() => loadCrew().then((m) => ({ default: m.Crew })))
 const Wrapped = lazy(() => loadWrapped().then((m) => ({ default: m.Wrapped })))
 
 const TABS: { id: Tab; label: string; icon: typeof House }[] = [
-  { id: 'home', label: 'Home', icon: House },
-  { id: 'lineup', label: 'Line-up', icon: ListMusic },
-  { id: 'map', label: 'Map', icon: MapIcon },
-  { id: 'crew', label: 'Crew', icon: Users },
+  { id: 'home', label: t('Home'), icon: House },
+  { id: 'lineup', label: t('Line-up'), icon: ListMusic },
+  { id: 'map', label: t('Map'), icon: MapIcon },
+  { id: 'crew', label: t('Crew'), icon: Users },
 ]
 
 export function AppBar({ floating }: { floating?: boolean }) {
@@ -30,10 +31,10 @@ export function AppBar({ floating }: { floating?: boolean }) {
       ? `${DAYS[now.day]?.label ?? ''} · ${fmt(now.min)}`
       : clockMode === 'real'
         ? phase === 'before'
-          ? `Noch ${Math.ceil(msToStart / 86_400_000)} Tage`
+          ? t('Noch {n} Tage', { n: Math.ceil(msToStart / 86_400_000) })
           : phase === 'departure'
-            ? 'Abreisetag'
-            : 'Bis nächstes Jahr'
+            ? t('Abreisetag')
+            : t('Bis nächstes Jahr')
         : PHASES.find((p) => p.id === phase)!.hint
   return (
     <header className={`appbar ${floating ? 'floating' : ''}`}>
@@ -49,11 +50,11 @@ export function AppBar({ floating }: { floating?: boolean }) {
         <span>{sub}</span>
       </div>
       {on('faq') && (
-        <button className="icon-btn" aria-label="Infos & FAQ" onClick={() => openSheet({ kind: 'faq' })}>
+        <button className="icon-btn" aria-label={t('Infos & FAQ')} onClick={() => openSheet({ kind: 'faq' })}>
           <CircleHelp size={22} />
         </button>
       )}
-      <button className="icon-btn" aria-label="Profil & Einstellungen" onClick={() => openSheet({ kind: 'profile' })}>
+      <button className="icon-btn" aria-label={t('Profil & Einstellungen')} onClick={() => openSheet({ kind: 'profile' })}>
         <Avatar id="me" />
       </button>
     </header>
@@ -73,12 +74,12 @@ export default function App() {
     <div className="stagewrap">
       <div className="side-note">
         <b>Realm</b>
-        Festival-Companion V2 – Prototyp. Über den Avatar oben rechts lassen sich die Festivalphasen (Vorher → Danach) umschalten.
+        {t('Festival-Companion V2 – Prototyp. Über den Avatar oben rechts lassen sich die Festivalphasen (Vorher → Danach) umschalten.')}
       </div>
       <div className="device">
         {FESTIVAL.status !== 'published' && (
           <div className="preview-banner" role="status">
-            {FESTIVAL.status === 'draft' ? 'Vorschau · Entwurf – für Besucher noch nicht sichtbar' : 'Archiviert – nur lesbar'}
+            {FESTIVAL.status === 'draft' ? t('Vorschau · Entwurf – für Besucher noch nicht sichtbar') : t('Archiviert – nur lesbar')}
           </div>
         )}
         {tab !== 'map' && <AppBar />}
@@ -104,20 +105,28 @@ export default function App() {
           {online && (!netOnline || outbox.length > 0) && (
             <motion.div className="net-pill" role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}>
               <span className={`dot ${netOnline ? 'sync' : ''}`} />
-              {netOnline ? `${outbox.length} ${outbox.length === 1 ? 'Änderung wird' : 'Änderungen werden'} gesendet …` : outbox.length ? `Offline · ${outbox.length} ${outbox.length === 1 ? 'Änderung wartet' : 'Änderungen warten'}` : 'Offline · Plan, Karte und Timetable funktionieren weiter'}
+              {netOnline
+                ? outbox.length === 1
+                  ? t('1 Änderung wird gesendet …')
+                  : t('{n} Änderungen werden gesendet …', { n: outbox.length })
+                : outbox.length
+                  ? outbox.length === 1
+                    ? t('Offline · 1 Änderung wartet')
+                    : t('Offline · {n} Änderungen warten', { n: outbox.length })
+                  : t('Offline · Plan, Karte und Timetable funktionieren weiter')}
             </motion.div>
           )}
         </AnimatePresence>
 
-        <nav className="nav" aria-label="Hauptnavigation">
-          {TABS.filter((t) => t.id !== 'crew' || on('crew')).map((t) => {
-            const on = tab === t.id
+        <nav className="nav" aria-label={t('Hauptnavigation')}>
+          {TABS.filter((tb) => tb.id !== 'crew' || on('crew')).map((tb) => {
+            const on = tab === tb.id
             return (
-              <button key={t.id} className={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => setTab(t.id)}>
+              <button key={tb.id} className={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => setTab(tb.id)}>
                 {on && <motion.span layoutId="nav-ind" className="ind" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
-                <t.icon size={22} strokeWidth={on ? 2.3 : 1.8} />
-                {t.label}
-                {t.id === 'crew' && unread > 0 && <span className="badge">{unread}</span>}
+                <tb.icon size={22} strokeWidth={on ? 2.3 : 1.8} />
+                {tb.label}
+                {tb.id === 'crew' && unread > 0 && <span className="badge">{unread}</span>}
               </button>
             )
           })}

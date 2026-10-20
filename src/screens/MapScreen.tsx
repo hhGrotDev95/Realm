@@ -6,14 +6,15 @@ import { useApp } from '../store'
 import { CAT_ICON } from './mapIcons'
 import { Ground, MAP_H as H, MAP_W as W } from './MapGround'
 import { AppBar } from '../App'
+import { t } from '../i18n'
 
 const CATS: { id: PoiCat; label: string }[] = [
-  { id: 'stage', label: 'Stages' },
-  { id: 'water', label: 'Wasser' },
-  { id: 'wc', label: 'WC' },
-  { id: 'food', label: 'Food' },
-  { id: 'medical', label: 'Medical' },
-  { id: 'bar', label: 'Bars' },
+  { id: 'stage', label: t('Stages') },
+  { id: 'water', label: t('Wasser') },
+  { id: 'wc', label: t('WC') },
+  { id: 'food', label: t('Food') },
+  { id: 'medical', label: t('Medical') },
+  { id: 'bar', label: t('Bars') },
 ]
 
 type View = { x: number; y: number; k: number }
@@ -108,11 +109,11 @@ export function MapScreen() {
     const wy = (e.clientY - rect.top - view.y) / view.k
     press.current = window.setTimeout(() => {
       if (moved.current > 8 || pointers.current.size !== 1) return
-      const pin = { id: 'pin' + Date.now(), name: `Pin ${myPins.length + 1}`, x: Math.round(wx), y: Math.round(wy) }
+      const pin = { id: 'pin' + Date.now(), name: t('Pin {n}', { n: myPins.length + 1 }), x: Math.round(wx), y: Math.round(wy) }
       set('myPins', [...myPins, pin])
       setLayers((l) => ({ ...l, pins: true }))
       navigator.vibrate?.(15)
-      toast(`${pin.name} gesetzt`, on('crew') ? { label: 'Hier treffen', run: () => requireIdentity('Damit deine Crew weiß, wer einlädt.', () => openSheet({ kind: 'newMeetup', place: pin.name })) } : undefined)
+      toast(t('{name} gesetzt', { name: pin.name }), on('crew') ? { label: t('Hier treffen'), run: () => requireIdentity(t('Damit deine Crew weiß, wer einlädt.'), () => openSheet({ kind: 'newMeetup', place: pin.name })) } : undefined)
     }, 550)
   }
   const onMove = (e: React.PointerEvent) => {
@@ -154,7 +155,7 @@ export function MapScreen() {
   const selectedPoi = sheet?.kind === 'poi' ? sheet.id : null
 
   return (
-    <main style={{ position: 'absolute', inset: 0 }} aria-label="Festivalkarte">
+    <main style={{ position: 'absolute', inset: 0 }} aria-label={t('Festivalkarte')}>
       <div ref={wrap} className="map-wrap" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onWheel={onWheel}>
         <div
           style={{
@@ -204,7 +205,7 @@ export function MapScreen() {
                 key={pin.id}
                 style={pinStyle(pin.x, pin.y, inv)}
                 aria-label={pin.name}
-                onClick={() => toast(pin.name, { label: 'Entfernen', run: () => set('myPins', myPins.filter((x) => x.id !== pin.id)) })}
+                onClick={() => toast(pin.name, { label: t('Entfernen'), run: () => set('myPins', myPins.filter((x) => x.id !== pin.id)) })}
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px 3px 4px', borderRadius: 99, background: '#fff', color: '#111', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
                   <MapPin size={13} /> {pin.name}
@@ -234,9 +235,9 @@ export function MapScreen() {
       <div className="map-overlay-top" style={{ top: 58 }}>
         <div className="map-search">
           <Search size={18} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Suchen · lange drücken für Pin" aria-label="Karte durchsuchen" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Suchen · lange drücken für Pin')} aria-label={t('Karte durchsuchen')} />
           {q && (
-            <button className="icon-btn" style={{ width: 36, height: 36 }} onClick={() => setQ('')} aria-label="Leeren">
+            <button className="icon-btn" style={{ width: 36, height: 36 }} onClick={() => setQ('')} aria-label={t('Leeren')}>
               <X size={18} />
             </button>
           )}
@@ -254,7 +255,7 @@ export function MapScreen() {
                     <span className="grow">
                       <span style={{ fontWeight: 600 }}>{p.name}</span>
                       <span className="tiny faint" style={{ display: 'block' }}>
-                        {walkMinutes(ME.x, ME.y, p.x, p.y)} Min. · {p.detail}
+                        {t('{n} Min.', { n: walkMinutes(ME.x, ME.y, p.x, p.y) })} · {p.detail}
                       </span>
                     </span>
                   </button>
@@ -281,10 +282,10 @@ export function MapScreen() {
         {routePoi && (
           <motion.div className="route-banner" initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}>
             <span className="grow">
-              <span style={{ display: 'block', fontSize: 17 }}>{walkMinutes(ME.x, ME.y, routePoi.x, routePoi.y)} Min. zu Fuß</span>
-              <span style={{ fontSize: 13, opacity: 0.75 }}>bis {routePoi.name}</span>
+              <span style={{ display: 'block', fontSize: 17 }}>{t('{n} Min. zu Fuß', { n: walkMinutes(ME.x, ME.y, routePoi.x, routePoi.y) })}</span>
+              <span style={{ fontSize: 13, opacity: 0.75 }}>{t('bis {place}', { place: routePoi.name })}</span>
             </span>
-            <button className="icon-btn" style={{ color: 'var(--brand-ink)' }} onClick={() => setRoute(null)} aria-label="Route beenden">
+            <button className="icon-btn" style={{ color: 'var(--brand-ink)' }} onClick={() => setRoute(null)} aria-label={t('Route beenden')}>
               <X size={20} />
             </button>
           </motion.div>
@@ -293,7 +294,7 @@ export function MapScreen() {
 
       <div className="map-fabs">
         <div style={{ position: 'relative' }}>
-          <button className={`fab ${layersOpen ? 'active' : ''}`} aria-label="Ebenen" onClick={() => setLayersOpen((v) => !v)}>
+          <button className={`fab ${layersOpen ? 'active' : ''}`} aria-label={t('Ebenen')} onClick={() => setLayersOpen((v) => !v)}>
             <Layers size={21} />
           </button>
           <AnimatePresence>
@@ -301,10 +302,10 @@ export function MapScreen() {
               <motion.div className="layers-pop" initial={{ opacity: 0, scale: 0.92, x: 10 }} animate={{ opacity: 1, scale: 1, x: 0 }} exit={{ opacity: 0, scale: 0.95 }} style={{ transformOrigin: 'right bottom' }}>
                 {(
                   [
-                    ['friends', 'Freunde', Users],
-                    ['reports', 'Meldungen', TriangleAlert],
-                    ['pins', 'Meine Pins', MapPin],
-                    ['satellite', 'Satellit', Satellite],
+                    ['friends', t('Freunde'), Users],
+                    ['reports', t('Meldungen'), TriangleAlert],
+                    ['pins', t('Meine Pins'), MapPin],
+                    ['satellite', t('Satellit'), Satellite],
                   ] as const
                 )
                   // the satellite look only exists for the built-in illustration
@@ -319,13 +320,13 @@ export function MapScreen() {
             )}
           </AnimatePresence>
         </div>
-        <button className="fab" aria-label="Hineinzoomen" onClick={() => zoomAt(1.3, wrap.current!.clientWidth / 2, wrap.current!.clientHeight / 2)}>
+        <button className="fab" aria-label={t('Hineinzoomen')} onClick={() => zoomAt(1.3, wrap.current!.clientWidth / 2, wrap.current!.clientHeight / 2)}>
           <Plus size={20} />
         </button>
-        <button className="fab" aria-label="Herauszoomen" onClick={() => zoomAt(1 / 1.3, wrap.current!.clientWidth / 2, wrap.current!.clientHeight / 2)}>
+        <button className="fab" aria-label={t('Herauszoomen')} onClick={() => zoomAt(1 / 1.3, wrap.current!.clientWidth / 2, wrap.current!.clientHeight / 2)}>
           <Minus size={20} />
         </button>
-        <button className="fab active" aria-label="Mein Standort" onClick={() => center(ME.x, ME.y, Math.max(view.k, 0.9))}>
+        <button className="fab active" aria-label={t('Mein Standort')} onClick={() => center(ME.x, ME.y, Math.max(view.k, 0.9))}>
           <LocateFixed size={21} />
         </button>
       </div>
