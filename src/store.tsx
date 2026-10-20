@@ -154,6 +154,7 @@ export type SheetState =
   | { kind: 'chat' }
   | { kind: 'shared' }
   | { kind: 'members' }
+  | { kind: 'faq'; q?: string }
   | { kind: 'steps' }
   | null
 

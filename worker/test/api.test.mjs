@@ -498,6 +498,31 @@ try {
     assert.equal((await api('GET', `/api/crews/${nc.id}`, nils.token, undefined, N)).data.messages[0].text, 'vorher')
   })
 
+  await test('FAQ: drafts stay private, published entries travel with the festival, module switch', async () => {
+    const A = 'test-admin-token'
+    const base = '/api/admin/festivals/nordlicht/faq'
+    assert.equal((await api('PUT', `${base}/einlass`, lea.token, { question: 'Wann ist Einlass?', answer: 'Ab 12 Uhr.' }, null)).status, 401)
+    assert.equal((await api('PUT', `${base}/Einlass Nord`, A, { question: 'Wann?', answer: 'Ab 12 Uhr.' }, null)).status, 400)
+    assert.equal((await api('PUT', `${base}/einlass`, A, { question: 'Wann ist Einlass?' }, null)).status, 400)
+    const d = await api('PUT', `${base}/einlass`, A, { question: 'Wann ist Einlass?', answer: 'Ab 12 Uhr am Hafentor.', category: 'Einlass', source: 'Infoseite', status: 'draft' }, null)
+    assert.equal(d.status, 200)
+    let pub = (await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data.faq
+    assert.deepEqual(pub, [])
+    await api('PUT', `${base}/einlass`, A, { question: 'Wann ist Einlass?', answer: 'Ab 12 Uhr am Hafentor.', category: 'Einlass', source: 'Infoseite', status: 'published' }, null)
+    pub = (await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data.faq
+    assert.equal(pub.length, 1)
+    assert.equal(pub[0].source, 'Infoseite')
+    assert.ok(pub[0].updatedAt > 0)
+    // the other festival keeps its own FAQ
+    assert.ok(!(await api('GET', '/api/festivals/realm-open-air', null, undefined, null)).data.faq.some((f) => f.answer.includes('Hafentor')))
+    // module off → no FAQ delivered
+    await api('PUT', '/api/admin/festivals/nordlicht/modules', A, { faq: false, faqbot: false }, null)
+    assert.deepEqual((await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data.faq, [])
+    await api('PUT', '/api/admin/festivals/nordlicht/modules', A, {}, null)
+    assert.equal((await api('DELETE', `${base}/einlass`, A, undefined, null)).status, 204)
+    assert.equal((await api('GET', `${base}`, A, undefined, null)).data.length, 0)
+  })
+
   await test('CORS preflight is answered', async () => {
     const r = await fetch(BASE + '/api/me', { method: 'OPTIONS', headers: { Origin: 'https://realm.app', 'Access-Control-Request-Method': 'GET' } })
     assert.equal(r.headers.get('access-control-allow-origin'), 'https://realm.app')

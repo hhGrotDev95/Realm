@@ -7,6 +7,8 @@ export const MODULES = {
   steps: { label: 'Step-Challenge', hint: 'Freiwillige Schritte-Rangliste in der Crew', requires: ['crew'] },
   reports: { label: 'Community-Meldungen', hint: 'Besucher melden z. B. leere Wasserstellen oder Schlangen', requires: [] },
   wrapped: { label: 'Festival-Rückblick', hint: '„Wrapped“ nach dem Festival', requires: [] },
+  faq: { label: 'FAQ & Infos', hint: 'Antworten zu Einlass, Tickets, Camping, Essen …', requires: [] },
+  faqbot: { label: 'FAQ-Bot', hint: 'Beantwortet Fragen nur aus freigegebenen FAQ – mit Quelle', requires: ['faq'] },
 } as const satisfies Record<string, { label: string; hint: string; requires: readonly string[] }>
 
 export type ModuleKey = keyof typeof MODULES

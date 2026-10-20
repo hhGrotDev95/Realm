@@ -1,5 +1,6 @@
 import type { Theme } from './theme/apply'
-import { isEnabled, type ModuleKey, type ModuleState } from './modules'
+import { isEnabled, type ModuleKey, type ModuleState } from './modules.ts'
+import type { Faq } from './faq/match'
 // Realm — demo dataset for "Realm Open Air 2027".
 // Times are minutes after midnight of the festival day (values > 1440 = after midnight).
 
@@ -382,6 +383,7 @@ export interface FestivalBundle {
   stages: Stage[]
   acts: Omit<Act, 'change'>[]
   pois: Poi[]
+  faq?: Faq[]
 }
 
 const replace = <T,>(arr: T[], items: T[]) => arr.splice(0, arr.length, ...items)
@@ -402,6 +404,7 @@ export function loadFestivalBundle(b: FestivalBundle) {
   replace(ACTS, b.acts.map((a) => ({ ...a })))
   refill(actById, ACTS.map((a) => [a.id, a]))
   replace(POIS, b.pois)
+  replace(FAQS, b.faq ?? [])
   ORIGINAL.clear()
   for (const a of ACTS) ORIGINAL.set(a.id, { start: a.start, end: a.end, stage: a.stage })
   applied = ''
@@ -418,3 +421,22 @@ export function dateRange() {
     ? `${a.getDate()}.–${b.getDate()}. ${month(b)} ${b.getFullYear()}`
     : `${a.getDate()}. ${month(a)} – ${b.getDate()}. ${month(b)} ${b.getFullYear()}`
 }
+
+/** Demo FAQ (also seeded for the demo festival in migration 0008). */
+export const DEMO_FAQ: Faq[] = [
+  { id: 'einlass-zeiten', category: 'Einlass', question: 'Wann öffnet der Einlass?', keywords: 'einlass öffnungszeiten tore', answer: 'Der Einlass öffnet Donnerstag um 10:00 Uhr. Freitag und Samstag ist das Gelände ab 12:00 Uhr geöffnet, der Campingplatz durchgehend.', source: 'Infoseite Anreise', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'baendchen', category: 'Tickets', question: 'Wo bekomme ich mein Bändchen?', keywords: 'bändchen ticket umtausch wristband', answer: 'Tickets werden am Eingang Nord gegen ein Bändchen getauscht. Bitte Ticket (digital oder ausgedruckt) und Ausweis bereithalten.', source: 'Ticket-AGB', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'bändchen-verloren', category: 'Tickets', question: 'Ich habe mein Bändchen verloren – was nun?', keywords: 'bändchen verloren kaputt gerissen', answer: 'Komm mit Ausweis und Ticket-Nummer zum Info-Zelt. Gerissene Bändchen werden ersetzt, verlorene nur mit Nachweis.', source: 'Ticket-AGB', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'camping', category: 'Camping', question: 'Darf ich einen Pavillon mitbringen?', keywords: 'camping zelt pavillon gaskocher grill', answer: 'Pavillons bis 3 × 3 m sind erlaubt. Gaskocher nur mit Kartusche, offene Feuer und Holzkohlegrills sind verboten.', source: 'Campingregeln', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'mitnehmen', category: 'Gelände', question: 'Was darf ich aufs Gelände mitnehmen?', keywords: 'erlaubt verboten flaschen glas taschen', answer: 'Erlaubt sind leere Plastikflaschen bis 1,5 l, kleine Taschen und Sonnencreme. Glas, Dosen und Getränke von außen sind auf dem Konzertgelände verboten.', source: 'Hausordnung', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'wasser', category: 'Gelände', question: 'Gibt es kostenloses Trinkwasser?', keywords: 'wasser trinkwasser auffüllen', answer: 'Ja, an drei Wasserstellen (Nord, Lagoon, Forest) kannst du kostenlos auffüllen. Die Karte zeigt sie unter „Wasser“.', source: 'Geländeplan', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'essen', category: 'Essen', question: 'Gibt es veganes Essen?', keywords: 'essen vegan vegetarisch food court', answer: 'Ja, im Food Court gibt es an jedem Stand mindestens ein veganes Gericht.', source: 'Gastro-Übersicht', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'bezahlen', category: 'Essen', question: 'Kann ich mit Karte zahlen?', keywords: 'bezahlen karte bargeld cashless', answer: 'Alle Stände nehmen Karte und Handy. Bargeld wird nur am Info-Zelt angenommen.', source: 'Gastro-Übersicht', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'akku', category: 'Service', question: 'Wo kann ich mein Handy laden?', keywords: 'handy akku laden strom powerbank', answer: 'Am Info-Zelt gibt es Ladestationen und Powerbanks zum Ausleihen (5 € Pfand).', source: 'Service-Seite', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'fundsachen', category: 'Service', question: 'Wo ist das Fundbüro?', keywords: 'fundsachen verloren lost found', answer: 'Fundsachen werden im Info-Zelt gesammelt, nach dem Festival noch bis Montag 14 Uhr.', source: 'Service-Seite', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'hilfe', category: 'Sicherheit', question: 'Wo finde ich Hilfe, wenn es mir nicht gut geht?', keywords: 'sanitäter hilfe awareness notfall', answer: 'Das Sanitätszelt ist rund um die Uhr besetzt. Das Awareness-Team erreichst du am Info-Zelt. Im Notfall: 112.', source: 'Sicherheitskonzept', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'anreise', category: 'Anreise', question: 'Wie komme ich ohne Auto hin?', keywords: 'anreise shuttle bahn bus zug', answer: 'Vom Bahnhof fährt ein Shuttle alle 15 Minuten (am Anreisetag alle 10), im Ticket enthalten.', source: 'Infoseite Anreise', updatedAt: Date.UTC(2027, 5, 1) },
+]
+
+/** The festival's published FAQ (demo answers until a festival is loaded). */
+export const FAQS: Faq[] = [...DEMO_FAQ]

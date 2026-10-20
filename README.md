@@ -61,6 +61,12 @@ Pro Festival in der Konsole unter **Branding**: Markenfarbe (Voreinstellungen, F
 
 Timetable, Plan, Karte und offizielle Meldungen sind immer dabei. Optional und pro Festival schaltbar (Konsole → **Module**): Crew & Freunde, Crew-Chat, Standort teilen, Step-Challenge (diese drei brauchen Crew), Community-Meldungen, Festival-Rückblick. Die Liste steht zentral in `src/modules.ts`. Ausgeschaltete Module verschwinden aus der App ohne Lücken **und** werden vom Worker mit 403 abgelehnt; der Crew-Snapshot liefert dann auch keine Chat-, Standort- oder Schrittdaten.
 
+### FAQ und FAQ-Bot
+
+Veranstalter pflegen die FAQ in der Konsole (**FAQ**): Frage, Antwort, Kategorie, Quelle, Stichworte für Alltagswörter, Status Entwurf/Freigegeben, plus ein Testfeld für den Bot. Nur freigegebene Antworten erreichen die App – sie reisen im Festivaldokument mit und funktionieren dadurch offline.
+
+Der Bot (`src/faq/match.ts`) läuft auf dem Gerät und **schreibt keine eigenen Texte**: Er sucht die passende freigegebene Antwort (Synonyme wie „Klo“ → „WC“, Umlaute, einfache Wortstämme) und zeigt sie mit **Quelle und Stand**. Ist er nicht sicher, bietet er Vorschläge an; findet er nichts, sagt er das und verweist aufs Info-Zelt. Ein Treffer nur im Antworttext reicht nie für eine Antwort. Module „FAQ & Infos“ und „FAQ-Bot“ sind abschaltbar.
+
 ## Backend (`worker/`)
 
 Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt eine pseudonyme ID und ein Bearer-Token (gespeichert wird nur der SHA-256-Hash).
@@ -68,7 +74,7 @@ Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt e
 | Bereich | Endpunkte |
 | --- | --- |
 | Festivals | `GET /api/festivals` (veröffentlichte), `GET /api/festivals/:slug` (Festivaldokument), `GET /api/admin/festivals` (alle, Admin) |
-| Einrichtung (Admin) | `PUT /api/admin/festivals/:slug/modules`, `PUT /api/admin/festivals/:slug/theme` (Farbe, Schrift, Logo), `POST /api/admin/festivals`, `PATCH /api/admin/festivals/:slug` (Name, Ort, Status), `PUT …/:slug/stages`, `POST …/:slug/import` (`mode`, `dryRun`, `rows`), `GET …/:slug/snapshots`, `POST …/:slug/snapshots/:id/restore` |
+| Einrichtung (Admin) | `GET/PUT/DELETE /api/admin/festivals/:slug/faq[/:id]`, `PUT /api/admin/festivals/:slug/modules`, `PUT /api/admin/festivals/:slug/theme` (Farbe, Schrift, Logo), `POST /api/admin/festivals`, `PATCH /api/admin/festivals/:slug` (Name, Ort, Status), `PUT …/:slug/stages`, `POST …/:slug/import` (`mode`, `dryRun`, `rows`), `GET …/:slug/snapshots`, `POST …/:slug/snapshots/:id/restore` |
 | Profil | `POST /api/guests`, `GET/PATCH/DELETE /api/me`, `POST /api/me/recovery`, `POST /api/restore`, `PUT /api/me/plan`, `PUT/DELETE /api/me/steps` |
 | Crew | `POST /api/crews`, `POST /api/crews/join`, `GET /api/crews/:id` (Snapshot), `POST /api/crews/:id/leave`, `PUT /api/crews/:id/location`, `POST /api/crews/:id/messages`, `POST /api/crews/:id/meetups` |
 | Moderation | `DELETE /api/crews/:id/messages/:msgId` (eigene / Gründer:in), `POST /api/crews/:id/messages/:msgId/flag` (ab 2 Meldungen ausgeblendet), `DELETE /api/crews/:id/members/:guestId` (Gründer:in, sperrt Wiederbeitritt) |
@@ -113,7 +119,7 @@ npm run deploy                        # ALLOWED_ORIGINS in wrangler.toml auf die
 
 ## Tests
 
-- `npm run test:import` – Unit-Tests des Import-Parsers (CSV DE/EN, JSON, XLSX, Nachtzeiten, Zeilenfehler) der Kontrastberechnung und der Modul-Regeln
+- `npm run test:import` – Unit-Tests des Import-Parsers (CSV DE/EN, JSON, XLSX, Nachtzeiten, Zeilenfehler) der Kontrastberechnung, der Modul-Regeln und des FAQ-Bots
 - `npm run test:e2e` – Smoke-Test der Demo-App
 - `cd worker && npm test` – API-Integrationstests gegen `wrangler dev` mit lokaler D1 (inkl. Mandantentrennung, Entwurf/Archiv) und ein Migrationstest, der Altdaten durch alle Migrationen führt
 - `npm run test:live` – zwei Browser-Nutzer gegen die echte API (Crew gründen, per Link beitreten, Chat, Meetup-Zusage, geteilte Pläne, Meldung bestätigen, Wiederherstellung auf neuem Gerät)

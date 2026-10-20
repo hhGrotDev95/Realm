@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { Flag, Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Copy, Fingerprint, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { switchFestival } from './festival'
+import { FaqSheet } from './FaqSheet'
 import { api } from './api'
 import { on, FESTIVAL, ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
 import { CAT_ICON } from './screens/MapScreen'
@@ -19,7 +20,7 @@ export function Sheets() {
   }, [sheet])
   const open = !!sheet && sheet.kind !== 'wrapped'
   const s = sheet ?? shown
-  const full = s?.kind === 'chat' || s?.kind === 'shared' || s?.kind === 'updates'
+  const full = s?.kind === 'chat' || s?.kind === 'shared' || s?.kind === 'updates' || s?.kind === 'faq'
   return (
     <Sheet open={open} onClose={closeSheet} full={full} label={sheetLabel(s)}>
       <AnimatePresence mode="wait" initial={false}>
@@ -38,6 +39,7 @@ export function Sheets() {
           {s?.kind === 'chat' && <Chat />}
           {s?.kind === 'shared' && <Shared />}
           {s?.kind === 'members' && <Members />}
+          {s?.kind === 'faq' && <FaqSheet q={s.q} />}
           {s?.kind === 'steps' && <Steps />}
         </motion.div>
       </AnimatePresence>
@@ -75,6 +77,8 @@ function sheetLabel(s: SheetState): string {
       return 'Gemeinsame Acts'
     case 'members':
       return 'Mitglieder'
+    case 'faq':
+      return 'Infos & FAQ'
     case 'steps':
       return 'Step-Challenge'
     default:
