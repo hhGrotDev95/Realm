@@ -11,4 +11,9 @@ assert.equal(isEnabled({ crew: false }, 'reports'), true) // independent modules
 assert.ok(moduleConflicts({ crew: false, chat: true }).includes('„Crew-Chat“ braucht „Crew & Freunde“'))
 assert.deepEqual(moduleConflicts({ crew: false }), ['„Crew-Chat“ braucht „Crew & Freunde“', '„Standort teilen“ braucht „Crew & Freunde“', '„Step-Challenge“ braucht „Crew & Freunde“'])
 assert.deepEqual(moduleConflicts({ crew: false, chat: false, location: false, steps: false }), [])
-console.log('✓ 7 Modul-Prüfungen bestanden')
+// opt-in modules: off until the festival switches them on
+assert.equal(isEnabled({}, 'festivalchat'), false)
+assert.equal(isEnabled(undefined, 'festivalchat'), false)
+assert.equal(isEnabled({ festivalchat: true }, 'festivalchat'), true)
+assert.deepEqual(moduleConflicts({ festivalchat: true }), [])
+console.log('✓ 11 Modul-Prüfungen bestanden')

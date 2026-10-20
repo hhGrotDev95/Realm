@@ -1,5 +1,5 @@
 import { m as motion } from 'framer-motion'
-import { CalendarClock, Users, ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
+import { CalendarClock, Megaphone, Users, ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { on, dateRange, FESTIVAL, ACTS, actById, DAYS, fmt, stageById, walkMinutes, ME } from '../data'
 import { conflictClusters, isMeetupActive, useApp } from '../store'
@@ -276,6 +276,28 @@ function PlanChanges({ i }: { i: number }) {
   )
 }
 
+/** Entry to the public festival chat when the organizer switched it on. */
+function FestivalChatTile({ i }: { i: number }) {
+  const { openSheet } = useApp()
+  if (!on('festivalchat')) return null
+  return (
+    <motion.section {...stagger(i)}>
+      <button className="tile" onClick={() => openSheet({ kind: 'festivalChat' })}>
+        <span className="tile-icon">
+          <Megaphone size={20} />
+        </span>
+        <span className="grow">
+          <span style={{ fontWeight: 600 }}>{t('Festival-Chat')}</span>
+          <span className="small faint" style={{ display: 'block' }}>
+            {t('Frag die anderen Besucher:innen – moderiert')}
+          </span>
+        </span>
+        <ChevronRight size={18} className="faint" />
+      </button>
+    </motion.section>
+  )
+}
+
 function During() {
   const { urgent } = useRelevantUpdates()
   return (
@@ -285,6 +307,7 @@ function During() {
       <NowNextHero />
       {on('crew') && <MeetupModule i={2} />}
       <UpdatesModule i={3} exclude={urgent?.id} />
+      <FestivalChatTile i={3} />
       <AttendPrompt i={4} />
       {on('crew') && <CrewPeek i={5} />}
     </>
@@ -356,6 +379,7 @@ function Before() {
         </motion.section>
       )}
       <UpdatesModule i={3} />
+      <FestivalChatTile i={3} />
       {on('crew') && (
       <motion.section {...stagger(4)} className="card">
         <div className="row" style={{ alignItems: 'flex-start' }}>

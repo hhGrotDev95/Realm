@@ -447,6 +447,43 @@ try {
     if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/analytics.png`, fullPage: true })
     await org.getByRole('button', { name: '„gibt es duschen“ als erledigt markieren' }).click()
     await org.getByText('Keine offenen Fragen', { exact: false }).waitFor()
+
+    // festival chat: opt-in; three reports hide spam; the organizer deletes it
+    await org.getByRole('tab', { name: 'Module' }).click()
+    await org.getByRole('switch', { name: 'Festival-Chat' }).click()
+    await org.getByRole('button', { name: 'Module speichern' }).click()
+    await org.getByText('Module gespeichert').waitFor()
+    await visitor.reload()
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await visitor.getByRole('button', { name: /Festival-Chat/ }).first().click()
+    await visitor.getByText('Noch ruhig hier').waitFor()
+    await visitor.getByLabel('Nachricht an alle').fill('Wer teilt sich ein Taxi zum Bahnhof?')
+    await visitor.getByRole('button', { name: 'Senden' }).click()
+    // first social action on this device: the app asks for a name, then sends
+    await visitor.getByPlaceholder('Spitzname').fill('Uma')
+    await visitor.getByRole('button', { name: 'Weiter' }).click()
+    await visitor.locator('.bubble.me', { hasText: 'Taxi zum Bahnhof' }).waitFor()
+    const T = (token) => ({ ...H(token) })
+    const spammer = await (await fetch(`${API}/api/guests`, { method: 'POST', headers: H(), body: JSON.stringify({ nickname: 'Spam' }) })).json()
+    const spam = await (await fetch(`${API}/api/festival-chat`, { method: 'POST', headers: T(spammer.token), body: JSON.stringify({ text: 'Billige Tickets hier!!!' }) })).json()
+    await visitor.locator('.bubble.them', { hasText: 'Billige Tickets' }).waitFor({ timeout: 15000 }) // arrives by polling
+    for (const name of ['V1', 'V2', 'V3']) {
+      const g = await (await fetch(`${API}/api/guests`, { method: 'POST', headers: H(), body: JSON.stringify({ nickname: name }) })).json()
+      const r = await fetch(`${API}/api/festival-chat/${spam.id}/flag`, { method: 'POST', headers: T(g.token) })
+      if (!r.ok) throw new Error('flag failed: ' + r.status)
+    }
+    await visitor.getByText('Ausgeblendet – von mehreren gemeldet').waitFor({ timeout: 15000 })
+    if (await visitor.getByText('Billige Tickets').count()) throw new Error('hidden spam still visible')
+    await visitor.keyboard.press('Escape')
+    await org.reload()
+    await org.getByRole('tab', { name: 'Chat-Moderation' }).click()
+    const row = org.locator('.list-item', { hasText: 'Billige Tickets' })
+    await row.getByText('ausgeblendet', { exact: true }).waitFor()
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/chat-moderation.png`, fullPage: true })
+    org.once('dialog', (d) => d.accept())
+    await row.getByRole('button', { name: /löschen/ }).click()
+    await org.getByText('Nachricht gelöscht').waitFor()
+    if (await org.getByText('Billige Tickets').count()) throw new Error('deleted message still listed')
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

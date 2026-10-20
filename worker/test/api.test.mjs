@@ -538,6 +538,51 @@ try {
     await api('PUT', '/api/admin/festivals/nordlicht/modules', A, { faqbot: true }, null)
   })
 
+  await test('festival chat: opt-in module, three flags hide, organizer deletes or restores', async () => {
+    const A = 'test-admin-token'
+    const N = 'nordlicht'
+    const say = (g, text) => api('POST', '/api/festival-chat', g.token, { text }, N)
+    const read = (g, since) => api('GET', '/api/festival-chat' + (since ? '?since=' + since : ''), g.token, undefined, N).then((r) => r.data)
+    const people = []
+    for (const name of ['Ola', 'Pia', 'Quinn', 'Rex']) people.push((await api('POST', '/api/guests', null, { nickname: name })).data)
+    const [ola, pia, quinn, rex] = people
+    // off until the organizer switches it on
+    assert.equal((await say(ola, 'Hallo?')).status, 403)
+    assert.equal((await api('PUT', '/api/admin/festivals/nordlicht/modules', A, { festivalchat: true }, null)).status, 200)
+    assert.equal((await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data.festival.modules.festivalchat, true)
+    const nameless = (await api('POST', '/api/guests', null, {})).data
+    assert.equal((await say(nameless, 'anon')).status, 403, 'a name is required to write')
+    assert.equal((await say(ola, 'x'.repeat(301))).status, 400)
+    const hello = (await say(ola, 'Wer kommt mit zum Pier?')).data
+    const spam = (await say(rex, 'Kauft Tickets bei mir!!!')).data
+    assert.equal(hello.from, 'me')
+    const t0 = (await read(pia)).serverTime
+    assert.deepEqual((await read(pia)).messages.map((m) => [m.name, m.text]), [['Ola', 'Wer kommt mit zum Pier?'], ['Rex', 'Kauft Tickets bei mir!!!']])
+    // two flags are not enough in public, the third hides it from everyone but the author
+    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, ola.token, undefined, N)).data.hidden, false)
+    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, pia.token, undefined, N)).data.hidden, false)
+    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, quinn.token, undefined, N)).data.hidden, true)
+    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, rex.token, undefined, N)).status, 400, 'no flagging of own messages')
+    const changed = (await read(pia, t0)).messages
+    assert.deepEqual(changed.map((m) => [m.id, m.text, m.hidden]), [[spam.id, null, true]], 'incremental poll delivers the hide')
+    assert.equal((await read(rex)).messages.find((m) => m.id === spam.id).text, 'Kauft Tickets bei mir!!!', 'the author still sees it')
+    // organizer: hidden messages first; restore keeps it visible, delete removes the text for all
+    const mod = (await api('GET', '/api/admin/festivals/nordlicht/chat', A, undefined, null)).data
+    assert.deepEqual([mod[0].id, mod[0].flags, mod[0].hidden], [spam.id, 3, true])
+    assert.equal((await api('POST', `/api/admin/festivals/nordlicht/chat/${spam.id}/restore`, A, undefined, null)).status, 204)
+    assert.equal((await read(pia)).messages.find((m) => m.id === spam.id).text, 'Kauft Tickets bei mir!!!')
+    assert.equal((await api('DELETE', `/api/admin/festivals/nordlicht/chat/${spam.id}`, A, undefined, null)).status, 204)
+    const gone = (await read(rex)).messages.find((m) => m.id === spam.id)
+    assert.deepEqual([gone.text, gone.deleted], [null, true])
+    // authors delete their own, not others'
+    assert.equal((await api('DELETE', `/api/festival-chat/${hello.id}`, pia.token, undefined, N)).status, 403)
+    assert.equal((await api('DELETE', `/api/festival-chat/${hello.id}`, ola.token, undefined, N)).status, 204)
+    // another festival never sees it
+    assert.equal((await api('GET', '/api/festival-chat', ola.token, undefined, 'realm-open-air')).status, 403)
+    await api('PUT', '/api/admin/festivals/nordlicht/modules', A, {}, null)
+    assert.equal((await say(ola, 'noch da?')).status, 403, 'switching it off again closes the chat')
+  })
+
   await test('modules: switched-off features are refused by the API, dependencies enforced', async () => {
     const A = 'test-admin-token'
     const N = 'nordlicht'
