@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, m as motion } from 'framer-motion'
 import { Share2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { FESTIVAL, actById, DAYS, fmt, stageById, STAGES, type StageId } from '../data'

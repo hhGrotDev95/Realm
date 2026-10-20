@@ -1,15 +1,15 @@
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, m as motion } from 'framer-motion'
 import { Flag, Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Copy, Fingerprint, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { switchFestival } from './festival'
-import { FaqSheet } from './FaqSheet'
+const FaqSheet = lazy(() => import('./FaqSheet').then((m) => ({ default: m.FaqSheet })))
 import { api } from './api'
 import { on, FESTIVAL, ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
-import { CAT_ICON } from './screens/MapScreen'
+import { CAT_ICON } from './screens/mapIcons'
 import { ActRow } from './screens/Lineup'
 import { useApp, type SheetState } from './store'
 import { status, untilLabel } from './time'
-import { Avatar, AvatarStack, Segmented, Sheet, SourceTag, StageDot, ago, spring } from './ui'
+import { Avatar, AvatarStack, Segmented, Sheet, SourceTag, StageDot, ago, spring, LazyBoundary } from './ui'
 
 export function Sheets() {
   const { sheet, closeSheet } = useApp()
@@ -39,7 +39,13 @@ export function Sheets() {
           {s?.kind === 'chat' && <Chat />}
           {s?.kind === 'shared' && <Shared />}
           {s?.kind === 'members' && <Members />}
-          {s?.kind === 'faq' && <FaqSheet q={s.q} />}
+          {s?.kind === 'faq' && (
+            <LazyBoundary>
+              <Suspense fallback={<p className="muted small">Lade …</p>}>
+                <FaqSheet q={s.q} />
+              </Suspense>
+            </LazyBoundary>
+          )}
           {s?.kind === 'steps' && <Steps />}
         </motion.div>
       </AnimatePresence>

@@ -1,22 +1,11 @@
-import { AnimatePresence, motion } from 'framer-motion'
-import { Beer, Check, Cross, DoorOpen, Droplet, Info, Layers, LocateFixed, Bus, Music, Search, Tent, Toilet, Utensils, X, MapPin, TriangleAlert, Users, Satellite, Minus, Plus } from 'lucide-react'
+import { AnimatePresence, m as motion } from 'framer-motion'
+import { Check, Layers, LocateFixed, Search, X, MapPin, TriangleAlert, Users, Satellite, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { on, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
 import { useApp } from '../store'
+import { CAT_ICON } from './mapIcons'
 import { AppBar } from '../App'
 
-export const CAT_ICON: Record<PoiCat, typeof Droplet> = {
-  stage: Music,
-  water: Droplet,
-  wc: Toilet,
-  food: Utensils,
-  medical: Cross,
-  bar: Beer,
-  entrance: DoorOpen,
-  camping: Tent,
-  info: Info,
-  shuttle: Bus,
-}
 const CATS: { id: PoiCat; label: string }[] = [
   { id: 'stage', label: 'Stages' },
   { id: 'water', label: 'Wasser' },

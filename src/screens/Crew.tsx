@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion'
+import { m as motion } from 'framer-motion'
 import { CalendarPlus, ChevronRight, Footprints, Heart, LogOut, MapPin, MessageCircle, Navigation, Share2, UserPlus, Users } from 'lucide-react'
 import { useState } from 'react'
 import { on, ACTS, fmt, stageById, ME, walkMinutes, type StageId } from '../data'

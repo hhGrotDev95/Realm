@@ -1,15 +1,20 @@
-import { AnimatePresence, motion } from 'framer-motion'
-import { useEffect } from 'react'
+import { AnimatePresence, m as motion } from 'framer-motion'
+import { lazy, Suspense, useEffect } from 'react'
 import { CircleHelp, House, ListMusic, Map as MapIcon, Users } from 'lucide-react'
 import { DAYS, FESTIVAL, on, PHASES, fmt } from './data'
-import { Crew } from './screens/Crew'
 import { Home } from './screens/Home'
 import { Lineup } from './screens/Lineup'
-import { MapScreen } from './screens/MapScreen'
 import { Sheets } from './sheets'
 import { useApp, type Tab } from './store'
-import { Avatar } from './ui'
-import { Wrapped } from './screens/Wrapped'
+import { Avatar, LazyBoundary } from './ui'
+
+// Less-used screens load on demand; the service worker caches them at install, so they also open offline.
+const loadMap = () => import('./screens/MapScreen')
+const loadCrew = () => import('./screens/Crew')
+const loadWrapped = () => import('./screens/Wrapped')
+const MapScreen = lazy(() => loadMap().then((m) => ({ default: m.MapScreen })))
+const Crew = lazy(() => loadCrew().then((m) => ({ default: m.Crew })))
+const Wrapped = lazy(() => loadWrapped().then((m) => ({ default: m.Wrapped })))
 
 const TABS: { id: Tab; label: string; icon: typeof House }[] = [
   { id: 'home', label: 'Home', icon: House },
@@ -87,8 +92,12 @@ export default function App() {
           >
             {tab === 'home' && <Home />}
             {tab === 'lineup' && <Lineup />}
-            {tab === 'map' && <MapScreen />}
-            {tab === 'crew' && <Crew />}
+            <LazyBoundary key={tab}>
+              <Suspense fallback={<div className="screen" aria-busy="true" />}>
+                {tab === 'map' && <MapScreen />}
+                {tab === 'crew' && <Crew />}
+              </Suspense>
+            </LazyBoundary>
           </motion.div>
 
         <AnimatePresence>
@@ -115,7 +124,11 @@ export default function App() {
         </nav>
 
         <Sheets />
-        <AnimatePresence>{sheet?.kind === 'wrapped' && <Wrapped />}</AnimatePresence>
+        <LazyBoundary>
+          <Suspense fallback={null}>
+            <AnimatePresence>{sheet?.kind === 'wrapped' && <Wrapped />}</AnimatePresence>
+          </Suspense>
+        </LazyBoundary>
 
         <AnimatePresence>
           {toastMsg && (
