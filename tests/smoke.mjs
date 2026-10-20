@@ -1,6 +1,6 @@
 // End-to-end smoke test: builds must already exist (npm run build).
 import { spawn } from 'node:child_process'
-import { chromium } from 'playwright'
+import { launch, promiseScrollIntoView } from './browser.mjs'
 
 const PORT = 4321
 const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore', detached: true })
@@ -12,8 +12,9 @@ for (let i = 0; i < 50; i++) {
   await new Promise((r) => setTimeout(r, 200))
 }
 
-const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
+const browser = await launch()
 const page = await browser.newPage({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
+await page.addInitScript(promiseScrollIntoView)
 const errors = []
 page.on('pageerror', (e) => errors.push(e.message))
 const step = async (name, fn) => {
@@ -128,6 +129,21 @@ try {
     await p.getByText('Als Nächstes').waitFor() // reloaded in German, choice remembered over the browser language
     await p.reload()
     await p.getByText('Als Nächstes').waitFor()
+    await ctx.close()
+  })
+  await step('narrow phone (320 px) with larger text: line-up toolbar fits, no clipped labels, no sideways scroll', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 320, height: 700 }, locale: 'de-DE' })
+    const p = await ctx.newPage()
+    await p.goto(url)
+    // fonts differ between machines; scale the labels up so wrapping shows up everywhere (users with larger text)
+    await p.addStyleTag({ content: '.seg button, .nav button { font-size: 16px !important }' })
+    await p.locator('nav').getByText('Line-up').click()
+    const report = await p.evaluate(() => ({
+      clipped: [...document.querySelectorAll('.seg button, .nav button')].filter((b) => b.scrollHeight > b.clientHeight + 1 || (b.closest('.seg') && b.getBoundingClientRect().height > 44)).map((b) => b.textContent),
+      toolbarRight: document.querySelector('.toolbar').getBoundingClientRect().right,
+      overflow: document.documentElement.scrollWidth - innerWidth,
+    }))
+    if (report.clipped.length || report.toolbarRight > 320 || report.overflow > 0) throw new Error('narrow layout: ' + JSON.stringify(report))
     await ctx.close()
   })
   await step('offline: after ONE online visit the app and lazily loaded screens open with the server down', async () => {

@@ -47,7 +47,10 @@ export function FestivalChat() {
   }, [merge])
 
   const count = messages?.length ?? 0
-  useEffect(() => end.current?.scrollIntoView({ behavior: 'smooth' }), [count])
+  // block body: newer browsers return a Promise from scrollIntoView, which must not become the effect's cleanup
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [count])
 
   const send = () => {
     const msg = text.trim()

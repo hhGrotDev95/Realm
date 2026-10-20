@@ -19,6 +19,26 @@ jobs:
       - run: npm run test:e2e
       - run: npm run test:a11y
 
+  # the visitor app in the other engines visitors use (audit F07 surfaced in one browser only)
+  browsers:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: npm run test:e2e
+        env:
+          BROWSER: ${{ matrix.browser }}
+
   api:
     runs-on: ubuntu-latest
     defaults:

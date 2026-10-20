@@ -315,3 +315,7 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - App: Einstieg auf Home und im Crew-Bereich, eigenes nachladbares Sheet mit inkrementellem Polling (8 s).
 - Nebenbei: Namensdialog fragte immer „Wie soll deine Crew dich nennen?“ – jetzt neutral „Wie sollen dich andere nennen?“.
 - Geprüft: Worker-API (30, neuer Chat-Test inkl. Mandantentrennung), Modul-Tests (11), i18n (486), e2e, a11y, live (neuer Schritt: einschalten → schreiben mit Namensabfrage → Spam per Polling → 3 Meldungen → ausgeblendet → Veranstalter löscht).
+
+## Prüfbericht-Behebung · Welle 0 (claude/realm-fix-wave0)
+- F07 Chat-Absturz in neuen Chrome-Versionen (Crew- und Festival-Chat), D07 Fokus im Dialog + Schließen-Knopf, D06 Lesbarkeit vergangener Acts, D08 Line-up auf 320 px. Jeder Fix mit einem Test, der am alten Stand nachweislich anschlägt; Übersicht in `docs/AUDIT.md`.
+- Tests: Browser-Setup zentral (`tests/browser.mjs`, `BROWSER=chromium|firefox|webkit`), CI-Job `browsers` für Firefox und WebKit.

@@ -1,7 +1,7 @@
 // Two-user end-to-end test against the real worker (wrangler dev, local D1) and the Vite dev server.
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
-import { chromium } from 'playwright'
+import { launch, promiseScrollIntoView } from './browser.mjs'
 
 const API = 'http://127.0.0.1:8798'
 const WEB = 'http://localhost:5199'
@@ -28,10 +28,11 @@ const waitFor = async (url) => {
 await waitFor(API + '/api/health')
 await waitFor(WEB)
 
-const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
+const browser = await launch()
 const errors = []
 const user = async () => {
   const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
+  await ctx.addInitScript(promiseScrollIntoView)
   // pin the app clock to "Friday 19:52" so the scenario does not depend on today's date
   await ctx.addInitScript(() => {
     try {

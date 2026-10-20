@@ -1,5 +1,5 @@
 import { AnimatePresence, m as motion, useDragControls, type PanInfo } from 'framer-motion'
-import { Heart } from 'lucide-react'
+import { Heart, X } from 'lucide-react'
 import { Component, useEffect, useRef, type ReactNode } from 'react'
 import { stageById, type StageId, type UpdateSource } from './data'
 import { useApp } from './store'
@@ -99,6 +99,18 @@ export function Sheet({ open, onClose, children, full, label }: { open: boolean;
       prev?.focus?.({ preventScroll: true })
     }
   }, [open])
+  // a modal really is modal: everything behind it is inert (no Tab focus, hidden from screen readers);
+  // status messages (toasts, offline pill) stay reachable
+  useEffect(() => {
+    const sheet = ref.current
+    const host = sheet?.parentElement
+    if (!open || !host) return
+    const behind = [...host.children].filter((el): el is HTMLElement => el instanceof HTMLElement && el !== sheet && !el.classList.contains('scrim') && el.getAttribute('role') !== 'status' && !el.hasAttribute('inert'))
+    for (const el of behind) el.setAttribute('inert', '')
+    return () => {
+      for (const el of behind) el.removeAttribute('inert')
+    }
+  }, [open])
   return (
     <AnimatePresence>
       {open && (
@@ -112,6 +124,22 @@ export function Sheet({ open, onClose, children, full, label }: { open: boolean;
             aria-modal
             aria-label={label}
             style={{ outline: 'none' }}
+            onKeyDown={(e: React.KeyboardEvent) => {
+              // keep Tab cycling inside the dialog instead of leaving for the browser chrome
+              if (e.key !== 'Tab' || !ref.current) return
+              const items = [...ref.current.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')].filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null)
+              if (!items.length) return
+              const first = items[0]
+              const last = items[items.length - 1]
+              const active = document.activeElement
+              if (e.shiftKey && (active === first || active === ref.current)) {
+                e.preventDefault()
+                last.focus()
+              } else if (!e.shiftKey && active === last) {
+                e.preventDefault()
+                first.focus()
+              }
+            }}
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
@@ -128,6 +156,9 @@ export function Sheet({ open, onClose, children, full, label }: { open: boolean;
             <div className="sheet-grip" onPointerDown={(e) => controls.start(e)}>
               <i />
             </div>
+            <button type="button" className="icon-btn sheet-close" onClick={onClose} aria-label={t('Schließen')}>
+              <X size={20} />
+            </button>
             <div className="sheet-body">{children}</div>
           </motion.div>
         </>
