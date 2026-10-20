@@ -19,8 +19,23 @@ for (let i = 0; i < 100; i++) {
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {})
 const page = await browser.newPage({ viewport: { width: 400, height: 860 }, reducedMotion: 'reduce', locale: 'de-DE' })
 const results = []
+/**
+ * Waits until nothing moves any more: contrast is only meaningful once fade-ins (inline opacity
+ * and transforms set by the animation library) have settled – a fixed delay raced lazy screens.
+ */
+async function settled() {
+  let last = ''
+  for (let stable = 0, i = 0; stable < 3 && i < 100; i++) {
+    await page.waitForTimeout(100)
+    const now = await page.evaluate(
+      () => [...document.querySelectorAll('[style]')].map((e) => e.getAttribute('style')).join('|') + document.getAnimations().filter((a) => a.playState === 'running').length,
+    )
+    stable = now === last ? stable + 1 : 0
+    last = now
+  }
+}
 async function audit(name) {
-  await page.waitForTimeout(500)
+  await settled()
   await page.addScriptTag({ path: AXE })
   const r = await page.evaluate(async () => {
     // @ts-ignore
