@@ -161,7 +161,7 @@ app.get('/api/festivals/:slug', async (c) => {
     db.prepare('SELECT id, name, color, x, y, vibe FROM stages WHERE festival_id = ? ORDER BY sort, name').bind(f.id),
     db.prepare('SELECT id, day, stage_id AS stage, artist, start_min AS start, end_min AS "end", genre, bio, popularity FROM acts WHERE festival_id = ? ORDER BY day, start_min').bind(f.id),
     db.prepare('SELECT id, cat, name, x, y, detail, status, important FROM pois WHERE festival_id = ? ORDER BY rowid').bind(f.id),
-    db.prepare("SELECT id, question, answer, category, keywords, source, updated_at AS updatedAt FROM faqs WHERE festival_id = ? AND status = 'published' ORDER BY sort, category, question").bind(f.id),
+    db.prepare("SELECT id, question, answer, category, keywords, source, updated_at AS updatedAt, question_en, answer_en, keywords_en FROM faqs WHERE festival_id = ? AND status = 'published' ORDER BY sort, category, question").bind(f.id),
   ])
   return c.json({
     festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), siteMap: f.site_map, updatedAt: f.updated_at },
@@ -174,7 +174,7 @@ app.get('/api/festivals/:slug', async (c) => {
       ...(pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
     ],
     // published answers travel with the festival document, so FAQ and bot work offline
-    faq: isEnabled(JSON.parse(f.modules) as ModuleState, 'faq') ? faqs.results : [],
+    faq: isEnabled(JSON.parse(f.modules) as ModuleState, 'faq') ? (faqs.results as FaqRow[]).map(publicFaq) : [],
   })
 })
 
@@ -528,7 +528,7 @@ app.delete('/api/meetups/:id', async (c) => {
 
 /* ---------- Official announcements ---------- */
 
-type AnnouncementRow = { id: string; title: string; body: string | null; place: string | null; poi: string | null; severity: string; created_at: number; expires_at: number | null }
+type AnnouncementRow = { id: string; title: string; body: string | null; place: string | null; poi: string | null; severity: string; created_at: number; expires_at: number | null; title_en: string | null; body_en: string | null }
 const toAnnouncement = (r: AnnouncementRow, now: number) => ({
   id: r.id,
   title: r.title,
@@ -538,6 +538,7 @@ const toAnnouncement = (r: AnnouncementRow, now: number) => ({
   severity: r.severity,
   ageMin: Math.max(0, Math.floor((now - r.created_at) / MIN)),
   validMin: r.expires_at === null ? null : Math.max(0, Math.ceil((r.expires_at - now) / MIN)),
+  ...(r.title_en ? { en: { title: r.title_en, body: r.body_en } } : {}),
 })
 
 app.get('/api/announcements', async (c) => {
@@ -571,15 +572,17 @@ function announcementInput(b: Record<string, unknown>, partial = false) {
     poi: v.str(b.poi, 'poi', { max: 40, optional: true }) ?? (opt('poi') ? undefined : null),
     severity: opt('severity') ? undefined : b.severity === undefined ? 'info' : v.oneOf(b.severity, 'severity', SEVERITY_ALL),
     validMin: b.validMin === undefined || b.validMin === null ? (opt('validMin') ? undefined : null) : v.int(b.validMin, 'validMin', 1, 7 * 24 * 60),
+    titleEn: v.str(b.titleEn, 'Titel (Englisch)', { min: 3, max: 120, optional: true }) ?? (opt('titleEn') ? undefined : null),
+    bodyEn: v.str(b.bodyEn, 'Text (Englisch)', { max: 1000, optional: true }) ?? (opt('bodyEn') ? undefined : null),
   }
 }
 
 app.post('/api/admin/announcements', async (c) => {
   const a = announcementInput(await body(c))
   const now = Date.now()
-  const row: AnnouncementRow = { id: randomId('a'), title: a.title!, body: a.body ?? null, place: a.place ?? null, poi: a.poi ?? null, severity: a.severity!, created_at: now, expires_at: a.validMin ? now + a.validMin * MIN : null }
-  await c.env.DB.prepare('INSERT INTO announcements (id, festival_id, title, body, place, poi, severity, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(row.id, c.get('festival').id, row.title, row.body, row.place, row.poi, row.severity, row.created_at, row.expires_at)
+  const row: AnnouncementRow = { id: randomId('a'), title: a.title!, body: a.body ?? null, place: a.place ?? null, poi: a.poi ?? null, severity: a.severity!, created_at: now, expires_at: a.validMin ? now + a.validMin * MIN : null, title_en: a.titleEn ?? null, body_en: a.titleEn ? (a.bodyEn ?? null) : null }
+  await c.env.DB.prepare('INSERT INTO announcements (id, festival_id, title, body, place, poi, severity, created_at, expires_at, title_en, body_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(row.id, c.get('festival').id, row.title, row.body, row.place, row.poi, row.severity, row.created_at, row.expires_at, row.title_en, row.body_en)
     .run()
   return c.json(toAnnouncement(row, now), 201)
 })
@@ -597,9 +600,11 @@ app.patch('/api/admin/announcements/:id', async (c) => {
     poi: a.poi === undefined ? cur.poi : a.poi,
     severity: a.severity ?? cur.severity,
     expires_at: a.validMin === undefined ? cur.expires_at : a.validMin === null ? null : now + a.validMin * MIN,
+    title_en: a.titleEn === undefined ? cur.title_en : a.titleEn,
+    body_en: a.bodyEn === undefined ? cur.body_en : a.bodyEn,
   }
-  await c.env.DB.prepare('UPDATE announcements SET title = ?, body = ?, place = ?, poi = ?, severity = ?, expires_at = ? WHERE id = ?')
-    .bind(next.title, next.body, next.place, next.poi, next.severity, next.expires_at, next.id)
+  await c.env.DB.prepare('UPDATE announcements SET title = ?, body = ?, place = ?, poi = ?, severity = ?, expires_at = ?, title_en = ?, body_en = ? WHERE id = ?')
+    .bind(next.title, next.body, next.place, next.poi, next.severity, next.expires_at, next.title_en, next.body_en, next.id)
     .run()
   return c.json(toAnnouncement(next, now))
 })
@@ -724,14 +729,26 @@ app.put('/api/admin/festivals/:slug/modules', async (c) => {
 })
 
 /* FAQ (admin): drafts stay in the console until published. */
-type FaqRow = { id: string; question: string; answer: string; category: string; keywords: string; source: string | null; status: string; sort: number; updated_at: number }
-const toFaq = (r: FaqRow) => ({ id: r.id, question: r.question, answer: r.answer, category: r.category, keywords: r.keywords, source: r.source, status: r.status, sort: r.sort, updatedAt: r.updated_at })
+type FaqRow = { id: string; question: string; answer: string; category: string; keywords: string; source: string | null; status: string; sort: number; updated_at: number; updatedAt?: number; question_en: string | null; answer_en: string | null; keywords_en: string | null }
+/** English version travels as `en` only when the organizer wrote one (question and answer). */
+const faqEn = (r: FaqRow) => (r.question_en && r.answer_en ? { en: { question: r.question_en, answer: r.answer_en, keywords: r.keywords_en ?? '' } } : {})
+const toFaq = (r: FaqRow) => ({ id: r.id, question: r.question, answer: r.answer, category: r.category, keywords: r.keywords, source: r.source, status: r.status, sort: r.sort, updatedAt: r.updated_at, ...faqEn(r) })
+const publicFaq = (r: FaqRow) => ({ id: r.id, question: r.question, answer: r.answer, category: r.category, keywords: r.keywords, source: r.source, updatedAt: r.updatedAt ?? r.updated_at, ...faqEn(r) })
 
 app.get('/api/admin/festivals/:slug/faq', async (c) => {
   const f = await festivalBySlug(c)
   const rows = await c.env.DB.prepare('SELECT * FROM faqs WHERE festival_id = ? ORDER BY sort, category, question').bind(f.id).all<FaqRow>()
   return c.json(rows.results.map(toFaq))
 })
+
+/** Optional English version: question and answer belong together, keywords are extra. */
+function englishFaq(raw: unknown) {
+  const e = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const question = v.str(e.question, 'Frage (Englisch)', { min: 3, max: 200, optional: true }) ?? null
+  const answer = v.str(e.answer, 'Antwort (Englisch)', { min: 3, max: 2000, optional: true }) ?? null
+  if (!question !== !answer) throw new HttpError(400, 'Englisch: bitte Frage und Antwort angeben – oder beides leer lassen')
+  return { question_en: question, answer_en: answer, keywords_en: question ? (v.str(e.keywords, 'Stichworte (Englisch)', { max: 300, optional: true }) ?? null) : null }
+}
 
 app.put('/api/admin/festivals/:slug/faq/:id', async (c) => {
   const f = await festivalBySlug(c)
@@ -748,12 +765,14 @@ app.put('/api/admin/festivals/:slug/faq/:id', async (c) => {
     status: b.status === undefined ? 'draft' : v.oneOf(b.status, 'Status', ['draft', 'published'] as const),
     sort: b.sort === undefined ? 0 : v.int(b.sort, 'sort', 0, 9999),
     updated_at: Date.now(),
+    ...englishFaq(b.en),
   }
   await c.env.DB.batch([
     c.env.DB.prepare(
-      `INSERT INTO faqs (festival_id, id, question, answer, category, keywords, source, status, sort, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(festival_id, id) DO UPDATE SET question = excluded.question, answer = excluded.answer, category = excluded.category, keywords = excluded.keywords, source = excluded.source, status = excluded.status, sort = excluded.sort, updated_at = excluded.updated_at`,
-    ).bind(f.id, row.id, row.question, row.answer, row.category, row.keywords, row.source, row.status, row.sort, row.updated_at),
+      `INSERT INTO faqs (festival_id, id, question, answer, category, keywords, source, status, sort, updated_at, question_en, answer_en, keywords_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(festival_id, id) DO UPDATE SET question = excluded.question, answer = excluded.answer, category = excluded.category, keywords = excluded.keywords, source = excluded.source, status = excluded.status, sort = excluded.sort, updated_at = excluded.updated_at,
+         question_en = excluded.question_en, answer_en = excluded.answer_en, keywords_en = excluded.keywords_en`,
+    ).bind(f.id, row.id, row.question, row.answer, row.category, row.keywords, row.source, row.status, row.sort, row.updated_at, row.question_en, row.answer_en, row.keywords_en),
     touch(c.env.DB, f.id),
   ])
   return c.json(toFaq(row))

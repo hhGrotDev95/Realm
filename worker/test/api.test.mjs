@@ -583,6 +583,30 @@ try {
     assert.equal((await say(ola, 'noch da?')).status, 403, 'switching it off again closes the chat')
   })
 
+  await test('English content: FAQ and announcements carry an optional English version', async () => {
+    const A = 'test-admin-token'
+    const put = (id, b) => api('PUT', `/api/admin/festivals/nordlicht/faq/${id}`, A, b, null)
+    const de = { question: 'Gibt es Duschen?', answer: 'Ja, am Camping Nord, 2 € pro Dusche.', status: 'published' }
+    assert.equal((await put('duschen', { ...de, en: { question: 'Are there showers?' } })).status, 400, 'question without answer')
+    const ok = await put('duschen', { ...de, en: { question: 'Are there showers?', answer: 'Yes, at camping north, €2 per shower.', keywords: 'shower wash' } })
+    assert.equal(ok.status, 200)
+    assert.deepEqual(ok.data.en, { question: 'Are there showers?', answer: 'Yes, at camping north, €2 per shower.', keywords: 'shower wash' })
+    const doc = (await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data
+    assert.equal(doc.faq.find((f) => f.id === 'duschen').en.question, 'Are there showers?')
+    // German-only entries stay without `en`; clearing the English version removes it
+    await put('duschen', de)
+    assert.equal((await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data.faq.find((f) => f.id === 'duschen').en, undefined)
+    await api('DELETE', '/api/admin/festivals/nordlicht/faq/duschen', A, undefined, null)
+    // announcements
+    const a = (await api('POST', '/api/admin/announcements', A, { title: 'Einlass verschoben', titleEn: 'Entry delayed', bodyEn: 'Gates open at 13:00.' }, 'nordlicht')).data
+    assert.deepEqual(a.en, { title: 'Entry delayed', body: 'Gates open at 13:00.' })
+    const pub = (await api('GET', '/api/announcements', null, undefined, 'nordlicht')).data.find((x) => x.id === a.id)
+    assert.deepEqual([pub.title, pub.en.title], ['Einlass verschoben', 'Entry delayed'])
+    const patched = (await api('PATCH', `/api/admin/announcements/${a.id}`, A, { titleEn: null }, 'nordlicht')).data
+    assert.equal(patched.en, undefined)
+    await api('DELETE', `/api/admin/announcements/${a.id}`, A, undefined, 'nordlicht')
+  })
+
   await test('modules: switched-off features are refused by the API, dependencies enforced', async () => {
     const A = 'test-admin-token'
     const N = 'nordlicht'
