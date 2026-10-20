@@ -409,6 +409,17 @@ try {
     const log = org.getByLabel('Änderungsprotokoll')
     await log.locator('.list-item', { hasText: 'POST /api/admin/announcements' }).getByText('Olga').waitFor()
     await log.locator('.list-item', { hasText: 'PUT /api/admin/timetable/' }).first().getByText('Olga').waitFor()
+    // 320 px (audit D09): one compact area picker instead of rows of tabs; status one tap away
+    await org.setViewportSize({ width: 320, height: 700 })
+    if (await org.locator('.admin-tabs').isVisible()) throw new Error('tab rows still shown on a narrow phone')
+    const picker = org.locator('.admin-picker')
+    const box = await picker.boundingBox()
+    if (!box || box.height > 90) throw new Error('area picker too tall: ' + JSON.stringify(box))
+    await picker.getByLabel('Bereich').selectOption({ label: 'Meldungen' })
+    await org.getByPlaceholder('z. B. Gewitterwarnung ab 22:30').waitFor()
+    await picker.getByRole('button', { name: 'Status' }).click()
+    await org.getByRole('heading', { name: 'Prüfen & veröffentlichen' }).waitFor()
+    if ((await org.evaluate(() => document.documentElement.scrollWidth - innerWidth)) > 0) throw new Error('console scrolls sideways at 320 px')
     await nav(lea, 'Home')
   })
 
@@ -484,14 +495,27 @@ try {
     await org.getByRole('button', { name: /Zusammenführen – importieren/ }).click()
     await org.getByText('Importiert: 2 neu, 0 geändert').waitFor()
     await org.getByRole('button', { name: 'Weiter (2 Acts)' }).click()
-    // step 4: preview the draft in a new tab, then publish
+    // step 4 (audit D10): the checklist follows what is switched on – no entrance, no medical point, no FAQ for the bot
+    const publishBtn = org.getByRole('button', { name: 'Veröffentlichen', exact: true })
+    const dataChecks = org.getByLabel('Datenprüfung')
+    for (const t of ['Mindestens ein Eingang auf der Karte', 'Sanität auf der Karte', 'Freigegebene FAQ für den FAQ-Bot']) await dataChecks.locator('li', { hasText: t }).getByLabel('fehlt').waitFor()
+    if (await publishBtn.isEnabled()) throw new Error('publishing possible without entrance/medical point')
+    const AH = { 'Content-Type': 'application/json', Authorization: 'Bearer e2e-admin' }
+    await fetch(`${API}/api/admin/festivals/testwiese-festival/map`, { method: 'PUT', headers: AH, body: JSON.stringify({ pois: [{ id: 'ein', cat: 'entrance', name: 'Haupteingang', x: 100, y: 100 }, { id: 'san', cat: 'medical', name: 'Sanität', x: 200, y: 200 }] }) })
+    await fetch(`${API}/api/admin/festivals/testwiese-festival/faq/notfall`, { method: 'PUT', headers: AH, body: JSON.stringify({ question: 'Wo ist die Sanität?', answer: 'Neben dem Haupteingang.', category: 'Sicherheit', status: 'published' }) })
+    await org.getByRole('button', { name: 'Erneut prüfen' }).click()
+    await dataChecks.locator('li', { hasText: 'Sanität auf der Karte' }).getByLabel('erfüllt').waitFor()
+    // the organizer's confirmations; the preview one only after the preview was opened
+    for (const t of [/stimmen mit dem Gelände überein/, /offizielle Warnungen/, /Nur diese Funktionen/, /Moderation der Community-Funktionen/]) await org.getByLabel(t).check()
+    if (await publishBtn.isEnabled()) throw new Error('publishing possible without preview')
     const [preview] = await Promise.all([org.context().waitForEvent('page'), org.getByRole('button', { name: 'Vorschau öffnen' }).click()])
     await preview.getByText('Vorschau · Entwurf').waitFor()
     await preview.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
     await preview.close()
+    await org.getByLabel(/Besucher-Vorschau wurde angesehen/).check()
     // visitors cannot see the draft yet
     if ((await fetch(`${API}/api/festivals/testwiese-festival`)).status !== 404) throw new Error('draft visible to visitors')
-    await org.getByRole('button', { name: 'Veröffentlichen' }).click()
+    await publishBtn.click()
     await org.getByText('Festival ist veröffentlicht').waitFor()
     await org.getByRole('tab', { name: 'Status', selected: true }).waitFor() // wizard gives way to the status view
     // a visitor opens it: night set sorted into Friday night

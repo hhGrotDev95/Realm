@@ -1035,12 +1035,11 @@ app.patch('/api/admin/festivals/:slug', async (c) => {
   const name = v.str(b.name, 'Name', { min: 2, max: 60, optional: true }) ?? f.name
   const status = b.status === undefined ? f.status : v.oneOf(b.status, 'Status', ['draft', 'published', 'archived'] as const)
   if (status === 'published' && f.status !== 'published') {
-    // publishing needs something to show
-    const [{ n: acts }, { n: stages }] = await Promise.all([
-      c.env.DB.prepare('SELECT COUNT(*) AS n FROM acts WHERE festival_id = ?').bind(f.id).first<{ n: number }>().then((r) => r ?? { n: 0 }),
-      c.env.DB.prepare('SELECT COUNT(*) AS n FROM stages WHERE festival_id = ?').bind(f.id).first<{ n: number }>().then((r) => r ?? { n: 0 }),
-    ])
-    if (!stages || !acts) throw new HttpError(400, 'Zum Veröffentlichen braucht das Festival mindestens eine Bühne und einen Act')
+    // going live needs what visitors will rely on, plus the organizer's explicit confirmations (audit D10)
+    const given = Array.isArray(b.confirm) ? (b.confirm as unknown[]).filter((x): x is string => typeof x === 'string') : []
+    const checks = await readiness(c.env.DB, f.id, given)
+    const missing = checks.filter((x) => !x.ok)
+    if (missing.length) throw new HttpError(400, 'Noch nicht bereit: ' + missing.map((x) => x.text).join(' · '), { checks })
   }
   const updates: D1PreparedStatement[] = [c.env.DB.prepare('UPDATE festivals SET name = ?, status = ?, updated_at = ? WHERE id = ?').bind(name, status, Date.now(), f.id)]
   // an archived festival is over: nobody keeps sharing a location there
@@ -1048,6 +1047,51 @@ app.patch('/api/admin/festivals/:slug', async (c) => {
   if (b.location !== undefined) updates.push(c.env.DB.prepare('UPDATE festivals SET location = ? WHERE id = ?').bind(v.str(b.location, 'Ort', { max: 80, optional: true }) ?? null, f.id))
   await c.env.DB.batch(updates)
   return c.json({ slug: f.slug, name, status })
+})
+
+/**
+ * What must hold before a festival goes live (audit D10). Data checks follow what is switched on; the
+ * confirmations are the organizer's responsibility and cannot be derived from data – the app shows a
+ * schematic map and official warnings, so someone has to vouch for both.
+ */
+async function readiness(db: D1Database, festivalId: string, confirmed: string[]) {
+  const [counts, mods] = await Promise.all([
+    db
+      .prepare(
+        `SELECT (SELECT COUNT(*) FROM stages WHERE festival_id = ?1) AS stages, (SELECT COUNT(*) FROM acts WHERE festival_id = ?1) AS acts,
+           (SELECT COUNT(*) FROM festival_days WHERE festival_id = ?1) AS days,
+           (SELECT COUNT(*) FROM pois WHERE festival_id = ?1 AND cat = 'entrance') AS entrances, (SELECT COUNT(*) FROM pois WHERE festival_id = ?1 AND cat = 'medical') AS medical,
+           (SELECT COUNT(*) FROM faqs WHERE festival_id = ?1 AND status = 'published') AS faqs`,
+      )
+      .bind(festivalId)
+      .first<Record<string, number>>(),
+    db.prepare('SELECT modules FROM festivals WHERE id = ?').bind(festivalId).first<{ modules: string }>(),
+  ])
+  const n = counts ?? {}
+  const m = JSON.parse(mods?.modules || '{}') as ModuleState
+  const on = MODULE_KEYS.filter((k) => isEnabled(m, k))
+  const community = on.some((k) => k === 'reports' || k === 'chat' || k === 'festivalchat')
+  const data = [
+    { id: 'stages', ok: n.stages > 0, text: 'Mindestens eine Bühne' },
+    { id: 'acts', ok: n.acts > 0, text: 'Mindestens ein Act im Timetable' },
+    { id: 'days', ok: n.days > 0, text: 'Festivaltage festgelegt' },
+    { id: 'entrance', ok: n.entrances > 0, text: 'Mindestens ein Eingang auf der Karte' },
+    { id: 'medical', ok: n.medical > 0, text: 'Sanität auf der Karte' },
+    ...(isEnabled(m, 'faqbot') ? [{ id: 'faq', ok: n.faqs > 0, text: 'Freigegebene FAQ für den FAQ-Bot' }] : []),
+  ].map((x) => ({ ...x, kind: 'data' as const }))
+  const confirm = [
+    { id: 'terrain', text: 'Eingänge, Ausgänge, Sanität und Notrufnummer auf der Karte stimmen mit dem Gelände überein' },
+    { id: 'warnings', text: 'Es ist geregelt, wer im Ernstfall offizielle Warnungen in dieser Konsole veröffentlicht' },
+    { id: 'modules', text: `Nur diese Funktionen sind eingeschaltet, und wir bieten sie während des Festivals wirklich an: ${on.map((k) => MODULES[k].label).join(', ') || 'keine'}` },
+    ...(community ? [{ id: 'moderation', text: 'Die Moderation der Community-Funktionen ist während des Festivals besetzt' }] : []),
+    { id: 'preview', text: 'Die Besucher-Vorschau wurde angesehen' },
+  ].map((x) => ({ ...x, kind: 'confirm' as const, ok: confirmed.includes(x.id) }))
+  return [...data, ...confirm]
+}
+
+app.get('/api/admin/festivals/:slug/readiness', async (c) => {
+  const f = await festivalBySlug(c)
+  return c.json({ checks: await readiness(c.env.DB, f.id, []) })
 })
 
 /** Replaces the stage list; stages still used by acts cannot be removed. */
