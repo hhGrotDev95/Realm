@@ -910,6 +910,21 @@ try {
     assert.equal(rows.status, 404)
   })
 
+  await test('time model (audit F15): festival time zone; the same night limits for import and live changes', async () => {
+    const A = 'test-admin-token'
+    assert.equal((await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data.festival.timezone, 'Europe/Berlin')
+    assert.equal((await api('PATCH', '/api/admin/festivals/nordlicht', A, { timezone: 'Mars/Olympus' }, null)).status, 400)
+    assert.equal((await api('PATCH', '/api/admin/festivals/nordlicht', A, { timezone: 'Europe/Lisbon' }, null)).status, 200)
+    assert.equal((await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data.festival.timezone, 'Europe/Lisbon')
+    await api('PATCH', '/api/admin/festivals/nordlicht', A, { timezone: 'Europe/Berlin' }, null)
+    // live changes: start before 06:00 next morning (< 30:00), end by 12:00 (36:00) – as in the import
+    const change = (b) => api('PUT', '/api/admin/timetable/1-maduk', A, b, 'nordlicht')
+    assert.equal((await change({ start: 29 * 60, end: 31 * 60 })).status, 200, 'a set from 05:00 to 07:00 is allowed')
+    assert.equal((await change({ start: 30 * 60, end: 31 * 60 })).status, 400, '06:00 belongs to the next festival day')
+    assert.equal((await change({ start: 30 * 60 - 60, end: 36 * 60 + 1 })).status, 400)
+    await api('DELETE', '/api/admin/timetable/1-maduk', A, undefined, 'nordlicht')
+  })
+
   await test('privacy: a location share expires on the server 2 h after it was last confirmed', async () => {
     const N = 'nordlicht'
     const a = (await api('POST', '/api/guests', null, { nickname: 'Tia' })).data

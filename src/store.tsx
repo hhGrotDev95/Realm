@@ -3,8 +3,9 @@ import { api, ApiError, execute, online, opId, privacyKey, retryable, setToken, 
 import { lang, t } from './i18n'
 import { ageSince } from './aging'
 import { pollDelay, POLL_ACTIVE_MS } from './sync'
+import { reminderPlan } from './reminders'
 import { DEFAULT_FESTIVAL } from './festival'
-import { on, ACTS, fmt, POIS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
+import { on, ACTS, fmt, POIS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, actTime, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
   id: string
@@ -462,6 +463,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [s.session?.id, s.crewRef?.id, refresh, flush])
 
+  // reminders (audit F15): armed for every set in the plan of reminders – any day, festival time zone, live changes
+  // included – re-armed after a reload or a timetable change, and really cancelled when switched off
+  const reminderKey = Object.keys(s.reminders).filter((id) => s.reminders[id]).sort().join(',')
+  const actKey = JSON.stringify(s.timetableChanges)
+  useEffect(() => {
+    if (s.clockMode !== 'real' || !reminderKey || !('Notification' in window)) return
+    const plan = reminderPlan(reminderKey.split(','), (id) => actById[id] && { ...actById[id], cancelled: actById[id].change?.cancelled }, actTime, Date.now())
+    const handles = plan.map((r) =>
+      window.setTimeout(async () => {
+        if (Notification.permission !== 'granted') return
+        const body = t('{artist} beginnt um {time}', { artist: r.artist, time: fmt(r.start) })
+        const reg = await navigator.serviceWorker?.getRegistration()
+        if (reg) reg.showNotification(t('Gleich geht’s los'), { body, icon: '/icon.svg', tag: r.id })
+        else new Notification(t('Gleich geht’s los'), { body, icon: '/icon.svg', tag: r.id })
+      }, r.delay),
+    )
+    return () => handles.forEach((h) => window.clearTimeout(h))
+  }, [reminderKey, s.clockMode, actKey])
+
   // official announcements are public: fetched for everyone, cached for offline use
   useEffect(() => {
     if (!online) return
@@ -807,10 +827,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         toast(keep.length > 1 ? 'Hopping geplant – beide bleiben im Plan' : t('Entschieden: {artist}', { artist: actById[keep[0]].artist }))
       },
       toggleReminder: (id) => {
-        const on = !s.reminders[id]
+        // the latest state, not this render's: two quick taps must switch on and off again
+        const on = !sRef.current.reminders[id]
+        sRef.current = { ...sRef.current, reminders: { ...sRef.current.reminders, [id]: on } }
         setS((p) => ({ ...p, reminders: { ...p.reminders, [id]: on } }))
-        if (on) scheduleReminder(id, now)
-        toast(on ? t('Erinnerung 15 Min. vorher') : t('Erinnerung entfernt'))
+        if (on && 'Notification' in window && Notification.permission === 'default') Notification.requestPermission().catch(() => {})
+        toast(on ? t('Erinnerung 15 Min. vorher · nur solange Realm geöffnet ist') : t('Erinnerung entfernt'))
       },
       setPhase: (phase) => setS((p) => ({ ...p, phase, clockMode: 'demo' })),
       setNickname: async (nickname, color) => {
@@ -923,21 +945,3 @@ export function isMeetupActive(m: Meetup, now: { day: number; min: number }) {
   return m.day > now.day || (m.day === now.day && m.min + 30 >= now.min)
 }
 
-const timers: Record<string, number> = {}
-
-/** Asks for notification permission and fires a local notification 15 min before the set (relative to the app clock). */
-async function scheduleReminder(id: string, now: { day: number; min: number }) {
-  if (!('Notification' in window)) return
-  const perm = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission
-  if (perm !== 'granted') return
-  const a = actById[id]
-  if (a.day !== now.day) return
-  const delay = Math.max(0, a.start - 15 - now.min) * 60_000
-  window.clearTimeout(timers[id])
-  timers[id] = window.setTimeout(async () => {
-    const reg = await navigator.serviceWorker?.getRegistration()
-    const body = t('{artist} beginnt um {time}', { artist: a.artist, time: fmt(a.start) })
-    if (reg) reg.showNotification(t('Gleich geht’s los'), { body, icon: '/icon.svg', tag: id })
-    else new Notification(t('Gleich geht’s los'), { body, icon: '/icon.svg', tag: id })
-  }, delay)
-}

@@ -1,5 +1,6 @@
 // Timetable import: turns JSON, CSV or spreadsheet rows into normalized acts for the API.
 // Pure and framework-free so it can be unit-tested in Node. The server validates again.
+import { DAY_START, MAX_END, MAX_START } from '../festivalTime.ts'
 
 export interface ParsedRow {
   row: number // 1-based row in the source (header = row 1 for tables)
@@ -45,8 +46,8 @@ const ALIASES: Record<Field, string[]> = {
 }
 const norm = (s: string) => s.toLowerCase().replace(/[\s_\-./()]+/g, '')
 
-/** Hours before this belong to the previous festival night (01:30 → 25:30). */
-export const NIGHT_UNTIL = 6
+/** Hours before this belong to the previous festival night (01:30 → 25:30) – the app-wide rule (audit F15). */
+export const NIGHT_UNTIL = DAY_START / 60
 
 const WEEKDAYS: Record<string, number> = {
   sonntag: 0, so: 0, sunday: 0, sun: 0,
@@ -198,6 +199,7 @@ export function parseTable(table: Cell[][], days: DayInfo[]): ParseResult {
       if (end <= start) end += 1440 // e.g. 23:00–23:00 next day is impossible, 23:00–00:30 handled by night()
       if (end - start > 12 * 60) return void errors.push({ row: rowNo, message: `${artist}: Auftritt wäre länger als 12 Stunden – Zeiten prüfen` })
     }
+    if (start >= MAX_START || end > MAX_END) return void errors.push({ row: rowNo, message: `${artist}: Sets beginnen vor 06:00 und enden bis 12:00 am Folgemorgen` })
     const id = String(get('id') ?? '').trim() || undefined
     const genre = String(get('genre') ?? '').trim() || undefined
     const bio = String(get('bio') ?? '').trim() || undefined

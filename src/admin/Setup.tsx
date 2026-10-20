@@ -491,6 +491,7 @@ export function Settings({ token, flash, slug, reload }: { token: string; flash:
           <p className="tiny faint">Die Karte in der App ist ein schematischer Plan und ersetzt keine Beschilderung; Notfallkommunikation verantwortet ihr. Die Bestätigung wird mit eurem Namen im Änderungsprotokoll gespeichert.</p>
         </>
       )}
+      <TimeZone admin={admin} slug={slug} flash={flash} reload={reload} />
       <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
         <button
           className="btn secondary"
@@ -519,5 +520,40 @@ export function Settings({ token, flash, slug, reload }: { token: string; flash:
         )}
       </div>
     </div>
+  )
+}
+
+/** The festival's time zone (audit F15): clocks, countdowns and reminders follow it, not the visitor's phone. */
+function TimeZone({ admin, slug, flash, reload }: { admin: ReturnType<typeof adminApi>; slug: string; flash: Flash; reload: () => Promise<void> }) {
+  const [tz, setTz] = useState(FESTIVAL.timezone)
+  const [busy, setBusy] = useState(false)
+  return (
+    <form
+      className="row"
+      style={{ gap: 8, margin: '6px 0 14px', alignItems: 'flex-end', flexWrap: 'wrap' }}
+      onSubmit={async (e) => {
+        e.preventDefault()
+        setBusy(true)
+        try {
+          await admin.updateFestival(slug, { timezone: tz.trim() })
+          await reload()
+          flash('ok', 'Zeitzone gespeichert')
+        } catch (err) {
+          flash('err', errText(err))
+        }
+        setBusy(false)
+      }}
+    >
+      <label className="admin-field" style={{ marginBottom: 0, maxWidth: 260 }}>
+        <span>Zeitzone des Festivals</span>
+        <input className="field" value={tz} onChange={(e) => setTz(e.target.value)} placeholder="Europe/Berlin" />
+      </label>
+      <button className="btn ghost sm" disabled={busy || !tz.trim() || tz.trim() === FESTIVAL.timezone} style={{ minHeight: 44 }}>
+        Speichern
+      </button>
+      <span className="tiny faint" style={{ flexBasis: '100%' }}>
+        Alle Zeiten gelten in dieser Zeitzone. Ein Festivaltag läuft von 06:00 bis 06:00; Sets beginnen vor 06:00 und enden bis 12:00 am Folgemorgen.
+      </span>
+    </form>
   )
 }

@@ -315,7 +315,7 @@ export const adminApi = (adminToken: string) => {
     timetableChanges: () => req<TimetableChange[]>('GET', '/api/timetable/changes'),
     createFestival: (f: { name: string; slug?: string; location?: string; startDate: string; days: number }) => req<{ slug: string; name: string; status: string }>('POST', '/api/admin/festivals', f),
     readiness: (slug: string) => req<{ checks: Readiness[] }>('GET', `/api/admin/festivals/${slug}/readiness`),
-    updateFestival: (slug: string, f: { name?: string; location?: string; status?: 'draft' | 'published' | 'archived'; confirm?: string[] }) => req<{ slug: string; name: string; status: string }>('PATCH', `/api/admin/festivals/${slug}`, f),
+    updateFestival: (slug: string, f: { name?: string; location?: string; status?: 'draft' | 'published' | 'archived'; confirm?: string[]; timezone?: string }) => req<{ slug: string; name: string; status: string }>('PATCH', `/api/admin/festivals/${slug}`, f),
     setStages: (slug: string, stages: { id?: string; name: string; color?: string; vibe?: string }[]) => req<{ stages: { id: string; name: string; color: string }[] }>('PUT', `/api/admin/festivals/${slug}/stages`, { stages }),
     importTimetable: (slug: string, body: { mode: 'merge' | 'replace'; dryRun: boolean; rows: unknown[] }) => req<ImportResult>('POST', `/api/admin/festivals/${slug}/import`, body),
     faq: (slug: string) => req<AdminFaq[]>('GET', `/api/admin/festivals/${slug}/faq`),

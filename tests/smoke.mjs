@@ -132,7 +132,8 @@ try {
     await page.locator('.wrapped [aria-label="Schließen"]').click()
     await page.getByRole('button', { name: 'Profil & Einstellungen' }).click()
     await page.locator('.sheet').getByText('Echtzeit').click()
-    const days = Math.ceil((new Date(2027, 6, 15, 10).getTime() - Date.now()) / 86_400_000)
+    // doors open at 10:00 festival time (Berlin, summer time = 08:00 UTC) – not the test machine's time zone (audit F15)
+    const days = Math.ceil((Date.UTC(2027, 6, 15, 8) - Date.now()) / 86_400_000)
     if (days > 0) await page.getByText(`Noch ${days} Tage`).waitFor()
   })
   await step('English browser gets the English app; the language can be switched in the profile', async () => {
@@ -170,6 +171,63 @@ try {
       overflow: document.documentElement.scrollWidth - innerWidth,
     }))
     if (report.clipped.length || report.toolbarRight > 320 || report.overflow > 0) throw new Error('narrow layout: ' + JSON.stringify(report))
+    await ctx.close()
+  })
+  await step('reminders (audit F15): festival time zone, armed again after a reload, really cancelled when switched off', async () => {
+    // a phone in New York, the festival in Berlin; 21:30 Berlin on the second day (2027-07-16)
+    const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE', timezoneId: 'America/New_York', permissions: ['notifications'] })
+    await ctx.addInitScript(() => {
+      // record notifications instead of showing them
+      const shown = JSON.parse(sessionStorage.getItem('shown') ?? '[]')
+      const record = (title, o) => sessionStorage.setItem('shown', JSON.stringify([...JSON.parse(sessionStorage.getItem('shown') ?? '[]'), o?.body ?? title]))
+      window.Notification = Object.assign(function (title, o) { record(title, o) }, { permission: 'granted', requestPermission: async () => 'granted' })
+      if (window.ServiceWorkerRegistration) ServiceWorkerRegistration.prototype.showNotification = async (title, o) => record(title, o)
+      void shown
+    })
+    const p = await ctx.newPage()
+    watch(p, 'reminders')
+    await p.clock.install({ time: new Date('2027-07-16T19:30:00Z') })
+    await p.goto(url)
+    await p.evaluate(() => {
+      window.__reminderEvents = []
+      for (const type of ['pointerdown', 'pointerup', 'click']) document.addEventListener(type, (e) => {
+        window.__reminderEvents.push({ type, target: e.target.outerHTML?.slice(0, 300), time: Date.now() })
+      }, true)
+    })
+    await p.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    await p.locator('.sheet').getByText('Echtzeit').click()
+    await p.keyboard.press('Escape')
+    const bell = async (artist, pressed) => {
+      await p.locator('nav').getByText('Line-up').click()
+      await p.getByRole('tab', { name: 'Alle', exact: true }).click()
+      await p.locator('.act', { hasText: artist }).first().click()
+      await p.locator('.sheet').getByRole('heading', { name: artist }).waitFor()
+      const button = p.locator('.sheet').getByRole('button', { name: 'Erinnerung' })
+      // Assert the initial state as well, so an unintended reset cannot look like a successful toggle.
+      await p.locator('.sheet').getByRole('button', { name: 'Erinnerung', pressed: !pressed }).waitFor()
+      await button.click()
+      try {
+        await p.locator('.sheet').getByRole('button', { name: 'Erinnerung', pressed }).waitFor()
+      } catch (error) {
+        console.error('Reminder interaction', artist, pressed, await p.evaluate(() => ({
+          events: window.__reminderEvents,
+          sheet: document.querySelector('.sheet')?.outerHTML,
+          reminders: localStorage.getItem('realm'),
+        })))
+        throw error
+      }
+      await p.keyboard.press('Escape')
+      await p.locator('.sheet').waitFor({ state: 'detached' })
+    }
+    await bell('Arcturus', true) // moved to 22:30 by a live change → reminder at 22:15 Berlin
+    await bell('Somna', true) // on …
+    await bell('Somna', false) // … and off again: must not fire
+    await p.reload()
+    await p.getByText('Als Nächstes').waitFor()
+    await p.clock.runFor(50 * 60_000)
+    await p.waitForTimeout(300)
+    const shown = await p.evaluate(() => JSON.parse(sessionStorage.getItem('shown') ?? '[]'))
+    if (JSON.stringify(shown) !== JSON.stringify(['Arcturus beginnt um 22:30'])) throw new Error('reminders shown: ' + JSON.stringify(shown))
     await ctx.close()
   })
   await step('offline: after ONE online visit the app and lazily loaded screens open with the server down', async () => {

@@ -1,3 +1,4 @@
+import { DEFAULT_TZ, festivalClock, instant } from './festivalTime.ts'
 import type { Theme } from './theme/apply'
 import { lang, locale, t } from './i18n/index.ts'
 import { isEnabled, type ModuleKey, type ModuleState } from './modules.ts'
@@ -313,30 +314,24 @@ export const FESTIVAL = {
   modules: {} as ModuleState,
   /** uploaded site plan (data: URL); null = the built-in illustration */
   siteMap: null as string | null,
+  /** the festival's time zone: every time in the app is wall-clock time there (audit F15) */
+  timezone: DEFAULT_TZ as string,
 }
 
 /** Is an optional module available at this festival? (all on in the demo) */
 export const on = (key: ModuleKey) => isEnabled(FESTIVAL.modules, key)
 
-/** Doors open on day 0 at 10:00 local time. */
-const festivalStart = () => {
-  const [y, m, d] = DAYS[0].date.split('-').map(Number)
-  return new Date(y, m - 1, d, 10, 0)
-}
-const DAY_MS = 86_400_000
+/** The moment a set (festival day, minute) happens – in the festival's time zone, not the phone's. */
+export const actTime = (day: number, min: number) => instant(DAYS[day]?.date ?? DAYS[0].date, min, FESTIVAL.timezone)
 
 /**
- * Real-time clock. A festival day runs from 06:00 to 06:00, so a set at 01:30
- * still belongs to the previous day (minute 1530), matching the timetable.
+ * Real-time clock in the festival's time zone (audit F15). A festival day runs from 06:00 to 06:00,
+ * so a set at 01:30 still belongs to the previous day (minute 1530), matching the timetable.
  */
 export function realClock(date = new Date()): { phase: Phase; day: number; min: number; msToStart: number } {
-  const shifted = new Date(date.getTime() - 6 * 3_600_000)
-  const start = festivalStart()
-  const day0 = new Date(start.getFullYear(), start.getMonth(), start.getDate())
-  const today = new Date(shifted.getFullYear(), shifted.getMonth(), shifted.getDate())
-  const day = Math.round((today.getTime() - day0.getTime()) / DAY_MS)
-  const min = shifted.getHours() * 60 + shifted.getMinutes() + 360
-  const msToStart = start.getTime() - date.getTime()
+  const { day, min } = festivalClock(date, DAYS, FESTIVAL.timezone)
+  // doors open on day 0 at 10:00 festival time
+  const msToStart = actTime(0, 10 * 60) - date.getTime()
   const last = DAYS.length - 1
   const phase: Phase = day < 0 ? 'before' : day === 0 && min < 14 * 60 ? (msToStart > 0 ? 'before' : 'arrival') : day <= last ? 'during' : day <= last + 1 ? 'departure' : 'after'
   return { phase, day, min, msToStart }
@@ -408,7 +403,7 @@ function localizeFaq(f: Faq): Faq {
 
 /** The public festival document served by GET /api/festivals/:slug. */
 export interface FestivalBundle {
-  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; siteMap?: string | null; updatedAt: number }
+  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; siteMap?: string | null; timezone?: string; updatedAt: number }
   days: FestivalDay[]
   stages: Stage[]
   acts: Omit<Act, 'change'>[]
@@ -427,7 +422,7 @@ const refill = <T,>(map: Record<string, T>, entries: [string, T][]) => {
  * lookup maps are updated in place so every module keeps working with the same references.
  */
 export function loadFestivalBundle(b: FestivalBundle) {
-  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {}, modules: b.festival.modules ?? {}, siteMap: b.festival.siteMap ?? null })
+  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {}, modules: b.festival.modules ?? {}, siteMap: b.festival.siteMap ?? null, timezone: b.festival.timezone ?? DEFAULT_TZ })
   replace(DAYS, b.days)
   replace(STAGES, b.stages)
   refill(stageById, STAGES.map((st) => [st.id, st]))
