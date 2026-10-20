@@ -19,6 +19,8 @@ const MIN = 60_000
 const FLAGS_TO_HIDE = 2
 /** The public festival chat needs more voices to hide a message than a crew of friends. */
 const PUBLIC_FLAGS_TO_HIDE = 3
+/** A location share ends on its own when the app has not confirmed it for this long. */
+const LOCATION_TTL = 120 * MIN
 const REPORT_TTL = 60 * MIN
 const STILL_EXTENDS = 30 * MIN
 const FIXED_TO_RETIRE = 2
@@ -117,12 +119,25 @@ const tenant = async (c: Context<App>, next: () => Promise<void>) => {
   const f = await loadFestival(c.env.DB, slug)
   const admin = c.get('isAdmin') ?? (await isAdminRequest(c))
   if (!f || (f.status === 'draft' && !admin)) throw new HttpError(404, 'Festival nicht gefunden')
-  if (f.status === 'archived' && c.req.method !== 'GET' && !admin) throw new HttpError(403, 'Festival ist archiviert und schreibgeschützt')
+  // withdrawing consent, deleting data and leaving always work – an organizer's switch must never lock people in
+  const privacy = isPrivacyAction(c.req.method, c.req.path)
+  if (f.status === 'archived' && c.req.method !== 'GET' && !admin && !privacy) throw new HttpError(403, 'Festival ist archiviert und schreibgeschützt')
   c.set('festival', f)
   // switched-off modules do not exist for this festival – not even for clients that ignore the UI
   const mod = moduleFor(c.req.path)
-  if (mod && !isEnabled(f.modules, mod)) throw new HttpError(403, `„${MODULES[mod].label}“ ist bei diesem Festival nicht aktiviert`)
+  if (mod && !privacy && !isEnabled(f.modules, mod)) throw new HttpError(403, `„${MODULES[mod].label}“ ist bei diesem Festival nicht aktiviert`)
   await next()
+}
+
+/**
+ * Requests that withdraw consent or delete data. The location route only counts when it stops
+ * sharing; the route itself refuses share:true while the module is off or the festival archived.
+ */
+function isPrivacyAction(method: string, path: string) {
+  if (method === 'DELETE' && path === '/api/me/steps') return true
+  if (method === 'POST' && /^\/api\/crews\/[^/]+\/leave$/.test(path)) return true
+  if (method === 'PUT' && /^\/api\/crews\/[^/]+\/location$/.test(path)) return true
+  return false
 }
 
 function moduleFor(path: string): ModuleKey | null {
@@ -332,7 +347,7 @@ app.get('/api/crews/:id', async (c) => {
   const [crew, members, plans, steps, messages, meetups, rsvps] = await db.batch([
     db.prepare('SELECT id, name, code, created_by AS owner FROM crews WHERE id = ?').bind(crewId),
     db.prepare(
-      'SELECT g.id, g.nickname, g.color, m.share_location, CASE WHEN m.share_location = 1 THEN m.location END AS location, CASE WHEN m.share_location = 1 THEN m.location_at END AS location_at FROM crew_members m JOIN guests g ON g.id = m.guest_id WHERE m.crew_id = ? ORDER BY m.joined_at',
+      `SELECT g.id, g.nickname, g.color, (m.share_location = 1 AND m.location_at > ${Date.now() - LOCATION_TTL}) AS share_location, CASE WHEN m.share_location = 1 AND m.location_at > ${Date.now() - LOCATION_TTL} THEN m.location END AS location, CASE WHEN m.share_location = 1 AND m.location_at > ${Date.now() - LOCATION_TTL} THEN m.location_at END AS location_at FROM crew_members m JOIN guests g ON g.id = m.guest_id WHERE m.crew_id = ? ORDER BY m.joined_at`,
     ).bind(crewId),
     db.prepare('SELECT p.guest_id, p.act_id FROM plans p JOIN crew_members m ON m.guest_id = p.guest_id WHERE m.crew_id = ? AND p.festival_id = ?').bind(crewId, c.get('festival').id),
     db.prepare('SELECT s.guest_id, s.day, s.total, s.synced_at FROM steps s JOIN crew_members m ON m.guest_id = s.guest_id WHERE m.crew_id = ? AND s.festival_id = ?').bind(crewId, c.get('festival').id),
@@ -400,9 +415,13 @@ app.put('/api/crews/:id/location', async (c) => {
   await membership(c, crewId)
   const b = await body(c)
   const share = v.bool(b.share, 'share')
-  const location = b.location === null || b.location === undefined ? null : v.oneOf(b.location, 'location', [...c.get('festival').stages, 'camp'])
+  const f = c.get('festival')
+  if (share && !isEnabled(f.modules, 'location')) throw new HttpError(403, `„${MODULES.location.label}“ ist bei diesem Festival nicht aktiviert`)
+  if (share && f.status === 'archived') throw new HttpError(403, 'Festival ist archiviert und schreibgeschützt')
+  const location = b.location === null || b.location === undefined ? null : v.oneOf(b.location, 'location', [...f.stages, 'camp'])
+  // location_at is the moment consent was last confirmed; the share expires LOCATION_TTL later
   await c.env.DB.prepare('UPDATE crew_members SET share_location = ?, location = ?, location_at = ? WHERE crew_id = ? AND guest_id = ?')
-    .bind(share ? 1 : 0, share ? location : null, share && location ? Date.now() : null, crewId, g.id)
+    .bind(share ? 1 : 0, share ? location : null, share ? Date.now() : null, crewId, g.id)
     .run()
   return c.json({ share, location: share ? location : null })
 })
@@ -676,6 +695,8 @@ app.patch('/api/admin/festivals/:slug', async (c) => {
     if (!stages || !acts) throw new HttpError(400, 'Zum Veröffentlichen braucht das Festival mindestens eine Bühne und einen Act')
   }
   const updates: D1PreparedStatement[] = [c.env.DB.prepare('UPDATE festivals SET name = ?, status = ?, updated_at = ? WHERE id = ?').bind(name, status, Date.now(), f.id)]
+  // an archived festival is over: nobody keeps sharing a location there
+  if (status === 'archived') updates.push(c.env.DB.prepare('UPDATE crew_members SET share_location = 0, location = NULL, location_at = NULL WHERE crew_id IN (SELECT id FROM crews WHERE festival_id = ?)').bind(f.id))
   if (b.location !== undefined) updates.push(c.env.DB.prepare('UPDATE festivals SET location = ? WHERE id = ?').bind(v.str(b.location, 'Ort', { max: 80, optional: true }) ?? null, f.id))
   await c.env.DB.batch(updates)
   return c.json({ slug: f.slug, name, status })
@@ -724,7 +745,13 @@ app.put('/api/admin/festivals/:slug/modules', async (c) => {
   if (conflicts.length) throw new HttpError(400, conflicts.join('; '))
   // only choices that differ from the default are stored (most modules are on, opt-in ones off)
   const stored = Object.fromEntries(Object.entries(state).filter(([k, on]) => on !== defaultOn(k as ModuleKey)))
-  await c.env.DB.prepare('UPDATE festivals SET modules = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(stored), Date.now(), f.id).run()
+  const db = c.env.DB
+  // switching a sensitive module off ends what people shared with it; switching it on again starts from zero
+  await db.batch([
+    db.prepare('UPDATE festivals SET modules = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(stored), Date.now(), f.id),
+    ...(!isEnabled(state, 'location') ? [db.prepare('UPDATE crew_members SET share_location = 0, location = NULL, location_at = NULL WHERE crew_id IN (SELECT id FROM crews WHERE festival_id = ?)').bind(f.id)] : []),
+    ...(!isEnabled(state, 'steps') ? [db.prepare('DELETE FROM steps WHERE festival_id = ?').bind(f.id)] : []),
+  ])
   return c.json(stored)
 })
 
@@ -1322,6 +1349,8 @@ export default {
       env.DB.prepare('DELETE FROM reports WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
       env.DB.prepare('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?').bind(now - 24 * 60 * MIN),
       env.DB.prepare('DELETE FROM rate WHERE window < ?').bind(now - 2 * 60 * MIN),
+      // expired location shares are ended for good, not just hidden
+      env.DB.prepare('UPDATE crew_members SET share_location = 0, location = NULL, location_at = NULL WHERE share_location = 1 AND location_at < ?').bind(now - LOCATION_TTL),
       // the public chat is ephemeral: 30 days after the last change
       env.DB.prepare('DELETE FROM festival_messages WHERE updated_at < ?').bind(now - 30 * 24 * 60 * MIN),
       // FAQ-bot statistics are kept for one festival cycle

@@ -68,6 +68,14 @@ try {
     code = (await lea.getByText(/Person.* · Code/).textContent()).match(/[A-Z0-9]{4}-[A-Z0-9]{4}/)[0]
   })
 
+  await step('profile tells the truth about storage (audit F13): on the server, not recoverable without a code', async () => {
+    await lea.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    await lea.locator('.sheet').getByText('Auf dem Server gespeichert · ohne Recovery-Code nicht wiederherstellbar').waitFor()
+    if (await lea.locator('.sheet').getByText('Nur auf diesem Gerät gespeichert').count()) throw new Error('profile claims device-only storage')
+    if (await lea.locator('.sheet').getByText(/Passkey|Apple|Google/).count()) throw new Error('profile announces sign-in methods that do not exist')
+    await lea.keyboard.press('Escape')
+  })
+
   await step('Lea plans her acts (every live festival starts with an empty plan)', async () => {
     await nav(lea, 'Line-up')
     for (const artist of ['Maduk', 'Arcturus']) await lea.locator('.act', { hasText: artist }).getByRole('button', { name: 'Zum Plan hinzufügen' }).click()
@@ -118,6 +126,32 @@ try {
     if ((await lea.locator('.bubble', { hasText: 'Funkloch!' }).count()) !== 1) throw new Error('duplicate message after retry')
     await lea.keyboard.press('Escape')
     await ben.keyboard.press('Escape')
+  })
+
+  await step('privacy (audit F02): a location share switched off while offline ends on the server after reconnect – without reload', async () => {
+    const stored = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:realm-open-air') ?? '{}'))
+    const { session, crewRef } = await stored(lea)
+    const benShares = async () => {
+      const r = await fetch(`${API}/api/crews/${crewRef.id}`, { headers: { Authorization: 'Bearer ' + session.token, 'X-Festival': 'realm-open-air' } })
+      return (await r.json()).members.find((m) => m.nickname === 'Ben')?.sharing
+    }
+    const until = async (want, ms = 20000) => {
+      for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 500))) if ((await benShares()) === want) return
+      throw new Error(`server still reports sharing=${!want} after ${ms} ms`)
+    }
+    await nav(ben, 'Crew')
+    const toggle = ben.getByRole('switch', { name: 'Standort teilen' })
+    await toggle.click()
+    await until(true)
+    await ben.context().setOffline(true)
+    await toggle.click()
+    if ((await toggle.getAttribute('aria-checked')) !== 'false') throw new Error('switch did not turn off')
+    await ben.getByText(/wird zurückgezogen/).waitFor() // the app does not pretend it is already done
+    await ben.waitForTimeout(1500)
+    if ((await benShares()) !== true) throw new Error('precondition: server should not know yet')
+    await ben.context().setOffline(false)
+    await until(false)
+    await ben.getByText(/wird zurückgezogen/).waitFor({ state: 'detached', timeout: 15000 })
   })
 
   await step('meetup from an act; the other member says yes', async () => {

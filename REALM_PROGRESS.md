@@ -324,3 +324,6 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 ## Prüfbericht-Behebung · Welle 0 (claude/realm-fix-wave0)
 - F07 Chat-Absturz in neuen Chrome-Versionen (Crew- und Festival-Chat), D07 Fokus im Dialog + Schließen-Knopf, D06 Lesbarkeit vergangener Acts, D08 Line-up auf 320 px. Jeder Fix mit einem Test, der am alten Stand nachweislich anschlägt; Übersicht in `docs/AUDIT.md`.
 - Tests: Browser-Setup zentral (`tests/browser.mjs`, `BROWSER=chromium|firefox|webkit`), CI-Job `browsers` für Firefox und WebKit.
+
+## Prüfbericht-Behebung · Welle 1 (claude/realm-fix-wave1)
+- F02, F03, F10, F13, D04 und feste Schrittwerte – Details und Tests in `docs/AUDIT.md`. Neue Migration nicht nötig; Server: `isPrivacyAction`, Standort-TTL 2 h (+ Cron), Modul-/Archiv-Abschaltung beendet Freigaben.

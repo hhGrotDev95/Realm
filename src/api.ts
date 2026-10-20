@@ -178,6 +178,12 @@ export type OutboxOp =
   | { id: string; kind: 'rsvp'; meetupId: string; going: boolean }
   | { id: string; kind: 'vote'; reportId: string; vote: 'still' | 'fixed' }
   | { id: string; kind: 'report'; data: { title: string; place?: string; poi?: string; severity: 'info' | 'warning' } }
+  // privacy decisions: queued with priority and kept until the server confirms them (audit F02)
+  | { id: string; kind: 'location'; crewId: string; share: boolean; location: string | null }
+  | { id: string; kind: 'deleteSteps' }
+
+/** Ops that carry a privacy decision; only the newest one per target matters. */
+export const privacyKey = (op: OutboxOp) => (op.kind === 'location' ? `location:${op.crewId}` : op.kind === 'deleteSteps' ? 'deleteSteps' : null)
 
 export function execute(op: OutboxOp): Promise<unknown> {
   switch (op.kind) {
@@ -191,6 +197,10 @@ export function execute(op: OutboxOp): Promise<unknown> {
       return api.vote(op.reportId, op.vote)
     case 'report':
       return api.report({ ...op.data, id: op.id })
+    case 'location':
+      return api.setLocation(op.crewId, op.share, op.location)
+    case 'deleteSteps':
+      return api.deleteSteps()
   }
 }
 

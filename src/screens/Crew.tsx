@@ -16,8 +16,8 @@ export function Crew() {
 }
 
 function CrewHome() {
-  const { crew, inviteLink, toast, leaveCrew } = useApp()
-  const { now, plan, meetups, declined, openSheet, setTab, setFocusPoi, shareLocation, set, guest, requireIdentity, stepsOptIn, chat, phase } = useApp()
+  const { crew, inviteLink, toast, leaveCrew, online } = useApp()
+  const { now, plan, meetups, declined, openSheet, setTab, setFocusPoi, shareLocation, set, guest, requireIdentity, stepsOptIn, chat, phase, pendingPrivacy } = useApp()
   const ref = useScrollTop()
 
   const groups = Object.entries(
@@ -35,7 +35,6 @@ function CrewHome() {
   const meetup = meetups.filter((m) => !declined.includes(m.id) && isMeetupActive(m, clock)).sort((a, b) => a.day - b.day || a.min - b.min)[0]
   const unread = chat.filter((c) => c.from !== 'me').length
   const lastMsg = chat[chat.length - 1]
-  const freshest = Math.min(...crew.members.filter((m) => m.at).map((m) => m.seen))
   const share = async () => {
     const url = inviteLink()
     if (!url) return
@@ -94,11 +93,13 @@ function CrewHome() {
         <motion.section {...stagger(1)}>
           <div className="section-h">
             <h2>{t('Wo ist meine Crew?')}</h2>
-            <span className="tiny faint">{groups.length ? t('live') + ' · ' + (freshest <= 1 ? t('gerade eben') : t('vor {n} Min.', { n: freshest })) : ''}</span>
           </div>
           <div className="list">
             {groups.map(([stage, ids]) => {
               const s = stageById[stage as StageId]
+              // how current this place is: the oldest position in the group, never the freshest one (audit D04)
+              const age = Math.max(...ids.map((id) => crew.byId[id]?.seen ?? 0))
+              const stale = age > 30
               return (
                 <button
                   key={stage}
@@ -116,6 +117,9 @@ function CrewHome() {
                     <span className="small faint row" style={{ gap: 6 }}>
                       <StageDot id={s.id} />
                       {t('{n} Min. entfernt', { n: walkMinutes(ME.x, ME.y, s.x, s.y) })}
+                      <span style={stale ? { color: 'var(--warn)' } : undefined}>
+                        · {age <= 1 ? t('Stand: gerade eben') : stale ? t('Stand vor {n} Min. · veraltet', { n: age }) : t('Stand vor {n} Min.', { n: age })}
+                      </span>
                     </span>
                   </span>
                   <Navigation size={18} className="faint" />
@@ -237,7 +241,8 @@ function CrewHome() {
             <span className="grow">
               <span style={{ fontWeight: 600 }}>{t('Step-Challenge')}</span>
               <span className="small faint" style={{ display: 'block' }}>
-                {stepsOptIn ? t('Platz 3 von 10 · heute {n} Schritte', { n: num(12840) }) : t('Freiwillig · nur Tagessumme, kein Standort')}
+                {/* fixed numbers only in the demo – live, the sheet shows what the server has */}
+                {stepsOptIn ? (online ? t('Rangliste deiner Crew ansehen') : t('Platz 3 von 10 · heute {n} Schritte', { n: num(12840) })) : t('Freiwillig · nur Tagessumme, kein Standort')}
               </span>
             </span>
             <ChevronRight size={18} className="faint" />
@@ -250,8 +255,13 @@ function CrewHome() {
             <span className="grow">
               <span style={{ fontWeight: 600 }}>{t('Standort mit Crew teilen')}</span>
               <span className="small faint" style={{ display: 'block' }}>
-                {shareLocation ? t('Nur Stage-Bereich, nur für deine Crew') : t('Aus – du siehst die anderen trotzdem')}
+                {shareLocation ? t('Nur Stage-Bereich, nur für deine Crew · endet 2 Std. nach der letzten Nutzung') : t('Aus – du siehst die anderen trotzdem')}
               </span>
+              {pendingPrivacy.location && (
+                <span className="small" role="status" style={{ display: 'block', color: 'var(--warn)', marginTop: 2 }}>
+                  {pendingPrivacy.location === 'off' ? t('Freigabe wird zurückgezogen … wartet auf Verbindung') : t('Freigabe wird übertragen …')}
+                </span>
+              )}
             </span>
             <Switch on={shareLocation} onChange={(v) => set('shareLocation', v)} label={t('Standort teilen')} />
           </div>

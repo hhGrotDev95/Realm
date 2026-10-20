@@ -1,5 +1,5 @@
 import { AnimatePresence, m as motion } from 'framer-motion'
-import { Flag, Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Copy, Fingerprint, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
+import { Flag, Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Copy, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { switchFestival } from './festival'
 const FaqSheet = lazy(() => import('./FaqSheet').then((m) => ({ default: m.FaqSheet })))
@@ -810,11 +810,14 @@ function Profile() {
         <div className="grow">
           <div style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: 22 }}>{guest.nickname ?? t('Gast')}</div>
           <div className="tiny faint">
-            {guest.secured ? (
-              <span style={{ color: 'var(--ok)' }}>{t('Gesichert')} · {guest.secured === 'passkey' ? t('Passkey') : t('Recovery-Code')}</span>
-            ) : (
-              t('Nur auf diesem Gerät gespeichert')
-            )}
+            {/* where the profile lives and whether it can be restored are two different things (audit F13) */}
+            {!online
+              ? t('Demo · nur auf diesem Gerät gespeichert')
+              : !session
+                ? t('Nur auf diesem Gerät gespeichert')
+                : guest.secured
+                  ? <span style={{ color: 'var(--ok)' }}>{t('Auf dem Server gespeichert · mit Recovery-Code wiederherstellbar')}</span>
+                  : t('Auf dem Server gespeichert · ohne Recovery-Code nicht wiederherstellbar')}
           </div>
         </div>
         <button className="btn secondary sm" onClick={() => openSheet({ kind: 'identity', reason: t('Ändere deinen Namen oder deine Farbe.') })}>
@@ -829,7 +832,7 @@ function Profile() {
           <span className="grow">
             <span style={{ fontWeight: 600 }}>{t('Profil sichern')}</span>
             <span className="small faint" style={{ display: 'block' }}>
-              {t('Für Gerätewechsel – Passkey, Apple/Google oder Code')}
+              {t('Für Gerätewechsel – mit Recovery-Code')}
             </span>
           </span>
           <ChevronRight size={18} className="faint" />
@@ -965,11 +968,6 @@ function Secure() {
       setCode(await secure('code'))
       setBusy(false)
     })
-  const passkey = (label: string) => {
-    secure('passkey')
-    toast(t('Mit {method} gesichert', { method: label }))
-    closeSheet()
-  }
   return (
     <>
       <div className="sheet-head">
@@ -1005,24 +1003,10 @@ function Secure() {
           <button className="btn primary block" disabled={busy} onClick={makeCode}>
             <KeyRound size={17} /> {busy ? t('Wird erstellt …') : t('Recovery-Code erstellen')}
           </button>
-          <p className="tiny faint" style={{ textAlign: 'center' }}>
-            {t('Passkey sowie Apple- und Google-Anmeldung folgen in der nativen App.')}
-          </p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button className="btn primary block" onClick={() => passkey('Passkey')}>
-            <Fingerprint size={18} /> {t('Mit Passkey sichern')}
-          </button>
-          <div className="row" style={{ gap: 8 }}>
-            <button className="btn secondary grow" onClick={() => passkey('Apple')}>
-              Apple
-            </button>
-            <button className="btn secondary grow" onClick={() => passkey('Google')}>
-              Google
-            </button>
-          </div>
-          <button className="btn ghost block" onClick={makeCode}>
+          <button className="btn primary block" onClick={makeCode}>
             <KeyRound size={17} /> {t('Recovery-Code erstellen')}
           </button>
           <p className="tiny faint" style={{ textAlign: 'center' }}>
