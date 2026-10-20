@@ -179,4 +179,6 @@ export const EN_SCREENS: Record<string, string> = {
   "In die Zwischenablage kopiert": "Copied to clipboard",
   "Teilen": "Share",
   "Schließen": "Close",
+  "Fairer Treffpunkt für alle": "Fair meeting point for everyone",
+  "Höchstens {n} Min. Weg für jede:n": "At most {n} min walk for anyone",
 }

@@ -301,3 +301,7 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - Grenze: Planzahlen kennt der Server nur von Besucher:innen mit Server-Profil (entsteht beim ersten sozialen Feature) – in der Konsole so beschrieben.
 - Geprüft: Worker-API (29 inkl. neuem Auswertungstest), Migration, test:import, e2e, a11y, live (neuer Schritt: 3 Planungen + 3 Bot-Lücken erscheinen, „Erledigt“ entfernt die Frage).
 - Ablauf ab jetzt: eigene PRs werden nach grüner CI selbst gemergt (Absprache vom 20.10.).
+
+## Runde: Fairer Treffpunkt / Gruppenroute (Schritt 10b, claude/realm-group-route)
+- Crew → unter „Wo ist meine Crew?“: Vorschlag „Fairer Treffpunkt für alle“ – der offene Ort (Stage, Bar, Food, Info, Wasser, Eingang), an dem der längste Weg aller Crew-Mitglieder mit geteiltem Standort am kürzesten ist (Minimax, bei Gleichstand kleinste Gesamtstrecke). Direkt „Route“ oder „Hier treffen“ (Meetup).
+- `src/meet.ts` rein und getestet (`tests/meet.test.mts`, 7 Prüfungen); Smoke-Schritt folgt der Route bis zum Banner.

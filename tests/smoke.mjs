@@ -65,6 +65,14 @@ try {
     await page.locator('.sheet').getByRole('button', { name: 'Route' }).click()
     await page.getByText('zu Fuß').waitFor()
   })
+  await step('crew suggests a fair meeting point and routes there', async () => {
+    await page.locator('nav').getByText('Crew').click()
+    const card = page.locator('.fair')
+    await card.getByText('Fairer Treffpunkt für alle').waitFor()
+    const place = (await card.locator('span[style*="font-weight: 600"]').innerText()).trim()
+    await card.getByRole('button', { name: 'Route' }).click()
+    await page.locator('.route-banner').getByText('bis ' + place).waitFor()
+  })
   await step('crew chat sends a message', async () => {
     await page.locator('nav').getByText('Crew').click()
     await page.getByText('Crew-Chat').click()
