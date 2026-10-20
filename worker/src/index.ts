@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { defaultOn, isEnabled, MODULE_KEYS, moduleConflicts, MODULES, type ModuleKey, type ModuleState } from '../../src/modules'
 import { checkBrand, HEX } from '../../src/theme/contrast'
 import { powBits, verify } from '../../src/pow'
+import { checkPassword, checkTotp, hashPassword, newTotpSecret } from './accounts'
 import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v } from './util'
 
 export interface Env {
@@ -14,7 +15,9 @@ export interface Env {
 
 type Guest = { id: string; nickname: string | null; color: string }
 type Festival = { id: string; slug: string; status: 'draft' | 'published' | 'archived'; stages: string[]; modules: ModuleState }
-type App = { Bindings: Env; Variables: { guest: Guest; festival: Festival; isAdmin: boolean } }
+/** Who is working in the console: a personal account, or the platform key (break-glass, CLI) */
+type Admin = { id: string; name: string; role: 'platform' | 'organizer'; festivals: Set<string>; session: string | null; totp: boolean; mfaReady: boolean }
+type App = { Bindings: Env; Variables: { guest: Guest; festival: Festival; admin: Admin | null } }
 
 const MIN = 60_000
 const FLAGS_TO_HIDE = 2
@@ -141,16 +144,49 @@ function handOver(db: D1Database, guestId: string, crewId: string | null) {
   ]
 }
 
-async function isAdminRequest(c: Context<App>) {
+const bearer = (c: Context<App>) => c.req.header('Authorization')?.replace(/^Bearer\s+/i, '') ?? ''
+
+async function isPlatformKey(c: Context<App>) {
   const expected = c.env.ADMIN_TOKEN
   if (!expected) return false
-  const given = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '') ?? ''
   // constant-time comparison via hashing both sides
-  const [a, b] = await Promise.all([sha256(given), sha256(expected)])
+  const [a, b] = await Promise.all([sha256(bearer(c)), sha256(expected)])
   let diff = 0
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
   return diff === 0
 }
+
+/**
+ * The console user behind this request (audit F01), or null. A personal session counts only while it is
+ * valid and not revoked; `mfaReady` only after the authenticator code was confirmed in this session.
+ * ADMIN_TOKEN stays as the platform key for the CLI and for creating the first account.
+ */
+async function resolveAdmin(c: Context<App>): Promise<Admin | null> {
+  const cached = c.get('admin')
+  if (cached !== undefined) return cached
+  let a: Admin | null = null
+  const token = bearer(c)
+  if (token && (await isPlatformKey(c))) {
+    a = { id: 'platform-key', name: 'Plattform-Schlüssel', role: 'platform', festivals: new Set(), session: null, totp: true, mfaReady: true }
+  } else if (token) {
+    const now = Date.now()
+    const row = await c.env.DB.prepare(
+      'SELECT s.id AS sid, s.mfa, a.id, a.name, a.role, a.totp_enabled FROM admin_sessions s JOIN admins a ON a.id = s.admin_id WHERE s.token_hash = ? AND s.revoked = 0 AND s.expires_at > ? AND a.disabled = 0',
+    )
+      .bind(await sha256(token), now)
+      .first<{ sid: string; mfa: number; id: string; name: string; role: 'platform' | 'organizer'; totp_enabled: number }>()
+    if (row) {
+      const fs = await c.env.DB.prepare('SELECT festival_id FROM admin_festivals WHERE admin_id = ?').bind(row.id).all<{ festival_id: string }>()
+      await c.env.DB.prepare('UPDATE admin_sessions SET last_seen = ? WHERE id = ?').bind(now, row.sid).run()
+      a = { id: row.id, name: row.name, role: row.role, festivals: new Set(fs.results.map((r) => r.festival_id)), session: row.sid, totp: !!row.totp_enabled, mfaReady: !!row.totp_enabled && !!row.mfa }
+    }
+  }
+  c.set('admin', a)
+  return a
+}
+
+/** Platform admins reach every festival; organizers only the ones they are assigned to. */
+const canAccess = (a: Admin | null, festivalId: string) => !!a && a.mfaReady && (a.role === 'platform' || a.festivals.has(festivalId))
 
 async function loadFestival(db: D1Database, slug: string): Promise<Festival | null> {
   const f = await db.prepare('SELECT id, slug, status, modules FROM festivals WHERE slug = ?').bind(slug).first<Omit<Festival, 'stages' | 'modules'> & { modules: string }>()
@@ -167,8 +203,9 @@ const tenant = async (c: Context<App>, next: () => Promise<void>) => {
   const slug = c.req.header('X-Festival')
   if (!slug) throw new HttpError(400, 'X-Festival fehlt')
   const f = await loadFestival(c.env.DB, slug)
-  const admin = c.get('isAdmin') ?? (await isAdminRequest(c))
-  if (!f || (f.status === 'draft' && !admin)) throw new HttpError(404, 'Festival nicht gefunden')
+  const admin = !!f && canAccess(await resolveAdmin(c), f.id)
+  // drafts exist only for their organizers; console routes only for festivals the account may manage
+  if (!f || (f.status === 'draft' && !admin) || (c.req.path.startsWith('/api/admin/') && !admin)) throw new HttpError(404, 'Festival nicht gefunden')
   // withdrawing consent, deleting data and leaving always work – an organizer's switch must never lock people in
   const privacy = isPrivacyAction(c.req.method, c.req.path)
   if (f.status === 'archived' && c.req.method !== 'GET' && !admin && !privacy) throw new HttpError(403, 'Festival ist archiviert und schreibgeschützt')
@@ -221,7 +258,7 @@ app.get('/api/festivals', async (c) => {
 /** Everything the visitor app needs to render a festival, in one cacheable document. */
 app.get('/api/festivals/:slug', async (c) => {
   const f = await c.env.DB.prepare('SELECT * FROM festivals WHERE slug = ?').bind(c.req.param('slug')).first<FestivalRow>()
-  if (!f || (f.status === 'draft' && !(await isAdminRequest(c)))) throw new HttpError(404, 'Festival nicht gefunden')
+  if (!f || (f.status === 'draft' && !canAccess(await resolveAdmin(c), f.id))) throw new HttpError(404, 'Festival nicht gefunden')
   const db = c.env.DB
   const [days, stages, acts, pois, faqs] = await db.batch([
     db.prepare('SELECT idx, date, label, short FROM festival_days WHERE festival_id = ? ORDER BY idx').bind(f.id),
@@ -659,16 +696,231 @@ app.get('/api/announcements', async (c) => {
   return c.json(rows.results.map((r) => toAnnouncement(r, now)))
 })
 
+/** what an account can do before its authenticator app is confirmed in this session */
+const MFA_FREE = /^\/api\/admin\/(me|session|logout|totp\/setup|totp\/enable)$/
+
 const admin = async (c: Context<App>, next: () => Promise<void>) => {
-  if (!c.env.ADMIN_TOKEN) throw new HttpError(403, 'Admin-Zugang ist nicht eingerichtet')
-  if (!(await isAdminRequest(c))) throw new HttpError(401, 'Admin-Token ungültig')
-  c.set('isAdmin', true)
+  const a = await resolveAdmin(c)
+  if (!a) throw new HttpError(401, 'Bitte anmelden')
+  if (!a.mfaReady && !MFA_FREE.test(c.req.path)) throw new HttpError(403, a.totp ? 'Bitte den Code aus der Authenticator-App eingeben' : 'Bitte zuerst die Zwei-Faktor-Anmeldung einrichten', { mfa: a.totp ? 'verify' : 'setup' })
   await next()
+  // change log: who changed what, when – successful writes only (errors are thrown past this point)
+  if (c.req.method !== 'GET' && c.res.status < 400 && !c.req.path.startsWith('/api/admin/totp')) {
+    const festival = c.req.path.match(/^\/api\/admin\/festivals\/([^/]+)/)?.[1] ?? c.req.header('X-Festival') ?? null
+    await c.env.DB.prepare('INSERT INTO audit_log (admin_id, admin_name, festival, action, status, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(a.id, a.name, festival, `${c.req.method} ${c.req.path}`, c.res.status, Date.now())
+      .run()
+  }
 }
 app.use('/api/admin/*', admin)
+
+/* ---------- Organizer accounts (audit F01) ---------- */
+
+const SESSION_TTL = 12 * 60 * MIN
+const INVITE_TTL = 7 * 24 * 60 * MIN
+
+async function newSession(c: Context<App>, adminId: string) {
+  const token = randomToken()
+  const now = Date.now()
+  await c.env.DB.prepare('INSERT INTO admin_sessions (id, token_hash, admin_id, mfa, created_at, expires_at, last_seen, agent) VALUES (?, ?, ?, 0, ?, ?, ?, ?)')
+    .bind(randomId('as'), await sha256(token), adminId, now, now + SESSION_TTL, now, (c.req.header('User-Agent') ?? '').slice(0, 120))
+    .run()
+  return token
+}
+
+type AdminRow = { id: string; email: string; name: string; role: 'platform' | 'organizer'; password: string; totp_secret: string | null; totp_enabled: number; totp_last_step: number; disabled: number }
+
+app.post('/api/auth/login', async (c) => {
+  const b = await body(c)
+  const email = v.str(b.email, 'E-Mail', { max: 120 })!.toLowerCase()
+  const password = v.str(b.password, 'Passwort', { max: 200 })!
+  await rateLimit(c.env.DB, 'login:' + email, 10, 15 * MIN)
+  await rateLimit(c.env.DB, 'loginip:' + (c.req.header('CF-Connecting-IP') ?? 'local'), 100, 15 * MIN)
+  const a = await c.env.DB.prepare('SELECT * FROM admins WHERE email = ? AND disabled = 0').bind(email).first<AdminRow>()
+  // same work whether or not the account exists
+  const ok = await checkPassword(password, a?.password ?? 'pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=')
+  if (!a || !ok) throw new HttpError(401, 'E-Mail oder Passwort falsch')
+  return c.json({ token: await newSession(c, a.id), mfa: a.totp_enabled ? 'verify' : 'setup', name: a.name, role: a.role })
+})
+
+/** Second step of the login: the code from the authenticator app unlocks this session. */
+app.post('/api/auth/totp', async (c) => {
+  const code = v.str((await body(c)).code, 'Code', { max: 10 })!.replace(/\s/g, '')
+  const tokenHash = await sha256(bearer(c))
+  await rateLimit(c.env.DB, 'totp:' + tokenHash, 10, 15 * MIN)
+  const row = await c.env.DB.prepare('SELECT s.id AS sid, a.* FROM admin_sessions s JOIN admins a ON a.id = s.admin_id WHERE s.token_hash = ? AND s.revoked = 0 AND s.expires_at > ? AND a.disabled = 0')
+    .bind(tokenHash, Date.now())
+    .first<AdminRow & { sid: string }>()
+  if (!row) throw new HttpError(401, 'Bitte erneut anmelden')
+  if (!row.totp_enabled || !row.totp_secret) throw new HttpError(400, 'Zwei-Faktor ist noch nicht eingerichtet')
+  const step = await checkTotp(row.totp_secret, code)
+  // each code works once, so an observed code cannot be replayed
+  if (step === null || step <= row.totp_last_step) throw new HttpError(401, 'Code falsch oder schon benutzt')
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE admin_sessions SET mfa = 1 WHERE id = ?').bind(row.sid),
+    c.env.DB.prepare('UPDATE admins SET totp_last_step = ? WHERE id = ?').bind(step, row.id),
+  ])
+  return c.json({ ok: true })
+})
+
+/** Accepting an invitation: a one-time link creates the account (or adds the festival to an existing one). */
+app.post('/api/auth/accept', async (c) => {
+  const b = await body(c)
+  const tokenHash = await sha256(v.str(b.token, 'Einladung', { max: 100 })!)
+  const password = v.str(b.password, 'Passwort', { min: 12, max: 200 })!
+  await rateLimit(c.env.DB, 'accept:' + (c.req.header('CF-Connecting-IP') ?? 'local'), 20, 15 * MIN)
+  const inv = await c.env.DB.prepare('SELECT * FROM admin_invites WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?').bind(tokenHash, Date.now()).first<{ email: string; role: 'platform' | 'organizer'; festival_id: string | null }>()
+  if (!inv) throw new HttpError(404, 'Einladung ungültig, abgelaufen oder schon benutzt')
+  const existing = await c.env.DB.prepare('SELECT * FROM admins WHERE email = ?').bind(inv.email).first<AdminRow>()
+  let id: string
+  if (existing) {
+    if (existing.disabled || !(await checkPassword(password, existing.password))) throw new HttpError(401, 'Für diese E-Mail gibt es schon ein Konto – bitte dessen Passwort eingeben')
+    id = existing.id
+  } else {
+    id = randomId('ad')
+    const name = v.str(b.name, 'Name', { min: 2, max: 60 })!
+    await c.env.DB.prepare('INSERT INTO admins (id, email, name, role, password, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, inv.email, name, inv.role, await hashPassword(password), Date.now()).run()
+  }
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE admin_invites SET used_at = ? WHERE token_hash = ?').bind(Date.now(), tokenHash),
+    ...(inv.festival_id ? [c.env.DB.prepare('INSERT OR IGNORE INTO admin_festivals (admin_id, festival_id) VALUES (?, ?)').bind(id, inv.festival_id)] : []),
+  ])
+  const a = await c.env.DB.prepare('SELECT * FROM admins WHERE id = ?').bind(id).first<AdminRow>()
+  return c.json({ token: await newSession(c, id), mfa: a!.totp_enabled ? 'verify' : 'setup', name: a!.name, role: a!.role }, 201)
+})
+
+async function festivalSlugs(db: D1Database, a: Admin) {
+  const rows = a.role === 'platform' ? await db.prepare('SELECT slug FROM festivals ORDER BY name').all<{ slug: string }>() : await db.prepare('SELECT f.slug FROM festivals f JOIN admin_festivals af ON af.festival_id = f.id WHERE af.admin_id = ? ORDER BY f.name').bind(a.id).all<{ slug: string }>()
+  return rows.results.map((r) => r.slug)
+}
+
+app.get('/api/admin/me', async (c) => {
+  const a = c.get('admin')!
+  const row = a.session ? await c.env.DB.prepare('SELECT email FROM admins WHERE id = ?').bind(a.id).first<{ email: string }>() : null
+  return c.json({ id: a.id, name: a.name, email: row?.email ?? null, role: a.role, totp: a.totp, mfa: a.mfaReady, personal: !!a.session, festivals: a.mfaReady ? await festivalSlugs(c.env.DB, a) : [] })
+})
 app.get('/api/admin/session', (c) => c.json({ ok: true }))
+
+app.post('/api/admin/logout', async (c) => {
+  const a = c.get('admin')!
+  if (a.session) await c.env.DB.prepare('UPDATE admin_sessions SET revoked = 1 WHERE id = ?').bind(a.session).run()
+  return c.body(null, 204)
+})
+
+/** Step 1 of two-factor setup: a fresh secret for the authenticator app (shown once). */
+app.post('/api/admin/totp/setup', async (c) => {
+  const a = c.get('admin')!
+  if (!a.session) throw new HttpError(400, 'Nur für persönliche Konten')
+  // replacing an active second factor needs a session that already proved it
+  if (a.totp && !a.mfaReady) throw new HttpError(403, 'Bitte zuerst mit dem bisherigen Code anmelden')
+  const row = await c.env.DB.prepare('SELECT email, totp_secret, totp_enabled FROM admins WHERE id = ?').bind(a.id).first<{ email: string; totp_secret: string | null; totp_enabled: number }>()
+  // a secret not yet confirmed is shown again (a reload or a second tab must not invalidate the app entry)
+  const secret = !row!.totp_enabled && row!.totp_secret ? row!.totp_secret : newTotpSecret()
+  await c.env.DB.prepare('UPDATE admins SET totp_secret = ?, totp_enabled = 0 WHERE id = ?').bind(secret, a.id).run()
+  return c.json({ secret, uri: `otpauth://totp/Realm:${encodeURIComponent(row!.email)}?secret=${secret}&issuer=Realm` })
+})
+
+/** Step 2: the first code from the app confirms the setup and unlocks this session. */
+app.post('/api/admin/totp/enable', async (c) => {
+  const a = c.get('admin')!
+  const code = v.str((await body(c)).code, 'Code', { max: 10 })!.replace(/\s/g, '')
+  const row = await c.env.DB.prepare('SELECT totp_secret FROM admins WHERE id = ?').bind(a.id).first<{ totp_secret: string | null }>()
+  if (!row?.totp_secret) throw new HttpError(400, 'Bitte zuerst einrichten')
+  const step = await checkTotp(row.totp_secret, code)
+  if (step === null) throw new HttpError(400, 'Code passt nicht – Uhrzeit des Handys prüfen und erneut versuchen')
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE admins SET totp_enabled = 1, totp_last_step = ? WHERE id = ?').bind(step, a.id),
+    c.env.DB.prepare('UPDATE admin_sessions SET mfa = 1 WHERE id = ?').bind(a.session),
+  ])
+  return c.json({ ok: true })
+})
+
+app.get('/api/admin/sessions', async (c) => {
+  const a = c.get('admin')!
+  const rows = await c.env.DB.prepare('SELECT id, created_at, last_seen, expires_at, agent FROM admin_sessions WHERE admin_id = ? AND revoked = 0 AND expires_at > ? ORDER BY last_seen DESC').bind(a.id, Date.now()).all<Record<string, unknown>>()
+  return c.json(rows.results.map((r) => ({ id: r.id, createdAt: r.created_at, lastSeen: r.last_seen, expiresAt: r.expires_at, agent: r.agent, current: r.id === a.session })))
+})
+
+app.delete('/api/admin/sessions/:id', async (c) => {
+  const res = await c.env.DB.prepare('UPDATE admin_sessions SET revoked = 1 WHERE id = ? AND admin_id = ? AND revoked = 0').bind(c.req.param('id'), c.get('admin')!.id).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Sitzung nicht gefunden')
+  return c.body(null, 204)
+})
+
+/** Invitations: platform admins invite anyone; organizers invite co-organizers for their own festivals. */
+app.post('/api/admin/invites', async (c) => {
+  const a = c.get('admin')!
+  const b = await body(c)
+  const email = v.str(b.email, 'E-Mail', { max: 120 })!.toLowerCase()
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'E-Mail ist ungültig')
+  const role = b.role === undefined ? 'organizer' : v.oneOf(b.role, 'Rolle', ['platform', 'organizer'] as const)
+  if (role === 'platform' && a.role !== 'platform') throw new HttpError(403, 'Nur die Plattform-Verwaltung lädt Plattform-Admins ein')
+  let festivalId: string | null = null
+  if (b.festival !== undefined && b.festival !== null) {
+    const f = await c.env.DB.prepare('SELECT id FROM festivals WHERE slug = ?').bind(v.str(b.festival, 'Festival', { max: 40 })!).first<{ id: string }>()
+    if (!f || !canAccess(a, f.id)) throw new HttpError(404, 'Festival nicht gefunden')
+    festivalId = f.id
+  }
+  if (role === 'organizer' && !festivalId) throw new HttpError(400, 'Veranstalter:innen werden immer für ein Festival eingeladen')
+  const token = randomToken()
+  const now = Date.now()
+  await c.env.DB.prepare('INSERT INTO admin_invites (token_hash, email, role, festival_id, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(await sha256(token), email, role, festivalId, a.id, now, now + INVITE_TTL).run()
+  return c.json({ token, email, role, expiresAt: now + INVITE_TTL }, 201)
+})
+
+/** Accounts with access to the festivals this admin manages (platform: all). */
+app.get('/api/admin/accounts', async (c) => {
+  const a = c.get('admin')!
+  const slug = c.req.query('festival')
+  const f = slug ? await c.env.DB.prepare('SELECT id FROM festivals WHERE slug = ?').bind(slug).first<{ id: string }>() : null
+  if (slug && (!f || !canAccess(a, f.id))) throw new HttpError(404, 'Festival nicht gefunden')
+  if (!f && a.role !== 'platform') throw new HttpError(400, 'festival fehlt')
+  const rows = f
+    ? await c.env.DB.prepare('SELECT a.id, a.name, a.email, a.role, a.totp_enabled, a.disabled FROM admins a JOIN admin_festivals af ON af.admin_id = a.id WHERE af.festival_id = ? ORDER BY a.name').bind(f.id).all<Record<string, unknown>>()
+    : await c.env.DB.prepare('SELECT id, name, email, role, totp_enabled, disabled FROM admins ORDER BY role, name').all<Record<string, unknown>>()
+  return c.json(rows.results.map((r) => ({ id: r.id, name: r.name, email: r.email, role: r.role, totp: !!r.totp_enabled, disabled: !!r.disabled })))
+})
+
+/** Takes a festival away from an account – effective with the account's next request. */
+app.delete('/api/admin/accounts/:id/festivals/:slug', async (c) => {
+  const f = await festivalBySlug(c)
+  const res = await c.env.DB.prepare('DELETE FROM admin_festivals WHERE admin_id = ? AND festival_id = ?').bind(c.req.param('id'), f.id).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Zugang nicht gefunden')
+  return c.body(null, 204)
+})
+
+/** Platform only: disable an account and end all its sessions. */
+app.delete('/api/admin/accounts/:id', async (c) => {
+  if (c.get('admin')!.role !== 'platform') throw new HttpError(403, 'Nur für die Plattform-Verwaltung')
+  const id = c.req.param('id')
+  const res = await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE admins SET disabled = 1 WHERE id = ?').bind(id),
+    c.env.DB.prepare('UPDATE admin_sessions SET revoked = 1 WHERE admin_id = ?').bind(id),
+  ])
+  if (!res[0].meta.changes) throw new HttpError(404, 'Konto nicht gefunden')
+  return c.body(null, 204)
+})
+
+/** Change log of a festival (platform without festival: everything). */
+app.get('/api/admin/audit', async (c) => {
+  const a = c.get('admin')!
+  const slug = c.req.query('festival')
+  if (slug) {
+    const f = await c.env.DB.prepare('SELECT id FROM festivals WHERE slug = ?').bind(slug).first<{ id: string }>()
+    if (!f || !canAccess(a, f.id)) throw new HttpError(404, 'Festival nicht gefunden')
+  } else if (a.role !== 'platform') throw new HttpError(400, 'festival fehlt')
+  const rows = slug
+    ? await c.env.DB.prepare('SELECT admin_name, festival, action, status, created_at FROM audit_log WHERE festival = ? ORDER BY id DESC LIMIT 200').bind(slug).all<Record<string, unknown>>()
+    : await c.env.DB.prepare('SELECT admin_name, festival, action, status, created_at FROM audit_log ORDER BY id DESC LIMIT 200').all<Record<string, unknown>>()
+  return c.json(rows.results.map((r) => ({ by: r.admin_name, festival: r.festival, action: r.action, status: r.status, at: r.created_at })))
+})
+
 app.get('/api/admin/festivals', async (c) => {
-  const rows = await c.env.DB.prepare('SELECT slug, name, status FROM festivals ORDER BY status, name').all()
+  const a = c.get('admin')!
+  const rows =
+    a.role === 'platform'
+      ? await c.env.DB.prepare('SELECT slug, name, status FROM festivals ORDER BY status, name').all()
+      : await c.env.DB.prepare('SELECT f.slug, f.name, f.status FROM festivals f JOIN admin_festivals af ON af.festival_id = f.id WHERE af.admin_id = ? ORDER BY f.status, f.name').bind(a.id).all()
   return c.json(rows.results)
 })
 // festival-scoped admin routes
@@ -741,7 +993,8 @@ const slugify = (s: string) =>
 
 async function festivalBySlug(c: Context<App>) {
   const f = await c.env.DB.prepare('SELECT id, slug, name, status FROM festivals WHERE slug = ?').bind(c.req.param('slug')!).first<{ id: string; slug: string; name: string; status: string }>()
-  if (!f) throw new HttpError(404, 'Festival nicht gefunden')
+  // another organizer's festival does not exist for this account (audit F01)
+  if (!f || !canAccess(c.get('admin') ?? null, f.id)) throw new HttpError(404, 'Festival nicht gefunden')
   return f
 }
 const touch = (db: D1Database, id: string) => db.prepare('UPDATE festivals SET updated_at = ? WHERE id = ?').bind(Date.now(), id)
@@ -770,6 +1023,8 @@ app.post('/api/admin/festivals', async (c) => {
   await c.env.DB.batch([
     c.env.DB.prepare("INSERT INTO festivals (id, slug, name, location, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'draft', ?, ?)").bind(id, slug, name, location, now, now),
     ...daysFrom(start, dayCount).map((d) => c.env.DB.prepare('INSERT INTO festival_days (festival_id, idx, date, label, short) VALUES (?, ?, ?, ?, ?)').bind(id, d.idx, d.date, d.label, d.short)),
+    // whoever creates a festival manages it
+    ...(c.get('admin')!.session ? [c.env.DB.prepare('INSERT INTO admin_festivals (admin_id, festival_id) VALUES (?, ?)').bind(c.get('admin')!.id, id)] : []),
   ])
   return c.json({ slug, name, location, status: 'draft' }, 201)
 })
@@ -1477,6 +1732,8 @@ export default {
       env.DB.prepare('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?').bind(now - 24 * 60 * MIN),
       env.DB.prepare('DELETE FROM rate WHERE window < ?').bind(now - 2 * 60 * MIN),
       env.DB.prepare('DELETE FROM challenges WHERE created_at < ?').bind(now - CHALLENGE_TTL),
+      env.DB.prepare('DELETE FROM admin_sessions WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
+      env.DB.prepare('DELETE FROM admin_invites WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
       // expired location shares are ended for good, not just hidden
       env.DB.prepare('UPDATE crew_members SET share_location = 0, location = NULL, location_at = NULL WHERE share_location = 1 AND location_at < ?').bind(now - LOCATION_TTL),
       // the public chat is ephemeral: 30 days after the last change

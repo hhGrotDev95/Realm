@@ -337,3 +337,7 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 
 ## Prüfbericht-Behebung · Welle 4 (claude/realm-fix-wave4)
 - F08 Anmeldung hinter Festival-WLAN (Proof of Work statt Sperre), F17 Timeouts, adaptives Polling, Kapazitätsziel + lokales Lastskript (`docs/CAPACITY.md`). Migration `0014_signup_challenges.sql`. Staging-Lasttest bleibt offen bis zum Deployment.
+
+## Prüfbericht-Behebung · Welle 5a (claude/realm-fix-wave5)
+- F01 Veranstalter-Konten: Einladung, Passwort, TOTP-Pflicht, Sitzungen, Festival-Bindung, Änderungsprotokoll; Konsolen-Tab „Zugang“. Migration `0015_admin_accounts.sql`.
+- Erstes Konto: mit dem Plattform-Schlüssel anmelden („Plattform-Schlüssel verwenden“) → Tab „Zugang“ → sich selbst einladen. Danach den Schlüssel nur noch für CLI/Notfall nutzen.
