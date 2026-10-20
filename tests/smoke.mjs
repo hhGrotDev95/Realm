@@ -180,7 +180,7 @@ try {
       watch(p, 'map320')
       await p.goto(url)
       await p.locator('nav').getByText('Map').click()
-      await p.locator('.map-wrap button[data-poi]').first().waitFor()
+      await p.locator('.map-wrap button[aria-label]').first().waitFor()
       await p.waitForTimeout(500)
       const r = await p.evaluate(() => {
         const R = (e) => e.getBoundingClientRect()

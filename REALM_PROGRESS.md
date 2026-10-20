@@ -349,3 +349,4 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - F14 Schriften lokal (keine Google-Verbindung mehr), F16 vollständige Snapshots inkl. Live-Änderungen und Bühnenattributen.
 - Welle 6b: F12 Löschfristen (Cron + `docs/DATA_RETENTION.md`), Profillöschung über alle Festivals. Migration `0017_guest_activity.sql`.
 - Welle 6c: F15 Zeitmodell (Festival-Zeitzone, einheitliche Nachtgrenze 06:00) und Erinnerungen über alle Tage; Konsole: Zeitzone unter „Status“. Migration `0018_festival_timezone.sql`.
+- Nachtrag D08: Kartenübersicht auf 320 px (offener Teil aus Welle 0).
