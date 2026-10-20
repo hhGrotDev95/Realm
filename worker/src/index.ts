@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { defaultOn, isEnabled, MODULE_KEYS, moduleConflicts, MODULES, type ModuleKey, type ModuleState } from '../../src/modules'
 import { checkBrand, HEX } from '../../src/theme/contrast'
 import { powBits, verify } from '../../src/pow'
+import { MAX_END, MAX_START, validTimeZone } from '../../src/festivalTime'
 import { checkPassword, checkTotp, hashPassword, newTotpSecret } from './accounts'
 import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v } from './util'
 
@@ -270,7 +271,7 @@ app.get('/api/health', (c) => c.json({ ok: true }))
 
 /* ---------- Festivals (public) ---------- */
 
-type FestivalRow = { id: string; slug: string; name: string; location: string | null; status: string; theme: string; modules: string; site_map: string | null; updated_at: number }
+type FestivalRow = { id: string; slug: string; name: string; location: string | null; status: string; theme: string; modules: string; site_map: string | null; timezone: string; updated_at: number }
 
 app.get('/api/festivals', async (c) => {
   const rows = await c.env.DB.prepare("SELECT slug, name, location FROM festivals WHERE status = 'published' ORDER BY name").all()
@@ -290,7 +291,7 @@ app.get('/api/festivals/:slug', async (c) => {
     db.prepare("SELECT id, question, answer, category, keywords, source, updated_at AS updatedAt, question_en, answer_en, keywords_en FROM faqs WHERE festival_id = ? AND status = 'published' ORDER BY sort, category, question").bind(f.id),
   ])
   return c.json({
-    festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), siteMap: f.site_map, updatedAt: f.updated_at },
+    festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), siteMap: f.site_map, timezone: f.timezone, updatedAt: f.updated_at },
     days: days.results,
     stages: stages.results,
     acts: acts.results,
@@ -658,7 +659,7 @@ app.post('/api/crews/:id/meetups', async (c) => {
     poi: v.str(b.poi, 'poi', { max: 40, optional: true }) ?? null,
     actId: v.str(b.actId, 'actId', { max: 60, optional: true }) ?? null,
     day: v.int(b.day, 'day', 0, 13),
-    min: v.int(b.min, 'min', 0, 30 * 60),
+    min: v.int(b.min, 'min', 0, MAX_START),
     note: v.str(b.note, 'Notiz', { max: 140, optional: true }) ?? '',
   }
   if (m.actId && !(await actExists(c, m.actId))) throw new HttpError(400, 'Act gehört nicht zu diesem Festival')
@@ -1067,6 +1068,11 @@ app.patch('/api/admin/festivals/:slug', async (c) => {
   // an archived festival is over: nobody keeps sharing a location there
   if (status === 'archived') updates.push(c.env.DB.prepare('UPDATE crew_members SET share_location = 0, location = NULL, location_at = NULL WHERE crew_id IN (SELECT id FROM crews WHERE festival_id = ?)').bind(f.id))
   if (b.location !== undefined) updates.push(c.env.DB.prepare('UPDATE festivals SET location = ? WHERE id = ?').bind(v.str(b.location, 'Ort', { max: 80, optional: true }) ?? null, f.id))
+  if (b.timezone !== undefined) {
+    const tz = v.str(b.timezone, 'Zeitzone', { max: 60 })!
+    if (!validTimeZone(tz)) throw new HttpError(400, 'Zeitzone ist ungültig (z. B. Europe/Berlin)')
+    updates.push(c.env.DB.prepare('UPDATE festivals SET timezone = ? WHERE id = ?').bind(tz, f.id))
+  }
   await c.env.DB.batch(updates)
   return c.json({ slug: f.slug, name, status })
 })
@@ -1523,7 +1529,7 @@ app.post('/api/admin/festivals/:slug/import', async (c) => {
       fail(`Tag ${typeof r.day === 'number' ? r.day + 1 : '?'} gibt es in diesem Festival nicht`)
       continue
     }
-    if (typeof r.start !== 'number' || typeof r.end !== 'number' || !Number.isInteger(r.start) || !Number.isInteger(r.end) || r.start < 0 || r.end > 36 * 60) {
+    if (typeof r.start !== 'number' || typeof r.end !== 'number' || !Number.isInteger(r.start) || !Number.isInteger(r.end) || r.start < 0 || r.start >= MAX_START || r.end > MAX_END) {
       fail('Beginn oder Ende fehlt oder ist ungültig')
       continue
     }
@@ -1676,9 +1682,10 @@ app.put('/api/admin/timetable/:actId', async (c) => {
   if (!/^[a-z0-9-]{1,60}$/.test(actId)) throw new HttpError(400, 'actId ist ungültig')
   if (!(await actExists(c, actId))) throw new HttpError(404, 'Act gehört nicht zu diesem Festival')
   const b = await body(c)
-  const time = (x: unknown, name: string) => (x === undefined || x === null ? null : v.int(x, name, 0, 30 * 60))
-  const start = time(b.start, 'start')
-  const end = time(b.end, 'end')
+  // the same limits as the import (audit F15): start before 06:00 next morning, end by 12:00
+  const time = (x: unknown, name: string, max: number) => (x === undefined || x === null ? null : v.int(x, name, 0, max))
+  const start = time(b.start, 'start', MAX_START - 1)
+  const end = time(b.end, 'end', MAX_END)
   if ((start === null) !== (end === null)) throw new HttpError(400, 'start und end gehören zusammen')
   if (start !== null && end! <= start) throw new HttpError(400, 'end muss nach start liegen')
   const stage = b.stage === undefined || b.stage === null ? null : v.oneOf(b.stage, 'stage', c.get('festival').stages)

@@ -11,20 +11,21 @@ import { AccessPanel, inviteFromUrl, SignIn, sessionState } from './Access'
 import { CommunityReports } from './CommunityReports'
 import { CreateFestival, ImportPanel, Settings, SetupWizard, StagesEditor } from './Setup'
 import { currentSlug } from '../festival'
+import { night } from '../festivalTime'
 import type { ModuleKey } from '../modules'
 import { ACTS, DAYS, FESTIVAL, fmt, loadFestivalBundle, on, STAGES, stageById, type Act, type StageId, type TimetableChange } from '../data'
 
 const KEY = 'realm.admin'
 type Tab = 'access' | 'setup' | 'announcements' | 'timetable' | 'import' | 'stages' | 'map' | 'faq' | 'analytics' | 'chat' | 'branding' | 'modules' | 'settings'
 
-/** Parses "22:30" (or "01:30" after midnight) into festival-day minutes. */
+/** Parses "22:30" (or "01:30" after midnight) into festival-day minutes – the same night rule as everywhere (audit F15). */
 function parseTime(v: string): number | null {
   const m = v.trim().match(/^(\d{1,2}):(\d{2})$/)
   if (!m) return null
   const h = Number(m[1])
   const min = Number(m[2])
   if (h > 23 || min > 59) return null
-  return (h < 10 ? h + 24 : h) * 60 + min
+  return night(h * 60 + min)
 }
 
 export default function Admin() {

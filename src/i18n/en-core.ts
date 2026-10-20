@@ -89,7 +89,6 @@ export const EN_CORE: Record<string, string> = {
   "{artist} ist in deinem Plan": "{artist} is in your plan",
   "Rückgängig": "Undo",
   "Entschieden: {artist}": "Decided: {artist}",
-  "Erinnerung 15 Min. vorher": "Reminder 15 min before",
   "Erinnerung entfernt": "Reminder removed",
   "Gründe zuerst eine Crew oder tritt einer bei": "Create or join a crew first",
   "Meetup erstellt – deine Crew sieht es gleich": "Meetup created – your crew will see it shortly",
@@ -135,4 +134,5 @@ export const EN_CORE: Record<string, string> = {
   "Mit dem Code kann jetzt jede:r direkt beitreten": "Anyone with the code can now join directly",
   "Neuer Code {code} · der alte Link gilt nicht mehr": "New code {code} · the old link no longer works",
   "Anfrage gesendet – wer „{name}“ verantwortet, gibt dich frei": "Request sent – whoever runs “{name}” will approve you",
+  "Erinnerung 15 Min. vorher · nur solange Realm geöffnet ist": "Reminder 15 min before · only while Realm is open",
 }
