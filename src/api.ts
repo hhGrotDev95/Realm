@@ -119,6 +119,17 @@ export interface Announcement {
   ageMin: number
   validMin: number | null
 }
+export interface PublicMessage {
+  id: string
+  from: string
+  name: string
+  color: string
+  text: string | null
+  at: number
+  deleted?: boolean
+  hidden?: boolean
+  flaggedByMe?: boolean
+}
 export type Session = { id: string; token: string; nickname: string | null; color: string }
 type CrewRef = { id: string; name: string; code: string }
 
@@ -149,6 +160,10 @@ export const api = {
   timetableChanges: () => call<TimetableChange[]>('GET', '/api/timetable/changes'),
   report: (r: { id?: string; title: string; place?: string; poi?: string; severity: 'info' | 'warning' }) => call<RemoteReport>('POST', '/api/reports', r),
   vote: (id: string, kind: 'still' | 'fixed') => call('PUT', `/api/reports/${id}/vote`, { kind }),
+  festivalChat: (since?: number) => call<{ serverTime: number; messages: PublicMessage[] }>('GET', '/api/festival-chat' + (since ? `?since=${since}` : '')),
+  postFestivalChat: (text: string, id?: string) => call<PublicMessage>('POST', '/api/festival-chat', { id, text }),
+  deleteFestivalChat: (id: string) => call<void>('DELETE', `/api/festival-chat/${id}`),
+  flagFestivalChat: (id: string) => call<{ hidden: boolean }>('POST', `/api/festival-chat/${id}/flag`),
   /** Anonymous FAQ-bot statistics for the organizer (no session needed). */
   faqEvent: (e: { kind: 'hit'; faqId: string } | { kind: 'miss'; question: string }) => call<void>('POST', '/api/faq/events', e),
 }
@@ -246,6 +261,9 @@ export const adminApi = (adminToken: string) => {
     setModules: (slug: string, modules: Record<string, boolean>) => req<Record<string, boolean>>('PUT', `/api/admin/festivals/${slug}/modules`, modules),
     setTheme: (slug: string, theme: { brand?: string; font?: string; logo?: string }) => req<Record<string, string>>('PUT', `/api/admin/festivals/${slug}/theme`, theme),
     saveMap: (slug: string, m: { siteMap?: string | null; stages?: { id: string; x: number; y: number }[]; pois?: Poi[] }) => req<{ stages: number; pois: number }>('PUT', `/api/admin/festivals/${slug}/map`, m),
+    chat: (slug: string) => req<{ id: string; name: string; text: string; at: number; flags: number; hidden: boolean; restored: boolean }[]>('GET', `/api/admin/festivals/${slug}/chat`),
+    deleteChat: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/chat/${id}`),
+    restoreChat: (slug: string, id: string) => req<void>('POST', `/api/admin/festivals/${slug}/chat/${id}/restore`),
     analytics: (slug: string) => req<Analytics>('GET', `/api/admin/festivals/${slug}/analytics`),
     dismissFaqMiss: (slug: string, question: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/analytics/faq-misses`, { question }),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),

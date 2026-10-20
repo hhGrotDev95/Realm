@@ -169,4 +169,5 @@ export const EN_SHEETS: Record<string, string> = {
   "keine Preise, nur Ehre": "no prizes, just glory",
   "Beenden": "Stop",
   "In den Kalender": "Add to calendar",
+  "Wie sollen dich andere nennen?": "What should others call you?",
 }

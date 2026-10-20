@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
-import { isEnabled, MODULE_KEYS, moduleConflicts, MODULES, type ModuleKey, type ModuleState } from '../../src/modules'
+import { defaultOn, isEnabled, MODULE_KEYS, moduleConflicts, MODULES, type ModuleKey, type ModuleState } from '../../src/modules'
 import { checkBrand, HEX } from '../../src/theme/contrast'
 import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v } from './util'
 
@@ -17,6 +17,8 @@ type App = { Bindings: Env; Variables: { guest: Guest; festival: Festival; isAdm
 
 const MIN = 60_000
 const FLAGS_TO_HIDE = 2
+/** The public festival chat needs more voices to hide a message than a crew of friends. */
+const PUBLIC_FLAGS_TO_HIDE = 3
 const REPORT_TTL = 60 * MIN
 const STILL_EXTENDS = 30 * MIN
 const FIXED_TO_RETIRE = 2
@@ -130,6 +132,7 @@ function moduleFor(path: string): ModuleKey | null {
   if (path.startsWith('/api/me/steps')) return 'steps'
   if (path.startsWith('/api/reports')) return 'reports'
   if (path.startsWith('/api/faq/')) return 'faqbot'
+  if (path.startsWith('/api/festival-chat')) return 'festivalchat'
   return null
 }
 
@@ -207,9 +210,11 @@ app.use('/api/crews/*', auth)
 app.use('/api/meetups/*', auth)
 app.use('/api/reports', auth)
 app.use('/api/reports/*', auth)
+app.use('/api/festival-chat', auth)
+app.use('/api/festival-chat/*', auth)
 
 // tenant-scoped routes (the profile itself – PATCH/DELETE /api/me, recovery – is global)
-for (const path of ['/api/me/plan', '/api/me/steps', '/api/crews', '/api/crews/*', '/api/meetups/*', '/api/reports', '/api/reports/*', '/api/announcements', '/api/timetable/*', '/api/faq/*'])
+for (const path of ['/api/me/plan', '/api/me/steps', '/api/crews', '/api/crews/*', '/api/meetups/*', '/api/reports', '/api/reports/*', '/api/announcements', '/api/timetable/*', '/api/faq/*', '/api/festival-chat', '/api/festival-chat/*'])
   app.use(path, tenant)
 app.get('/api/me', tenant)
 
@@ -712,8 +717,8 @@ app.put('/api/admin/festivals/:slug/modules', async (c) => {
   }
   const conflicts = moduleConflicts(state)
   if (conflicts.length) throw new HttpError(400, conflicts.join('; '))
-  // only switched-off modules are stored; everything else is on by default
-  const stored = Object.fromEntries(Object.entries(state).filter(([, on]) => on === false))
+  // only choices that differ from the default are stored (most modules are on, opt-in ones off)
+  const stored = Object.fromEntries(Object.entries(state).filter(([k, on]) => on !== defaultOn(k as ModuleKey)))
   await c.env.DB.prepare('UPDATE festivals SET modules = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(stored), Date.now(), f.id).run()
   return c.json(stored)
 })
@@ -784,6 +789,94 @@ app.put('/api/admin/festivals/:slug/theme', async (c) => {
   }
   await c.env.DB.prepare('UPDATE festivals SET theme = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(theme), Date.now(), f.id).run()
   return c.json(theme)
+})
+
+/* ---------- Festival chat (opt-in module) ---------- */
+
+type PublicMsgRow = { id: string; guest_id: string; nickname: string | null; color: string; text: string; created_at: number; updated_at: number; deleted: number; restored: number; flags: number; mine_flag: number }
+const PUBLIC_MSG_SELECT = `SELECT m.id, m.guest_id, g.nickname, g.color, m.text, m.created_at, m.updated_at, m.deleted, m.restored,
+  (SELECT COUNT(*) FROM festival_message_flags f WHERE f.message_id = m.id) AS flags,
+  (SELECT COUNT(*) FROM festival_message_flags f WHERE f.message_id = m.id AND f.guest_id = ?) AS mine_flag
+  FROM festival_messages m JOIN guests g ON g.id = m.guest_id`
+
+/** Hidden or deleted messages travel without their text; authors still see their own hidden ones. */
+function publicMessage(r: PublicMsgRow, me: string) {
+  const hidden = !r.restored && r.flags >= PUBLIC_FLAGS_TO_HIDE
+  const withheld = !!r.deleted || (hidden && r.guest_id !== me)
+  return { id: r.id, from: r.guest_id === me ? 'me' : r.guest_id, name: r.nickname ?? 'Gast', color: r.color, text: withheld ? null : r.text, at: r.created_at, deleted: !!r.deleted || undefined, hidden: hidden || undefined, flaggedByMe: !!r.mine_flag || undefined }
+}
+
+app.get('/api/festival-chat', async (c) => {
+  const g = c.get('guest')
+  const since = Number(c.req.query('since') ?? 0) || 0
+  const rows = since
+    ? await c.env.DB.prepare(`${PUBLIC_MSG_SELECT} WHERE m.festival_id = ? AND m.updated_at > ? ORDER BY m.created_at LIMIT 200`).bind(g.id, c.get('festival').id, since).all<PublicMsgRow>()
+    : await c.env.DB.prepare(`SELECT * FROM (${PUBLIC_MSG_SELECT} WHERE m.festival_id = ? ORDER BY m.created_at DESC LIMIT 100) ORDER BY created_at`).bind(g.id, c.get('festival').id).all<PublicMsgRow>()
+  return c.json({ serverTime: Date.now(), messages: rows.results.map((r) => publicMessage(r, g.id)) })
+})
+
+app.post('/api/festival-chat', async (c) => {
+  const g = c.get('guest')
+  requireName(g)
+  await rateLimit(c.env.DB, 'fchat:' + g.id, 10, MIN)
+  const b = await body(c)
+  const text = v.str(b.text, 'Nachricht', { max: 300 })!
+  const id = clientId(b.id, 'fm')
+  const now = Date.now()
+  const res = await c.env.DB.prepare('INSERT OR IGNORE INTO festival_messages (id, festival_id, guest_id, text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, c.get('festival').id, g.id, text, now, now).run()
+  if (!res.meta.changes && !(await c.env.DB.prepare('SELECT 1 FROM festival_messages WHERE id = ? AND guest_id = ?').bind(id, g.id).first())) throw new HttpError(409, 'id ist bereits vergeben')
+  const row = await c.env.DB.prepare(`${PUBLIC_MSG_SELECT} WHERE m.id = ?`).bind(g.id, id).first<PublicMsgRow>()
+  return c.json(publicMessage(row!, g.id), res.meta.changes ? 201 : 200)
+})
+
+async function publicMessageFor(c: Context<App>) {
+  const m = await c.env.DB.prepare('SELECT id, guest_id, deleted FROM festival_messages WHERE id = ? AND festival_id = ?').bind(c.req.param('id')!, c.get('festival').id).first<{ id: string; guest_id: string; deleted: number }>()
+  if (!m || m.deleted) throw new HttpError(404, 'Nachricht nicht gefunden')
+  return m
+}
+
+app.delete('/api/festival-chat/:id', async (c) => {
+  const m = await publicMessageFor(c)
+  if (m.guest_id !== c.get('guest').id) throw new HttpError(403, 'Nur eigene Nachrichten können gelöscht werden')
+  await c.env.DB.prepare("UPDATE festival_messages SET deleted = 1, text = '', updated_at = ? WHERE id = ?").bind(Date.now(), m.id).run()
+  return c.body(null, 204)
+})
+
+app.post('/api/festival-chat/:id/flag', async (c) => {
+  const m = await publicMessageFor(c)
+  const g = c.get('guest')
+  requireName(g)
+  if (m.guest_id === g.id) throw new HttpError(400, 'Eigene Nachrichten kannst du löschen statt melden')
+  await rateLimit(c.env.DB, 'fflag:' + g.id, 30, 60 * MIN)
+  const now = Date.now()
+  await c.env.DB.batch([
+    c.env.DB.prepare('INSERT OR IGNORE INTO festival_message_flags (message_id, guest_id, created_at) VALUES (?, ?, ?)').bind(m.id, g.id, now),
+    c.env.DB.prepare('UPDATE festival_messages SET updated_at = ? WHERE id = ?').bind(now, m.id),
+  ])
+  const r = await c.env.DB.prepare('SELECT restored, (SELECT COUNT(*) FROM festival_message_flags WHERE message_id = ?) AS n FROM festival_messages WHERE id = ?').bind(m.id, m.id).first<{ restored: number; n: number }>()
+  return c.json({ id: m.id, hidden: !r?.restored && (r?.n ?? 0) >= PUBLIC_FLAGS_TO_HIDE })
+})
+
+/** Organizer moderation: everything incl. hidden messages and flag counts, newest first. */
+app.get('/api/admin/festivals/:slug/chat', async (c) => {
+  const f = await festivalBySlug(c)
+  const rows = await c.env.DB.prepare(`${PUBLIC_MSG_SELECT} WHERE m.festival_id = ? AND m.deleted = 0 ORDER BY (flags >= ${PUBLIC_FLAGS_TO_HIDE} AND m.restored = 0) DESC, m.created_at DESC LIMIT 200`).bind('', f.id).all<PublicMsgRow>()
+  return c.json(rows.results.map((r) => ({ id: r.id, name: r.nickname ?? 'Gast', text: r.text, at: r.created_at, flags: r.flags, hidden: !r.restored && r.flags >= PUBLIC_FLAGS_TO_HIDE, restored: !!r.restored })))
+})
+
+app.delete('/api/admin/festivals/:slug/chat/:id', async (c) => {
+  const f = await festivalBySlug(c)
+  const res = await c.env.DB.prepare("UPDATE festival_messages SET deleted = 2, text = '', updated_at = ? WHERE id = ? AND festival_id = ? AND deleted = 0").bind(Date.now(), c.req.param('id'), f.id).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Nachricht nicht gefunden')
+  return c.body(null, 204)
+})
+
+/** Flags were unfounded: show the message again; new flags no longer hide it. */
+app.post('/api/admin/festivals/:slug/chat/:id/restore', async (c) => {
+  const f = await festivalBySlug(c)
+  const res = await c.env.DB.prepare('UPDATE festival_messages SET restored = 1, updated_at = ? WHERE id = ? AND festival_id = ? AND deleted = 0').bind(Date.now(), c.req.param('id'), f.id).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Nachricht nicht gefunden')
+  return c.body(null, 204)
 })
 
 /* ---------- Analytics ---------- */
@@ -1210,6 +1303,8 @@ export default {
       env.DB.prepare('DELETE FROM reports WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
       env.DB.prepare('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?').bind(now - 24 * 60 * MIN),
       env.DB.prepare('DELETE FROM rate WHERE window < ?').bind(now - 2 * 60 * MIN),
+      // the public chat is ephemeral: 30 days after the last change
+      env.DB.prepare('DELETE FROM festival_messages WHERE updated_at < ?').bind(now - 30 * 24 * 60 * MIN),
       // FAQ-bot statistics are kept for one festival cycle
       env.DB.prepare('DELETE FROM faq_events WHERE created_at < ?').bind(now - 365 * 24 * 60 * MIN),
     ])

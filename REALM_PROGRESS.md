@@ -305,3 +305,10 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - „Mein Plan“ zeigt zwischen zwei Sets die freie Zeit und den Laufweg zur nächsten Stage; reicht die Zeit nicht für den Weg, wird es als „Knapp“ markiert.
 - Kalender-Export (.ics): ganzer Plan („Plan in den Kalender“) oder einzelner Act (Act-Sheet); Erinnerung 15 Min. vorher, stabile UIDs (erneuter Import aktualisiert statt zu verdoppeln), Sets nach Mitternacht am richtigen Datum, RFC-5545-Escaping und Zeilenumbruch.
 - Tests: `tests/ics.test.mts` (14 Prüfungen), Smoke-Schritt lädt die Datei wirklich herunter und prüft sie; i18n-Wächter fing die neuen Texte ab (474 Texte).
+
+## Runde: Festival-Chat (Schritt 10c, claude/realm-festival-chat)
+- Neues Opt-in-Modul „Festival-Chat“: öffentlicher Chat für alle Besucher eines Festivals, standardmäßig **aus**. Modul-Register kennt jetzt Opt-in-Module (`off: true`); gespeichert wird jede Abweichung vom Standard (vorher nur „aus“ – ein eingeschaltetes Opt-in-Modul wäre verloren gegangen).
+- Moderation: Name nötig zum Schreiben, 300 Zeichen, 10 Nachrichten/Min.; 3 Meldungen blenden aus (Autor sieht weiter); Konsole „Chat-Moderation“ (nur wenn Modul an): ausgeblendete zuerst, Wiederherstellen oder Löschen. Nachrichten verfallen 30 Tage nach der letzten Änderung.
+- App: Einstieg auf Home und im Crew-Bereich, eigenes nachladbares Sheet mit inkrementellem Polling (8 s).
+- Nebenbei: Namensdialog fragte immer „Wie soll deine Crew dich nennen?“ – jetzt neutral „Wie sollen dich andere nennen?“.
+- Geprüft: Worker-API (30, neuer Chat-Test inkl. Mandantentrennung), Modul-Tests (11), i18n (486), e2e, a11y, live (neuer Schritt: einschalten → schreiben mit Namensabfrage → Spam per Polling → 3 Meldungen → ausgeblendet → Veranstalter löscht).
