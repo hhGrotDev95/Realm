@@ -185,4 +185,6 @@ export const EN_SCREENS: Record<string, string> = {
   "{gap} Min. frei · {walk} Min. Laufweg zur {stage}": "{gap} min free · {walk} min walk to {stage}",
   "Kalenderdatei mit {n} Acts erstellt": "Calendar file with {n} acts created",
   "Plan in den Kalender": "Add plan to calendar",
+  "Fairer Treffpunkt für alle": "Fair meeting point for everyone",
+  "Höchstens {n} Min. Weg für jede:n": "At most {n} min walk for anyone",
 }
