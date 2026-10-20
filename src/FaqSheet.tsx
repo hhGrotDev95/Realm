@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { FAQS, on, POIS } from './data'
 import { ask, type BotAnswer, type Faq } from './faq/match'
 import { useApp } from './store'
+import { api, online } from './api'
 import { locale, t } from './i18n'
 
 const stand = (ms: number) => new Date(ms).toLocaleDateString(locale(), { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -45,7 +46,11 @@ export function FaqSheet({ q: initial }: { q?: string }) {
             style={{ paddingTop: 0 }}
             onSubmit={(e) => {
               e.preventDefault()
-              if (q.trim()) setResult({ ...ask(q, FAQS), q: q.trim() })
+              if (!q.trim()) return
+              const r = ask(q, FAQS)
+              setResult({ ...r, q: q.trim() })
+              // anonymous, best effort: tells the organizer which answers help and which are missing
+              if (online) api.faqEvent(r.kind === 'answer' && r.faq ? { kind: 'hit', faqId: r.faq.id } : { kind: 'miss', question: q.trim() }).catch(() => {})
             }}
           >
             <input className="field" style={{ borderRadius: 99 }} placeholder={t('Frag den Festival-Bot, z. B. „Wo kann ich mein Handy laden?“')} aria-label={t('Frage an den Festival-Bot')} value={q} onChange={(e) => setQ(e.target.value)} />

@@ -149,6 +149,8 @@ export const api = {
   timetableChanges: () => call<TimetableChange[]>('GET', '/api/timetable/changes'),
   report: (r: { id?: string; title: string; place?: string; poi?: string; severity: 'info' | 'warning' }) => call<RemoteReport>('POST', '/api/reports', r),
   vote: (id: string, kind: 'still' | 'fixed') => call('PUT', `/api/reports/${id}/vote`, { kind }),
+  /** Anonymous FAQ-bot statistics for the organizer (no session needed). */
+  faqEvent: (e: { kind: 'hit'; faqId: string } | { kind: 'miss'; question: string }) => call<void>('POST', '/api/faq/events', e),
 }
 
 /** Network trouble (or an overloaded server) is worth retrying; validation errors are not. */
@@ -189,6 +191,15 @@ export interface AdminFaq {
   status: 'draft' | 'published'
   sort: number
   updatedAt: number
+}
+
+export interface Analytics {
+  minGroup: number
+  profiles: number
+  acts: { id: string; plans: number }[]
+  withheldActs: number
+  community: { crews: number; members: number; messages: number; meetups: number; reports: number; steps: number }
+  faq: { hits: { id: string; question: string; n: number }[]; misses: { question: string; n: number; last: number }[] }
 }
 
 export interface ImportResult {
@@ -235,6 +246,8 @@ export const adminApi = (adminToken: string) => {
     setModules: (slug: string, modules: Record<string, boolean>) => req<Record<string, boolean>>('PUT', `/api/admin/festivals/${slug}/modules`, modules),
     setTheme: (slug: string, theme: { brand?: string; font?: string; logo?: string }) => req<Record<string, string>>('PUT', `/api/admin/festivals/${slug}/theme`, theme),
     saveMap: (slug: string, m: { siteMap?: string | null; stages?: { id: string; x: number; y: number }[]; pois?: Poi[] }) => req<{ stages: number; pois: number }>('PUT', `/api/admin/festivals/${slug}/map`, m),
+    analytics: (slug: string) => req<Analytics>('GET', `/api/admin/festivals/${slug}/analytics`),
+    dismissFaqMiss: (slug: string, question: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/analytics/faq-misses`, { question }),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
     restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),
     announce: (a: { title: string; body?: string; place?: string; severity: Announcement['severity']; validMin?: number }) => req<Announcement>('POST', '/api/admin/announcements', a),

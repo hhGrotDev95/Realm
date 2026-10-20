@@ -294,6 +294,13 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - Tests laufen jetzt explizit mit `locale: 'de-DE'` (Playwright-Standard ist Englisch); neuer Smoke-Schritt prüft die englische App und den Sprachwechsel.
 - Geprüft: typecheck, test:import (inkl. i18n), build, e2e, a11y, live.
 
+## Runde: Auswertung für Veranstalter (Schritt 9, claude/realm-analytics)
+- Konsole → „Auswertung“: Kennzahlen (Profile mit Plan, Crews, Personen in Crews, Chat, Meetups, Step-Challenge), meistgeplante Acts, Heatmap „Erwarteter Andrang“ (Bühne × Stunde, je Tag), FAQ-Bot: Fragen ohne Antwort (mit „Erledigt“) und häufig genutzte Antworten.
+- Datenschutz: nur Summen; jede Gruppe unter 3 wird serverseitig zurückgehalten (auch Freitextfragen – erst wenn 3 Personen dieselbe Frage stellen). FAQ-Bot-Ereignisse sind anonym (keine Gast-ID), werden nach 365 Tagen gelöscht und hängen am Modul „FAQ-Bot“.
+- API: `POST /api/faq/events`, `GET /api/admin/festivals/:slug/analytics`, `DELETE …/analytics/faq-misses`; Migration 0010.
+- Grenze: Planzahlen kennt der Server nur von Besucher:innen mit Server-Profil (entsteht beim ersten sozialen Feature) – in der Konsole so beschrieben.
+- Geprüft: Worker-API (29 inkl. neuem Auswertungstest), Migration, test:import, e2e, a11y, live (neuer Schritt: 3 Planungen + 3 Bot-Lücken erscheinen, „Erledigt“ entfernt die Frage).
+- Ablauf ab jetzt: eigene PRs werden nach grüner CI selbst gemergt (Absprache vom 20.10.).
 ## Runde: Mein Tag & Kalender-Export (Schritt 10a, claude/realm-agenda)
 - „Mein Plan“ zeigt zwischen zwei Sets die freie Zeit und den Laufweg zur nächsten Stage; reicht die Zeit nicht für den Weg, wird es als „Knapp“ markiert.
 - Kalender-Export (.ics): ganzer Plan („Plan in den Kalender“) oder einzelner Act (Act-Sheet); Erinnerung 15 Min. vorher, stabile UIDs (erneuter Import aktualisiert statt zu verdoppeln), Sets nach Mitternacht am richtigen Datum, RFC-5545-Escaping und Zeilenumbruch.
