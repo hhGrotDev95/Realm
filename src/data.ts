@@ -393,6 +393,15 @@ function localizeDays() {
 }
 localizeDays()
 
+/**
+ * Organizer content in the visitor's language: the English version where one was written,
+ * otherwise the German original. German keywords stay searchable either way.
+ */
+function localizeFaq(f: Faq): Faq {
+  if (lang !== 'en' || !f.en) return f
+  return { ...f, question: f.en.question, answer: f.en.answer, keywords: [f.en.keywords, f.keywords].filter(Boolean).join(' ') }
+}
+
 /** The public festival document served by GET /api/festivals/:slug. */
 export interface FestivalBundle {
   festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; siteMap?: string | null; updatedAt: number }
@@ -421,7 +430,7 @@ export function loadFestivalBundle(b: FestivalBundle) {
   replace(ACTS, b.acts.map((a) => ({ ...a })))
   refill(actById, ACTS.map((a) => [a.id, a]))
   replace(POIS, b.pois)
-  replace(FAQS, b.faq ?? [])
+  replace(FAQS, (b.faq ?? []).map(localizeFaq))
   localizeDays()
   ORIGINAL.clear()
   for (const a of ACTS) ORIGINAL.set(a.id, { start: a.start, end: a.end, stage: a.stage })

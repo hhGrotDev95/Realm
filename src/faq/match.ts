@@ -10,6 +10,8 @@ export interface Faq {
   keywords?: string
   source?: string | null
   updatedAt: number
+  /** optional English version written by the organizer */
+  en?: { question: string; answer: string; keywords?: string }
 }
 
 export interface BotAnswer {
