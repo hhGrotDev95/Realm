@@ -132,7 +132,8 @@ try {
     await page.locator('.wrapped [aria-label="Schließen"]').click()
     await page.getByRole('button', { name: 'Profil & Einstellungen' }).click()
     await page.locator('.sheet').getByText('Echtzeit').click()
-    const days = Math.ceil((new Date(2027, 6, 15, 10).getTime() - Date.now()) / 86_400_000)
+    // doors open at 10:00 festival time (Berlin, summer time = 08:00 UTC) – not the test machine's time zone (audit F15)
+    const days = Math.ceil((Date.UTC(2027, 6, 15, 8) - Date.now()) / 86_400_000)
     if (days > 0) await page.getByText(`Noch ${days} Tage`).waitFor()
   })
   await step('English browser gets the English app; the language can be switched in the profile', async () => {
