@@ -135,6 +135,9 @@ try {
     await p.locator('.day-btn', { hasText: 'Fri' }).waitFor() // day names derived from the date
     await p.locator('.act', { hasText: 'Arcturus' }).getByText('Now 22:30 instead of 22:15').waitFor()
     await p.getByRole('button', { name: 'Profile & settings' }).click()
+    // switching the language reloads the page; let lazy chunks finish first, or WebKit reports
+    // the request the reload cancels ("Importing a module script failed") as a page error
+    await p.waitForLoadState('networkidle')
     await p.getByRole('button', { name: 'Deutsch' }).click()
     await p.getByText('Als Nächstes').waitFor() // reloaded in German, choice remembered over the browser language
     await p.reload()
