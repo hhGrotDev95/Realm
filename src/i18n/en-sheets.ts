@@ -193,4 +193,10 @@ export const EN_SHEETS: Record<string, string> = {
   "Einladungscode erneuern": "Renew invite code",
   "Als Verantwortliche:r kannst du Nachrichten löschen und Mitglieder entfernen.": "As the person in charge you can delete messages and remove members.",
   "Verlässt die verantwortliche Person die Crew, übernimmt das am längsten dabei gewesene Mitglied.": "If the person in charge leaves, the longest-standing member takes over.",
+  "Impressum": "Legal notice",
+  "Datenschutz": "Privacy",
+  "Ich bin mindestens {n} Jahre alt.": "I am at least {n} years old.",
+  "Noch nicht hinterlegt.": "Not provided yet.",
+  "Demo-Modus: hier stehen später die Texte des Veranstalters und der Plattform.": "Demo mode: the organizer’s and the platform’s texts will appear here.",
+  "Plattform": "Platform",
 }

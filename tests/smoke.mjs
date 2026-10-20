@@ -50,6 +50,9 @@ try {
   await step('rsvp asks for a name first', async () => {
     await page.getByRole('button', { name: 'Bin dabei' }).click()
     await page.getByPlaceholder('Spitzname').fill('Test')
+    // the minimum age is named at the first social step (Welle 7)
+    if (await page.getByRole('button', { name: 'Weiter' }).isEnabled()) throw new Error('name accepted without the age notice')
+    await page.getByLabel('Ich bin mindestens 16 Jahre alt.').check()
     await page.getByRole('button', { name: 'Weiter' }).click()
     await page.getByText('Du bist dabei').waitFor()
   })

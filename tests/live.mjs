@@ -28,6 +28,8 @@ const waitFor = async (url) => {
 }
 await waitFor(API + '/api/health')
 await waitFor(WEB)
+// the platform's legal texts (Welle 7) – without them no festival can go live
+await fetch(`${API}/api/admin/platform/legal`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer e2e-admin' }, body: JSON.stringify({ imprint: 'Realm Test GmbH, Musterstraße 1, 12345 Musterstadt', privacy: 'Datenschutzhinweise der Plattform (Test)' }) })
 
 const browser = await launch()
 const errors = []
@@ -66,6 +68,8 @@ const totpCode = (secret, step = Math.floor(Date.now() / 30000)) => {
 const nav = (p, t) => p.locator('nav').getByText(t).click()
 const name = async (p, n) => {
   await p.getByPlaceholder('Spitzname').fill(n)
+  if (await p.getByRole('button', { name: 'Weiter', exact: true }).isEnabled()) throw new Error('age notice must be confirmed before continuing')
+  await p.getByLabel(/Ich bin mindestens \d+ Jahre alt/).check()
   await p.getByRole('button', { name: 'Weiter' }).click()
 }
 
@@ -86,6 +90,10 @@ try {
 
   await step('profile tells the truth about storage (audit F13): on the server, not recoverable without a code', async () => {
     await lea.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    // legal notice from the profile (Welle 7)
+    await lea.locator('.sheet').getByRole('button', { name: 'Impressum' }).click()
+    await lea.locator('.sheet').getByText('Realm Test GmbH, Musterstraße 1, 12345 Musterstadt').waitFor()
+    await lea.keyboard.press('Escape') // back to the profile underneath
     await lea.locator('.sheet').getByText('Auf dem Server gespeichert · ohne Recovery-Code nicht wiederherstellbar').waitFor()
     if (await lea.locator('.sheet').getByText('Nur auf diesem Gerät gespeichert').count()) throw new Error('profile claims device-only storage')
     if (await lea.locator('.sheet').getByText(/Passkey|Apple|Google/).count()) throw new Error('profile announces sign-in methods that do not exist')
@@ -653,8 +661,7 @@ try {
     await visitor.getByLabel('Nachricht an alle').fill('Wer teilt sich ein Taxi zum Bahnhof?')
     await visitor.getByRole('button', { name: 'Senden' }).click()
     // first social action on this device: the app asks for a name, then sends
-    await visitor.getByPlaceholder('Spitzname').fill('Uma')
-    await visitor.getByRole('button', { name: 'Weiter' }).click()
+    await name(visitor, 'Uma')
     await visitor.locator('.bubble.me', { hasText: 'Taxi zum Bahnhof' }).waitFor()
     const T = (token) => ({ ...H(token) })
     const spammer = await (await fetch(`${API}/api/guests`, { method: 'POST', headers: H(), body: JSON.stringify({ nickname: 'Spam' }) })).json()

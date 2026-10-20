@@ -314,6 +314,8 @@ export const adminApi = (adminToken: string) => {
     announcements: () => req<Announcement[]>('GET', '/api/announcements'),
     timetableChanges: () => req<TimetableChange[]>('GET', '/api/timetable/changes'),
     createFestival: (f: { name: string; slug?: string; location?: string; startDate: string; days: number }) => req<{ slug: string; name: string; status: string }>('POST', '/api/admin/festivals', f),
+    setLegal: (slug: string, l: { imprint?: string | null; privacy?: string | null; minAge?: number }) => req<{ imprint: string | null; privacy: string | null; minAge: number }>('PUT', `/api/admin/festivals/${slug}/legal`, l),
+    setPlatformLegal: (l: { imprint?: string | null; privacy?: string | null }) => req<{ imprint: string | null; privacy: string | null }>('PUT', '/api/admin/platform/legal', l),
     readiness: (slug: string) => req<{ checks: Readiness[] }>('GET', `/api/admin/festivals/${slug}/readiness`),
     updateFestival: (slug: string, f: { name?: string; location?: string; status?: 'draft' | 'published' | 'archived'; confirm?: string[]; timezone?: string }) => req<{ slug: string; name: string; status: string }>('PATCH', `/api/admin/festivals/${slug}`, f),
     setStages: (slug: string, stages: { id?: string; name: string; color?: string; vibe?: string }[]) => req<{ stages: { id: string; name: string; color: string }[] }>('PUT', `/api/admin/festivals/${slug}/stages`, { stages }),

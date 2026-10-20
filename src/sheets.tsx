@@ -51,6 +51,7 @@ export function Sheets() {
           )}
           {s?.kind === 'steps' && <Steps />}
           {s?.kind === 'place' && <PlacePicker then={s.then} />}
+          {s?.kind === 'legal' && <LegalSheet doc={s.doc} />}
           {s?.kind === 'festivalChat' && (
             <LazyBoundary>
               <Suspense fallback={<p className="muted small">{t('Lade …')}</p>}>
@@ -102,6 +103,8 @@ function sheetLabel(s: SheetState): string {
       return t('Festival-Chat')
     case 'place':
       return t('Wo bist du gerade?')
+    case 'legal':
+      return s.doc === 'imprint' ? t('Impressum') : t('Datenschutz')
     default:
       return t('Dialog')
   }
@@ -874,9 +877,12 @@ function Report({ poi }: { poi?: string }) {
 const COLORS = ['#A58CFF', '#FF8A65', '#4FC3F7', '#FFD54F', '#81C784', '#F06292', '#4DB6AC']
 
 function Identity({ reason }: { reason: string }) {
-  const { setNickname, guest } = useApp()
+  const { setNickname, guest, openSheet } = useApp()
   const [name, setName] = useState(guest.nickname ?? '')
   const [color, setColor] = useState(guest.color)
+  // the festival names a minimum age for the social features (Welle 7); a notice, not an age check
+  const minAge = FESTIVAL.legal.minAge
+  const [ageOk, setAgeOk] = useState(!minAge)
   const ref = useRef<HTMLInputElement>(null)
   useEffect(() => {
     const timer = setTimeout(() => ref.current?.focus(), 350)
@@ -898,7 +904,7 @@ function Identity({ reason }: { reason: string }) {
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          if (name.trim()) setNickname(name.trim().slice(0, 20), color)
+          if (name.trim() && ageOk) setNickname(name.trim().slice(0, 20), color)
         }}
       >
         <input ref={ref} className="field" placeholder={t('Spitzname')} value={name} onChange={(e) => setName(e.target.value)} maxLength={20} />
@@ -907,12 +913,21 @@ function Identity({ reason }: { reason: string }) {
             <button type="button" key={c} aria-label={t('Farbe {color}', { color: c })} onClick={() => setColor(c)} style={{ width: 30, height: 30, borderRadius: 99, background: c, boxShadow: color === c ? '0 0 0 3px var(--bg-elev), 0 0 0 5px #fff' : 'none', transition: 'box-shadow .2s' }} />
           ))}
         </div>
-        <button className="btn primary block" disabled={!name.trim()}>
+        {minAge > 0 && (
+          <label className="row small" style={{ gap: 10, marginBottom: 14, alignItems: 'flex-start', cursor: 'pointer' }}>
+            <input type="checkbox" checked={ageOk} onChange={(e) => setAgeOk(e.target.checked)} style={{ width: 20, height: 20, marginTop: 1, flex: 'none' }} />
+            <span>{t('Ich bin mindestens {n} Jahre alt.', { n: minAge })}</span>
+          </label>
+        )}
+        <button className="btn primary block" disabled={!name.trim() || !ageOk}>
           {t('Weiter')}
         </button>
       </form>
       <p className="tiny faint" style={{ textAlign: 'center', marginTop: 14 }}>
-        {t('Kein Account, keine E-Mail. Du kannst dein Profil später optional sichern.')}
+        {t('Kein Account, keine E-Mail. Du kannst dein Profil später optional sichern.')}{' '}
+        <button type="button" className="link-btn" onClick={() => openSheet({ kind: 'legal', doc: 'privacy' })}>
+          {t('Datenschutz')}
+        </button>
       </p>
     </>
   )
@@ -1040,6 +1055,14 @@ function Profile() {
             <RotateCcw size={18} /> {online ? t('Profil löschen') : t('Demo zurücksetzen')}
           </button>
         )}
+        <div className="row small" style={{ gap: 16, justifyContent: 'center', padding: '10px 0 2px' }}>
+          <button type="button" className="link-btn" onClick={() => openSheet({ kind: 'legal', doc: 'imprint' })}>
+            {t('Impressum')}
+          </button>
+          <button type="button" className="link-btn" onClick={() => openSheet({ kind: 'legal', doc: 'privacy' })}>
+            {t('Datenschutz')}
+          </button>
+        </div>
       </div>
     </>
   )
@@ -1508,6 +1531,39 @@ function Steps() {
           {t('Beenden')}
         </button>
       </div>
+    </>
+  )
+}
+
+/** Legal notice or privacy information (Welle 7): the festival's text, then the platform's. Texts come from the operators. */
+function LegalSheet({ doc }: { doc: 'imprint' | 'privacy' }) {
+  const { openSheet, online } = useApp()
+  const own = FESTIVAL.legal[doc]
+  const platform = FESTIVAL.legal.platform[doc]
+  const title = doc === 'imprint' ? t('Impressum') : t('Datenschutz')
+  return (
+    <>
+      <div className="sheet-head">
+        <div className="grow">
+          <h2>{title}</h2>
+        </div>
+      </div>
+      {!own && !platform && <p className="small muted">{online ? t('Noch nicht hinterlegt.') : t('Demo-Modus: hier stehen später die Texte des Veranstalters und der Plattform.')}</p>}
+      {own && (
+        <section style={{ marginBottom: 18 }}>
+          <div className="label">{FESTIVAL.name}</div>
+          <div className="small legal-text">{own}</div>
+        </section>
+      )}
+      {platform && (
+        <section>
+          <div className="label">{t('Plattform')}</div>
+          <div className="small legal-text">{platform}</div>
+        </section>
+      )}
+      <button className="btn ghost sm" style={{ marginTop: 14 }} onClick={() => openSheet({ kind: 'legal', doc: doc === 'imprint' ? 'privacy' : 'imprint' })}>
+        {doc === 'imprint' ? t('Datenschutz') : t('Impressum')}
+      </button>
     </>
   )
 }
