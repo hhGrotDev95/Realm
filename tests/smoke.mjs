@@ -18,9 +18,16 @@ await page.addInitScript(promiseScrollIntoView)
 const errors = []
 /** set when the offline step takes the server down: network errors after that are expected */
 let serverDownAt = Infinity
-const onError = (e) => errors.push({ message: e.message, at: Date.now() })
-page.on('pageerror', onError)
+let currentStep = 'start'
+/** every page error with the step and page it happened on, plus failed requests – engines word errors differently */
+const watch = (pg, tag) => {
+  pg.on('pageerror', (e) => errors.push({ message: e.message, at: Date.now(), where: `${currentStep} [${tag}]` }))
+  pg.on('requestfailed', (r) => failed.push(`${currentStep} [${tag}] ${r.url()} – ${r.failure()?.errorText}`))
+}
+const failed = []
+watch(page, 'main')
 const step = async (name, fn) => {
+  currentStep = name
   await fn()
   await page.waitForTimeout(350)
   console.log('✓', name)
@@ -119,7 +126,7 @@ try {
   await step('English browser gets the English app; the language can be switched in the profile', async () => {
     const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'en-US' })
     const p = await ctx.newPage()
-    p.on('pageerror', onError)
+    watch(p, 'second')
     await p.goto(url)
     await p.getByText('Up next').waitFor()
     if ((await p.evaluate(() => document.documentElement.lang)) !== 'en') throw new Error('html lang not set to en')
@@ -152,7 +159,7 @@ try {
   await step('offline: after ONE online visit the app and lazily loaded screens open with the server down', async () => {
     const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
     const p = await ctx.newPage()
-    p.on('pageerror', onError)
+    watch(p, 'second')
     await p.goto(url)
     await p.getByText('Als Nächstes').waitFor()
     await p.evaluate(() => navigator.serviceWorker.ready)
@@ -180,7 +187,7 @@ try {
   // Firefox, WebKit incl. a lazy module that could not be fetched); before that, every error counts
   const network = /Failed to fetch|NetworkError|Load failed|Importing a module script failed/
   errors.splice(0, errors.length, ...errors.filter((e) => !(e.at >= serverDownAt && network.test(e.message))))
-  if (errors.length) throw new Error('Page errors:\n' + errors.map((e) => e.message).join('\n'))
+  if (errors.length) throw new Error('Page errors:\n' + errors.map((e) => `${e.where}: ${e.message}`).join('\n') + '\nFailed requests:\n' + failed.join('\n'))
   console.log('All smoke tests passed')
 } catch (e) {
   console.error(e)
