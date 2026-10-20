@@ -330,3 +330,7 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 
 ## Prüfbericht-Behebung · Welle 2 (claude/realm-fix-wave2)
 - F04/D02 ehrliche Navigation, D01 keine Demo-Inhalte im Live-Modus + Demo-Kennzeichen, D03 Warnungen in jeder Phase oben. Details in `docs/AUDIT.md`. Nebenbei gefunden und behoben: nach der Standortwahl startete die angeforderte Richtung nicht (Karte kannte den Ort noch nicht).
+
+## Prüfbericht-Behebung · Welle 3 (claude/realm-fix-wave3)
+- F05 Beitrittsfreigabe + Code-Erneuerung beim Entfernen, F09 Übergabe der Verantwortung, F11 Festival im Einladungslink, F06 ehrliche Zählung von Community-Meldungen + Freigabe durch Veranstalter, D05 Soforthilfe im Meldeformular. Migration `0013_crew_safety.sql`. Details in `docs/AUDIT.md`.
+- Bekannt für Welle 4: das Gast-Limit (20 Profile/IP/Std.) – die API-Tests geben späteren Gästen deshalb eigene Test-IPs.

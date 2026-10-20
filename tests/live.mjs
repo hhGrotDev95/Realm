@@ -83,14 +83,35 @@ try {
     await nav(lea, 'Crew')
   })
 
-  await step('Ben joins via invite link', async () => {
-    await ben.goto(`${WEB}/?join=${code}`)
+  let invite
+  await step('the invite link names the festival (audit F11)', async () => {
+    await lea.evaluate(() => {
+      Object.defineProperty(navigator, 'share', { value: undefined, configurable: true })
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (x) => void (window.__copied = x) }, configurable: true })
+    })
+    await lea.getByRole('button', { name: 'Einladen' }).click()
+    await lea.getByText('Einladungslink kopiert').waitFor()
+    invite = await lea.evaluate(() => window.__copied)
+    if (invite !== `${WEB}/?f=realm-open-air&join=${code}`) throw new Error('invite link without festival: ' + invite)
+  })
+
+  await step('Ben asks to join via the invite link; Lea approves him (audit F05)', async () => {
+    await ben.goto(invite)
     await nav(ben, 'Crew')
     await ben.getByText('Du wurdest in eine Crew eingeladen').waitFor()
     await ben.getByRole('button', { name: 'Beitreten' }).first().click()
     await name(ben, 'Ben')
+    // until approved, Ben sees nothing of the crew
+    await ben.getByRole('heading', { name: 'Anfrage gesendet' }).waitFor()
+    if (await ben.getByText(/Personen · Code|Crew-Chat/).count()) throw new Error('pending member sees the crew')
+    await lea.reload()
+    await nav(lea, 'Crew')
+    await lea.getByText('Ben möchte beitreten').click({ timeout: 15000 })
+    await lea.locator('.sheet').getByRole('button', { name: 'Freigeben' }).click()
+    await lea.getByText('Beitritt freigegeben').waitFor()
+    await lea.keyboard.press('Escape')
+    await ben.getByText(/2 Personen · Code/).waitFor({ timeout: 15000 })
     await ben.getByText('Zeltplatz 14', { exact: true }).waitFor()
-    await ben.getByText(/2 Personen · Code/).waitFor()
   })
 
   await step('chat message reaches the other member (polling)', async () => {
@@ -181,14 +202,29 @@ try {
     await lea.getByRole('button', { name: 'Wasser', exact: true }).click()
     await lea.getByRole('button', { name: 'Wasserstelle Nord' }).click()
     await lea.getByRole('button', { name: 'Problem melden' }).click()
+    // the way to immediate help comes before the form (audit D05)
+    const sos = lea.locator('.sheet .alert.critical', { hasText: 'Notfall? Ruf 112 – das hier ist kein Notruf.' })
+    if ((await sos.getByRole('link', { name: '112 anrufen' }).getAttribute('href')) !== 'tel:112') throw new Error('no direct 112 call')
+    await sos.getByRole('button', { name: 'Sanitätszelt' }).waitFor()
     await lea.getByRole('button', { name: 'Wasser leer' }).click()
     await lea.getByRole('button', { name: 'Veröffentlichen' }).click()
     await lea.getByText('Meldung veröffentlicht').waitFor()
     await ben.reload()
     await ben.locator('.section-h button', { hasText: 'Alle' }).click()
     await ben.locator('.sheet').getByText('Wasser leer: Wasserstelle Nord').waitFor({ timeout: 15000 })
-    await ben.locator('.sheet').getByRole('button', { name: /Stimmt noch/ }).first().click()
+    // a count of people, never a check (audit F06); the reporter cannot confirm her own report
+    const item = ben.locator('.sheet .list-item', { hasText: 'Wasser leer: Wasserstelle Nord' })
+    await item.getByText('Von 1 Person gemeldet · nicht geprüft').waitFor()
+    await item.getByRole('button', { name: /Stimmt noch/ }).click()
     await ben.getByText('Danke – als weiterhin gültig bestätigt').waitFor()
+    await item.getByText('Von 2 Personen gemeldet · nicht geprüft').waitFor()
+    await ben.keyboard.press('Escape')
+    await lea.reload()
+    await lea.locator('.section-h button', { hasText: 'Alle' }).click()
+    const own = lea.locator('.sheet .list-item', { hasText: 'Wasser leer: Wasserstelle Nord' })
+    await own.getByRole('button', { name: 'Erledigt – zurückziehen' }).waitFor()
+    if (await own.getByRole('button', { name: /Stimmt noch/ }).count()) throw new Error('reporter can confirm her own report')
+    await lea.keyboard.press('Escape')
   })
 
   await step('sync is incremental and backs off while the network is down', async () => {
@@ -603,17 +639,23 @@ try {
     await nav(fresh, 'Crew')
     await fresh.getByText('Zeltplatz 14', { exact: true }).waitFor({ timeout: 15000 })
 
-    // the owner removes Ben; his device notices on the next poll and cannot rejoin
+    // the owner removes Ben; his device notices on the next poll; the old code is dead – for any profile (audit F05)
     await lea.keyboard.press('Escape')
     await nav(lea, 'Crew')
     await lea.getByRole('button', { name: /^Mitglieder/ }).click()
     lea.once('dialog', (d) => d.accept())
     await lea.getByRole('button', { name: 'Ben entfernen' }).click()
-    await lea.getByText('Mitglied entfernt').waitFor()
+    await lea.getByText(/Entfernt · neuer Einladungscode/).waitFor()
     await fresh.getByText('Du bist nicht mehr Mitglied dieser Crew').waitFor({ timeout: 20000 })
     await fresh.getByPlaceholder('ABCD-EFGH').fill(code)
     await fresh.getByRole('button', { name: 'Beitreten' }).last().click()
-    await fresh.getByText('Du wurdest aus dieser Crew entfernt').waitFor()
+    await fresh.getByText('Einladung nicht gefunden').waitFor()
+    const other = await user()
+    await other.goto(invite)
+    await nav(other, 'Crew')
+    await other.getByRole('button', { name: 'Beitreten' }).first().click()
+    await name(other, 'Ben2')
+    await other.getByText('Einladung nicht gefunden').waitFor()
   })
 
   if (process.env.SHOTS) {

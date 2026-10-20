@@ -12,6 +12,7 @@ import { num, t } from '../i18n'
 export function Crew() {
   const { crew, online, crewRef } = useApp()
   if (online && !crewRef) return <CrewOnboarding />
+  if (online && crewRef?.pending) return <CrewPending name={crewRef.name} />
   return <CrewHome key={crew.name} />
 }
 
@@ -74,6 +75,17 @@ function CrewHome() {
               <Share2 size={15} /> {t('Einladen')}
             </button>
           </motion.section>
+        )}
+
+        {crew.live && crew.owner === 'me' && crew.requests.length > 0 && (
+          <motion.button {...stagger(1)} className="alert info" onClick={() => openSheet({ kind: 'members' })}>
+            <UserPlus size={20} />
+            <span className="grow">
+              <strong>{crew.requests.length === 1 ? t('{name} möchte beitreten', { name: crew.requests[0].name }) : t('{n} Beitrittsanfragen', { n: crew.requests.length })}</strong>
+              <span className="small muted">{t('Gib nur Leute frei, die du kennst.')}</span>
+            </span>
+            <ChevronRight size={18} className="faint" />
+          </motion.button>
         )}
 
         {crew.live && crew.members.length === 0 && (
@@ -322,6 +334,28 @@ function FairPoint() {
         )}
       </div>
     </div>
+  )
+}
+
+/** A join request waits for the crew's owner (audit F05): until then nothing of the crew is visible. */
+function CrewPending({ name }: { name: string }) {
+  const { leaveCrew } = useApp()
+  return (
+    <main className="screen">
+      <div className="stack">
+        <motion.div {...stagger(0)} className="hero">
+          <span className="label next">{t('Crew')}</span>
+          <h1>{t('Anfrage gesendet')}</h1>
+          <p className="meta">{t('Wer „{name}“ verantwortet, muss dich erst freigeben. Bis dahin siehst du weder Chat noch Pläne oder Standorte – und die Crew sieht nur deinen Namen.', { name })}</p>
+        </motion.div>
+        <motion.div {...stagger(1)} className="card small muted" role="status">
+          {t('Die App prüft regelmäßig, ob du freigegeben wurdest.')}
+        </motion.div>
+        <motion.button {...stagger(2)} className="btn ghost" onClick={() => leaveCrew()}>
+          <LogOut size={16} /> {t('Anfrage zurückziehen')}
+        </motion.button>
+      </div>
+    </main>
   )
 }
 

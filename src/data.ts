@@ -241,6 +241,10 @@ export interface FestivalUpdate {
   validMin?: number // remaining validity
   severity: 'info' | 'warning' | 'critical'
   confirms?: number
+  /** others who said it is fixed (live community reports) */
+  fixedVotes?: number
+  /** your own report: you can withdraw it, your vote does not count again */
+  mine?: boolean
   phases: Phase[]
 }
 

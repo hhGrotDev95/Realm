@@ -23,7 +23,8 @@ const PUBLIC_FLAGS_TO_HIDE = 3
 const LOCATION_TTL = 120 * MIN
 const REPORT_TTL = 60 * MIN
 const STILL_EXTENDS = 30 * MIN
-const FIXED_TO_RETIRE = 2
+/** a community report lives at most this long, however often it is confirmed */
+const REPORT_MAX_LIFE = 4 * 60 * MIN
 const SEVERITIES = ['info', 'warning'] as const
 
 const app = new Hono<App>()
@@ -84,11 +85,31 @@ const requireName = (g: Guest) => {
 }
 
 /** Membership is checked together with the tenant: a crew of another festival does not exist here. */
-async function membership(c: Context<App>, crewId: string, guestId = c.get('guest').id) {
-  const m = await c.env.DB.prepare('SELECT 1 FROM crew_members m JOIN crews c ON c.id = m.crew_id WHERE m.crew_id = ? AND m.guest_id = ? AND c.festival_id = ?')
-    .bind(crewId, guestId, c.get('festival').id)
-    .first()
+/** Members waiting for the owner's approval (audit F05) see nothing of the crew; only `allowPending` lets them in. */
+async function membership(c: Context<App>, crewId: string, { allowPending = false } = {}) {
+  const m = await c.env.DB.prepare('SELECT m.approved, c.created_by AS owner FROM crew_members m JOIN crews c ON c.id = m.crew_id WHERE m.crew_id = ? AND m.guest_id = ? AND c.festival_id = ?')
+    .bind(crewId, c.get('guest').id, c.get('festival').id)
+    .first<{ approved: number; owner: string }>()
   if (!m) throw new HttpError(404, 'Crew nicht gefunden')
+  if (!m.approved && !allowPending) throw new HttpError(403, 'Dein Beitritt wartet noch auf Freigabe')
+  return { pending: !m.approved, owner: m.owner === c.get('guest').id }
+}
+
+async function ownership(c: Context<App>, crewId: string, what: string) {
+  const m = await membership(c, crewId)
+  if (!m.owner) throw new HttpError(403, `Nur wer die Crew verantwortet, kann ${what}`)
+}
+
+/**
+ * Audit F09: when the owner leaves or deletes their profile, the longest-standing approved member takes over;
+ * a crew without any other approved member is dissolved (pending requests go with it).
+ */
+function handOver(db: D1Database, guestId: string, crewId: string | null) {
+  const others = 'SELECT guest_id FROM crew_members WHERE crew_id = crews.id AND guest_id != ?1 AND approved = 1'
+  return [
+    db.prepare(`DELETE FROM crews WHERE id IN (SELECT crew_id FROM crew_members WHERE guest_id = ?1) AND (?2 IS NULL OR id = ?2) AND NOT EXISTS (${others})`).bind(guestId, crewId),
+    db.prepare(`UPDATE crews SET created_by = (${others} ORDER BY joined_at LIMIT 1) WHERE created_by = ?1 AND (?2 IS NULL OR id = ?2)`).bind(guestId, crewId),
+  ]
 }
 
 async function isAdminRequest(c: Context<App>) {
@@ -137,6 +158,8 @@ function isPrivacyAction(method: string, path: string) {
   if (method === 'DELETE' && path === '/api/me/steps') return true
   if (method === 'POST' && /^\/api\/crews\/[^/]+\/leave$/.test(path)) return true
   if (method === 'PUT' && /^\/api\/crews\/[^/]+\/location$/.test(path)) return true
+  // removing someone from a crew is a safety action, also when modules are off or the festival is archived
+  if (method === 'DELETE' && /^\/api\/crews\/[^/]+\/members\/[^/]+$/.test(path)) return true
   return false
 }
 
@@ -236,10 +259,10 @@ app.get('/api/me', tenant)
 app.get('/api/me', async (c) => {
   const g = c.get('guest')
   const fid = c.get('festival').id
-  const crews = await c.env.DB.prepare('SELECT c.id, c.name, c.code FROM crews c JOIN crew_members m ON m.crew_id = c.id WHERE m.guest_id = ? AND c.festival_id = ? ORDER BY m.joined_at').bind(g.id, fid).all()
+  const crews = await c.env.DB.prepare("SELECT c.id, c.name, CASE WHEN m.approved = 1 THEN c.code ELSE '' END AS code, m.approved = 0 AS pending FROM crews c JOIN crew_members m ON m.crew_id = c.id WHERE m.guest_id = ? AND c.festival_id = ? ORDER BY m.joined_at").bind(g.id, fid).all()
   const plan = await c.env.DB.prepare('SELECT act_id FROM plans WHERE guest_id = ? AND festival_id = ?').bind(g.id, fid).all<{ act_id: string }>()
   const secured = await c.env.DB.prepare('SELECT recovery_hash IS NOT NULL AS s FROM guests WHERE id = ?').bind(g.id).first<{ s: number }>()
-  return c.json({ ...g, secured: !!secured?.s, crews: crews.results, plan: plan.results.map((r) => r.act_id) })
+  return c.json({ ...g, secured: !!secured?.s, crews: crews.results.map((r) => ({ ...r, pending: !!r.pending })), plan: plan.results.map((r) => r.act_id) })
 })
 
 app.patch('/api/me', async (c) => {
@@ -255,8 +278,8 @@ app.patch('/api/me', async (c) => {
 app.delete('/api/me', async (c) => {
   const id = c.get('guest').id
   await c.env.DB.batch([
-    // crews nobody else belongs to go with the guest; everything else cascades
-    c.env.DB.prepare('DELETE FROM crews WHERE id IN (SELECT crew_id FROM crew_members WHERE guest_id = ?1) AND NOT EXISTS (SELECT 1 FROM crew_members m WHERE m.crew_id = crews.id AND m.guest_id != ?1)').bind(id),
+    // crews without another approved member go with the guest, the others get a new owner; everything else cascades
+    ...handOver(c.env.DB, id, null),
     c.env.DB.prepare('DELETE FROM guests WHERE id = ?').bind(id),
   ])
   return c.body(null, 204)
@@ -310,10 +333,11 @@ app.post('/api/crews', async (c) => {
   const code = randomCode(2)
   const now = Date.now()
   await c.env.DB.batch([
-    c.env.DB.prepare('INSERT INTO crews (id, festival_id, code, name, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)').bind(id, c.get('festival').id, code, name, g.id, now),
+    // new crews ask the owner before anyone joins (audit F05); the owner can switch that off
+    c.env.DB.prepare('INSERT INTO crews (id, festival_id, code, name, created_by, created_at, approve_joins) VALUES (?, ?, ?, ?, ?, ?, 1)').bind(id, c.get('festival').id, code, name, g.id, now),
     c.env.DB.prepare('INSERT INTO crew_members (crew_id, guest_id, joined_at) VALUES (?, ?, ?)').bind(id, g.id, now),
   ])
-  return c.json({ id, name, code }, 201)
+  return c.json({ id, name, code, pending: false }, 201)
 })
 
 app.post('/api/crews/join', async (c) => {
@@ -321,19 +345,50 @@ app.post('/api/crews/join', async (c) => {
   requireName(g)
   await rateLimit(c.env.DB, 'join:' + g.id, 20, 60 * MIN)
   const code = normalizeCode(v.str((await body(c)).code, 'Code', { max: 20 })!)
-  const crew = await c.env.DB.prepare('SELECT id, name, code FROM crews WHERE code = ? AND festival_id = ?').bind(code, c.get('festival').id).first<{ id: string; name: string; code: string }>()
+  const crew = await c.env.DB.prepare('SELECT id, name, code, approve_joins FROM crews WHERE code = ? AND festival_id = ?').bind(code, c.get('festival').id).first<{ id: string; name: string; code: string; approve_joins: number }>()
   if (!crew) throw new HttpError(404, 'Einladung nicht gefunden')
   const banned = await c.env.DB.prepare('SELECT 1 FROM crew_bans WHERE crew_id = ? AND guest_id = ?').bind(crew.id, g.id).first()
   if (banned) throw new HttpError(403, 'Du wurdest aus dieser Crew entfernt')
   const count = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM crew_members WHERE crew_id = ?').bind(crew.id).first<{ n: number }>()
   if ((count?.n ?? 0) >= 50) throw new HttpError(409, 'Crew ist voll (max. 50)')
-  await c.env.DB.prepare('INSERT OR IGNORE INTO crew_members (crew_id, guest_id, joined_at) VALUES (?, ?, ?)').bind(crew.id, g.id, Date.now()).run()
-  return c.json(crew)
+  const existing = await c.env.DB.prepare('SELECT approved FROM crew_members WHERE crew_id = ? AND guest_id = ?').bind(crew.id, g.id).first<{ approved: number }>()
+  if (!existing) await c.env.DB.prepare('INSERT INTO crew_members (crew_id, guest_id, joined_at, approved) VALUES (?, ?, ?, ?)').bind(crew.id, g.id, Date.now(), crew.approve_joins ? 0 : 1).run()
+  const pending = existing ? !existing.approved : !!crew.approve_joins
+  // until approved, the joiner learns nothing but the crew's name
+  return c.json({ id: crew.id, name: crew.name, code: pending ? '' : crew.code, pending })
 })
 
 app.post('/api/crews/:id/leave', async (c) => {
-  await membership(c, c.req.param('id'))
-  await c.env.DB.prepare('DELETE FROM crew_members WHERE crew_id = ? AND guest_id = ?').bind(c.req.param('id'), c.get('guest').id).run()
+  const crewId = c.req.param('id')
+  const id = c.get('guest').id
+  await membership(c, crewId, { allowPending: true })
+  await c.env.DB.batch([...handOver(c.env.DB, id, crewId), c.env.DB.prepare('DELETE FROM crew_members WHERE crew_id = ? AND guest_id = ?').bind(crewId, id)])
+  return c.body(null, 204)
+})
+
+/** Owner settings: whether joining needs approval. */
+app.patch('/api/crews/:id', async (c) => {
+  const crewId = c.req.param('id')
+  await ownership(c, crewId, 'Einstellungen ändern')
+  const approveJoins = v.bool((await body(c)).approveJoins, 'approveJoins')
+  await c.env.DB.prepare('UPDATE crews SET approve_joins = ? WHERE id = ?').bind(approveJoins ? 1 : 0, crewId).run()
+  return c.json({ approveJoins })
+})
+
+/** A fresh invite code: the old link stops working at once. */
+app.post('/api/crews/:id/code', async (c) => {
+  const crewId = c.req.param('id')
+  await ownership(c, crewId, 'den Einladungscode erneuern')
+  const code = randomCode(2)
+  await c.env.DB.prepare('UPDATE crews SET code = ? WHERE id = ?').bind(code, crewId).run()
+  return c.json({ code })
+})
+
+app.post('/api/crews/:id/members/:guestId/approve', async (c) => {
+  const crewId = c.req.param('id')
+  await ownership(c, crewId, 'Beitritte freigeben')
+  const res = await c.env.DB.prepare('UPDATE crew_members SET approved = 1, joined_at = ? WHERE crew_id = ? AND guest_id = ? AND approved = 0').bind(Date.now(), crewId, c.req.param('guestId')).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Keine offene Anfrage')
   return c.body(null, 204)
 })
 
@@ -341,16 +396,20 @@ app.post('/api/crews/:id/leave', async (c) => {
 app.get('/api/crews/:id', async (c) => {
   const crewId = c.req.param('id')
   const g = c.get('guest')
-  await membership(c, crewId)
+  const me = await membership(c, crewId, { allowPending: true })
+  if (me.pending) {
+    const crew = await c.env.DB.prepare('SELECT id, name FROM crews WHERE id = ?').bind(crewId).first<{ id: string; name: string }>()
+    return c.json({ pending: true, crew: { ...crew, code: '' } })
+  }
   const since = Number(c.req.query('since') ?? 0) || 0
   const db = c.env.DB
   const [crew, members, plans, steps, messages, meetups, rsvps] = await db.batch([
-    db.prepare('SELECT id, name, code, created_by AS owner FROM crews WHERE id = ?').bind(crewId),
+    db.prepare('SELECT id, name, code, created_by AS owner, approve_joins FROM crews WHERE id = ?').bind(crewId),
     db.prepare(
-      `SELECT g.id, g.nickname, g.color, (m.share_location = 1 AND m.location_at > ${Date.now() - LOCATION_TTL}) AS share_location, CASE WHEN m.share_location = 1 AND m.location_at > ${Date.now() - LOCATION_TTL} THEN m.location END AS location, CASE WHEN m.share_location = 1 AND m.location_at > ${Date.now() - LOCATION_TTL} THEN m.location_at END AS location_at FROM crew_members m JOIN guests g ON g.id = m.guest_id WHERE m.crew_id = ? ORDER BY m.joined_at`,
+      `SELECT g.id, g.nickname, g.color, (m.share_location = 1 AND m.location_at > ${Date.now() - LOCATION_TTL}) AS share_location, CASE WHEN m.share_location = 1 AND m.location_at > ${Date.now() - LOCATION_TTL} THEN m.location END AS location, CASE WHEN m.share_location = 1 AND m.location_at > ${Date.now() - LOCATION_TTL} THEN m.location_at END AS location_at, m.approved FROM crew_members m JOIN guests g ON g.id = m.guest_id WHERE m.crew_id = ? ORDER BY m.joined_at`,
     ).bind(crewId),
-    db.prepare('SELECT p.guest_id, p.act_id FROM plans p JOIN crew_members m ON m.guest_id = p.guest_id WHERE m.crew_id = ? AND p.festival_id = ?').bind(crewId, c.get('festival').id),
-    db.prepare('SELECT s.guest_id, s.day, s.total, s.synced_at FROM steps s JOIN crew_members m ON m.guest_id = s.guest_id WHERE m.crew_id = ? AND s.festival_id = ?').bind(crewId, c.get('festival').id),
+    db.prepare('SELECT p.guest_id, p.act_id FROM plans p JOIN crew_members m ON m.guest_id = p.guest_id WHERE m.crew_id = ? AND m.approved = 1 AND p.festival_id = ?').bind(crewId, c.get('festival').id),
+    db.prepare('SELECT s.guest_id, s.day, s.total, s.synced_at FROM steps s JOIN crew_members m ON m.guest_id = s.guest_id WHERE m.crew_id = ? AND m.approved = 1 AND s.festival_id = ?').bind(crewId, c.get('festival').id),
     db.prepare(
       `SELECT * FROM (
          SELECT m.id, m.guest_id, m.text, m.created_at, m.deleted,
@@ -373,12 +432,14 @@ app.get('/api/crews/:id', async (c) => {
   for (const p of plans.results as R[]) (planBy[p.guest_id as string] ??= []).push(p.act_id as string)
   const stepsBy: Record<string, { day: number; total: number; syncedAt: number }[]> = {}
   for (const s of steps.results as R[]) (stepsBy[s.guest_id as string] ??= []).push({ day: s.day as number, total: s.total as number, syncedAt: s.synced_at as number })
+  const head = crew.results[0] as R
   return c.json({
-    crew: { ...(crew.results[0] as R), owner: undefined },
-    owner: (crew.results[0] as R).owner,
+    crew: { id: head.id, name: head.name, code: head.code, approveJoins: !!head.approve_joins },
+    owner: head.owner,
     me: g.id,
     serverTime: Date.now(),
-    members: (members.results as R[]).map((m) => ({
+    // join requests are visible to the owner only, and carry nothing but a name
+    members: (members.results as R[]).filter((m) => m.approved || me.owner).map((m) => !m.approved ? { id: m.id, nickname: m.nickname, color: m.color, pending: true, sharing: false, location: null, locationAt: null, plan: [], steps: [] } : ({
       id: m.id,
       nickname: m.nickname,
       color: m.color,
@@ -476,21 +537,22 @@ app.post('/api/crews/:id/messages/:msgId/flag', async (c) => {
   return c.json({ id: m.id, flags: n?.n ?? 0, hidden: (n?.n ?? 0) >= FLAGS_TO_HIDE })
 })
 
-// The owner removes a member; the removal also bans them from rejoining with the code.
+// The owner removes a member or declines a join request: that profile is banned and the invite code renewed.
 app.delete('/api/crews/:id/members/:guestId', async (c) => {
   const crewId = c.req.param('id')
   const target = c.req.param('guestId')
   const g = c.get('guest')
-  await membership(c, crewId)
-  const crew = await c.env.DB.prepare('SELECT created_by FROM crews WHERE id = ?').bind(crewId).first<{ created_by: string }>()
-  if (crew?.created_by !== g.id) throw new HttpError(403, 'Nur wer die Crew gegründet hat, kann Mitglieder entfernen')
+  await ownership(c, crewId, 'Mitglieder entfernen')
   if (target === g.id) throw new HttpError(400, 'Verlasse die Crew stattdessen')
+  const code = randomCode(2)
   const res = await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM crew_members WHERE crew_id = ? AND guest_id = ?').bind(crewId, target),
     c.env.DB.prepare('INSERT OR IGNORE INTO crew_bans (crew_id, guest_id, created_at) SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM guests WHERE id = ?)').bind(crewId, target, Date.now(), target),
+    // the ban binds only to this guest profile; a new invite code keeps a fresh profile out too (audit F05)
+    c.env.DB.prepare('UPDATE crews SET code = ? WHERE id = ?').bind(code, crewId),
   ])
   if (!res[0].meta.changes) throw new HttpError(404, 'Mitglied nicht gefunden')
-  return c.body(null, 204)
+  return c.json({ code })
 })
 
 app.post('/api/crews/:id/meetups', async (c) => {
@@ -1270,8 +1332,9 @@ app.get('/api/reports', async (c) => {
   const g = c.get('guest')
   const now = Date.now()
   const rows = await c.env.DB.prepare(
-    `SELECT r.id, r.title, r.place, r.poi, r.severity, r.created_at, r.expires_at, r.guest_id,
-       (SELECT COUNT(*) FROM votes WHERE report_id = r.id AND kind = 'still') AS still,
+    `SELECT r.id, r.title, r.place, r.poi, r.severity, r.created_at, r.expires_at, r.guest_id, r.verified,
+       (SELECT COUNT(*) FROM votes WHERE report_id = r.id AND kind = 'still' AND guest_id != r.guest_id) AS still,
+       (SELECT COUNT(*) FROM votes WHERE report_id = r.id AND kind = 'fixed' AND guest_id != r.guest_id) AS fixed,
        (SELECT kind FROM votes WHERE report_id = r.id AND guest_id = ?) AS my_vote
      FROM reports r WHERE r.festival_id = ? AND r.expires_at > ? ORDER BY r.created_at DESC LIMIT 100`,
   )
@@ -1279,6 +1342,7 @@ app.get('/api/reports', async (c) => {
     .all<Record<string, unknown>>()
   return c.json(
     rows.results.map((r) => {
+      // people who reported it: the reporter plus everyone else who said "still true" – own votes never count (audit F06)
       const confirms = 1 + (r.still as number)
       return {
         id: r.id,
@@ -1286,9 +1350,10 @@ app.get('/api/reports', async (c) => {
         place: r.place,
         poi: r.poi,
         severity: r.severity,
-        // the reporter counts as the first confirmation; three make it "confirmed"
-        source: confirms >= 3 ? 'confirmed' : 'unconfirmed',
+        // "official" only when the organizer checked it; otherwise it says how many reported it, nothing more
+        source: r.verified ? 'official' : confirms >= 3 ? 'confirmed' : 'unconfirmed',
         confirms,
+        fixedVotes: r.fixed,
         mine: r.guest_id === g.id,
         myVote: r.my_vote ?? null,
         ageMin: Math.floor((now - (r.created_at as number)) / MIN),
@@ -1329,15 +1394,46 @@ app.put('/api/reports/:id/vote', async (c) => {
   const now = Date.now()
   const r = await c.env.DB.prepare('SELECT id, guest_id, expires_at FROM reports WHERE id = ? AND festival_id = ? AND expires_at > ?').bind(id, c.get('festival').id, now).first<{ id: string; guest_id: string; expires_at: number }>()
   if (!r) throw new HttpError(404, 'Meldung ist abgelaufen')
+  if (r.guest_id === g.id && kind === 'still') throw new HttpError(400, 'Die eigene Meldung zählt schon – du kannst sie nur zurückziehen')
   await c.env.DB.prepare('INSERT INTO votes (report_id, guest_id, kind, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(report_id, guest_id) DO UPDATE SET kind = excluded.kind, created_at = excluded.created_at').bind(id, g.id, kind, now).run()
   if (kind === 'still') {
-    await c.env.DB.prepare('UPDATE reports SET expires_at = MAX(expires_at, ?) WHERE id = ?').bind(now + STILL_EXTENDS, id).run()
-  } else {
-    const fixed = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM votes WHERE report_id = ? AND kind = 'fixed'").bind(id).first<{ n: number }>()
-    // the reporter can retire their own report; otherwise two independent "fixed" votes do
-    if (r.guest_id === g.id || (fixed?.n ?? 0) >= FIXED_TO_RETIRE) await c.env.DB.prepare('UPDATE reports SET expires_at = ? WHERE id = ?').bind(now, id).run()
+    // confirmations keep a report alive, but never beyond REPORT_MAX_LIFE after it was made
+    await c.env.DB.prepare('UPDATE reports SET expires_at = MIN(created_at + ?, MAX(expires_at, ?)) WHERE id = ?').bind(REPORT_MAX_LIFE, now + STILL_EXTENDS, id).run()
+  } else if (r.guest_id === g.id) {
+    // the reporter can retire their own report; "fixed" from others is shown, but only the organizer or time ends it
+    await c.env.DB.prepare('UPDATE reports SET expires_at = ? WHERE id = ?').bind(now, id).run()
   }
   return c.json({ id, kind })
+})
+
+/** Organizer view of community reports: verify as official or end them. */
+app.get('/api/admin/festivals/:slug/reports', async (c) => {
+  const f = await festivalBySlug(c)
+  const rows = await c.env.DB.prepare(
+    `SELECT r.id, r.title, r.place, r.created_at, r.expires_at, r.verified, g.nickname,
+       (SELECT COUNT(*) FROM votes WHERE report_id = r.id AND kind = 'still' AND guest_id != r.guest_id) AS still,
+       (SELECT COUNT(*) FROM votes WHERE report_id = r.id AND kind = 'fixed' AND guest_id != r.guest_id) AS fixed
+     FROM reports r LEFT JOIN guests g ON g.id = r.guest_id WHERE r.festival_id = ? AND r.expires_at > ? ORDER BY r.created_at DESC LIMIT 100`,
+  )
+    .bind(f.id, Date.now())
+    .all<Record<string, unknown>>()
+  return c.json(rows.results.map((r) => ({ id: r.id, title: r.title, place: r.place, by: r.nickname ?? 'Gast', at: r.created_at, expiresAt: r.expires_at, verified: !!r.verified, reporters: 1 + (r.still as number), fixedVotes: r.fixed })))
+})
+
+app.put('/api/admin/festivals/:slug/reports/:id', async (c) => {
+  const f = await festivalBySlug(c)
+  const verified = v.bool((await body(c)).verified, 'verified')
+  const res = await c.env.DB.prepare('UPDATE reports SET verified = ? WHERE id = ? AND festival_id = ? AND expires_at > ?').bind(verified ? 1 : 0, c.req.param('id'), f.id, Date.now()).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Meldung nicht gefunden')
+  return c.json({ verified })
+})
+
+app.delete('/api/admin/festivals/:slug/reports/:id', async (c) => {
+  const f = await festivalBySlug(c)
+  const now = Date.now()
+  const res = await c.env.DB.prepare('UPDATE reports SET expires_at = ? WHERE id = ? AND festival_id = ? AND expires_at > ?').bind(now, c.req.param('id'), f.id, now).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Meldung nicht gefunden')
+  return c.body(null, 204)
 })
 
 export default {

@@ -65,6 +65,8 @@ export interface RemoteMember {
   locationAt: number | null
   plan: string[]
   steps: { day: number; total: number; syncedAt: number }[]
+  /** a join request, visible to the owner only (audit F05) */
+  pending?: boolean
 }
 export interface RemoteMeetup {
   id: string
@@ -88,7 +90,8 @@ export interface RemoteMessage {
   flaggedByMe?: boolean
 }
 export interface CrewState {
-  crew: { id: string; name: string; code: string }
+  pending?: false
+  crew: { id: string; name: string; code: string; approveJoins: boolean }
   owner: string
   me: string
   serverTime: number
@@ -102,8 +105,12 @@ export interface RemoteReport {
   place: string | null
   poi: string | null
   severity: 'info' | 'warning'
-  source: 'confirmed' | 'unconfirmed'
+  /** official only when the organizer verified it (audit F06) */
+  source: 'official' | 'confirmed' | 'unconfirmed'
+  /** how many people reported it: the reporter plus others who said it is still true */
   confirms: number
+  /** others who said it is fixed – shown, but only the reporter, the organizer or time end a report */
+  fixedVotes: number
   mine: boolean
   myVote: 'still' | 'fixed' | null
   ageMin: number
@@ -132,7 +139,10 @@ export interface PublicMessage {
   flaggedByMe?: boolean
 }
 export type Session = { id: string; token: string; nickname: string | null; color: string }
-type CrewRef = { id: string; name: string; code: string }
+/** `pending`: the join request waits for the owner; the code stays hidden until then */
+type CrewRef = { id: string; name: string; code: string; pending?: boolean }
+/** what a member waiting for approval gets instead of the crew */
+export type CrewPending = { pending: true; crew: { id: string; name: string; code: string } }
 
 export const api = {
   festivals: () => call<{ slug: string; name: string; location: string | null }[]>('GET', '/api/festivals'),
@@ -148,11 +158,14 @@ export const api = {
   createCrew: (name: string) => call<CrewRef>('POST', '/api/crews', { name }),
   joinCrew: (code: string) => call<CrewRef>('POST', '/api/crews/join', { code }),
   leaveCrew: (id: string) => call<void>('POST', `/api/crews/${id}/leave`),
-  crew: (id: string, since?: number) => call<CrewState>('GET', `/api/crews/${id}${since ? `?since=${since}` : ''}`),
+  crew: (id: string, since?: number) => call<CrewState | CrewPending>('GET', `/api/crews/${id}${since ? `?since=${since}` : ''}`),
   setLocation: (id: string, share: boolean, location: string | null) => call('PUT', `/api/crews/${id}/location`, { share, location }),
   deleteMessage: (crewId: string, id: string) => call<void>('DELETE', `/api/crews/${crewId}/messages/${id}`),
   flagMessage: (crewId: string, id: string) => call<{ hidden: boolean }>('POST', `/api/crews/${crewId}/messages/${id}/flag`),
-  removeMember: (crewId: string, guestId: string) => call<void>('DELETE', `/api/crews/${crewId}/members/${guestId}`),
+  removeMember: (crewId: string, guestId: string) => call<{ code: string }>('DELETE', `/api/crews/${crewId}/members/${guestId}`),
+  approveMember: (crewId: string, guestId: string) => call<void>('POST', `/api/crews/${crewId}/members/${guestId}/approve`),
+  setApproveJoins: (crewId: string, approveJoins: boolean) => call<{ approveJoins: boolean }>('PATCH', `/api/crews/${crewId}`, { approveJoins }),
+  renewCode: (crewId: string) => call<{ code: string }>('POST', `/api/crews/${crewId}/code`),
   sendMessage: (crewId: string, text: string, id?: string) => call<RemoteMessage>('POST', `/api/crews/${crewId}/messages`, { id, text }),
   createMeetup: (crewId: string, m: { id?: string; place: string; poi?: string; actId?: string; day: number; min: number; note: string }) => call<RemoteMeetup>('POST', `/api/crews/${crewId}/meetups`, m),
   rsvp: (id: string, going: boolean) => call('PUT', `/api/meetups/${id}/rsvp`, { going }),
@@ -276,6 +289,9 @@ export const adminApi = (adminToken: string) => {
     chat: (slug: string) => req<{ id: string; name: string; text: string; at: number; flags: number; hidden: boolean; restored: boolean }[]>('GET', `/api/admin/festivals/${slug}/chat`),
     deleteChat: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/chat/${id}`),
     restoreChat: (slug: string, id: string) => req<void>('POST', `/api/admin/festivals/${slug}/chat/${id}/restore`),
+    reports: (slug: string) => req<{ id: string; title: string; place: string | null; by: string; at: number; expiresAt: number; verified: boolean; reporters: number; fixedVotes: number }[]>('GET', `/api/admin/festivals/${slug}/reports`),
+    verifyReport: (slug: string, id: string, verified: boolean) => req<{ verified: boolean }>('PUT', `/api/admin/festivals/${slug}/reports/${id}`, { verified }),
+    endReport: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/reports/${id}`),
     analytics: (slug: string) => req<Analytics>('GET', `/api/admin/festivals/${slug}/analytics`),
     dismissFaqMiss: (slug: string, question: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/analytics/faq-misses`, { question }),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
