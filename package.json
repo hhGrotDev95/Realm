@@ -8,20 +8,27 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p .",
-    "test:e2e": "node tests/smoke.mjs"
+    "test:e2e": "node tests/smoke.mjs",
+    "test:live": "node tests/live.mjs",
+    "dev:live": "VITE_API_URL=http://127.0.0.1:8787 vite",
+    "test:a11y": "node tests/a11y.mjs",
+    "test:import": "node --experimental-strip-types --no-warnings tests/import.test.mts && node --experimental-strip-types --no-warnings tests/theme.test.mts && node --experimental-strip-types --no-warnings tests/modules.test.mts && node --experimental-strip-types --no-warnings tests/faq.test.mts"
   },
   "dependencies": {
     "framer-motion": "^14.4.0",
     "lucide-react": "^1.59.0",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "read-excel-file": "^9.3.12"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "axe-core": "^4.14.0",
     "playwright": "^1.56.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4"
+    "vite": "^8.3.4",
+    "write-excel-file": "^4.1.1"
   }
 }

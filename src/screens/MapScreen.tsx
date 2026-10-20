@@ -1,22 +1,11 @@
-import { AnimatePresence, motion } from 'framer-motion'
-import { Beer, Check, Cross, DoorOpen, Droplet, Info, Layers, LocateFixed, Bus, Music, Search, Tent, Toilet, Utensils, X, MapPin, TriangleAlert, Users, Satellite, Minus, Plus } from 'lucide-react'
+import { AnimatePresence, m as motion } from 'framer-motion'
+import { Check, Layers, LocateFixed, Search, X, MapPin, TriangleAlert, Users, Satellite, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { FRIENDS, ME, POIS, STAGES, UPDATES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { on, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
 import { useApp } from '../store'
+import { CAT_ICON } from './mapIcons'
 import { AppBar } from '../App'
 
-export const CAT_ICON: Record<PoiCat, typeof Droplet> = {
-  stage: Music,
-  water: Droplet,
-  wc: Toilet,
-  food: Utensils,
-  medical: Cross,
-  bar: Beer,
-  entrance: DoorOpen,
-  camping: Tent,
-  info: Info,
-  shuttle: Bus,
-}
 const CATS: { id: PoiCat; label: string }[] = [
   { id: 'stage', label: 'Stages' },
   { id: 'water', label: 'Wasser' },
@@ -31,7 +20,8 @@ const H = 940
 type View = { x: number; y: number; k: number }
 
 export function MapScreen() {
-  const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, myUpdates, votes, sheet, set, toast, requireIdentity } = useApp()
+  const { crew } = useApp()
+  const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, updates, votes, sheet, set, toast, requireIdentity } = useApp()
   const wrap = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 0.5 })
   const [animate, setAnimate] = useState(false)
@@ -123,7 +113,7 @@ export function MapScreen() {
       set('myPins', [...myPins, pin])
       setLayers((l) => ({ ...l, pins: true }))
       navigator.vibrate?.(15)
-      toast(`${pin.name} gesetzt`, { label: 'Hier treffen', run: () => requireIdentity('Damit deine Crew weiß, wer einlädt.', () => openSheet({ kind: 'newMeetup', place: pin.name })) })
+      toast(`${pin.name} gesetzt`, on('crew') ? { label: 'Hier treffen', run: () => requireIdentity('Damit deine Crew weiß, wer einlädt.', () => openSheet({ kind: 'newMeetup', place: pin.name })) } : undefined)
     }, 550)
   }
   const onMove = (e: React.PointerEvent) => {
@@ -160,12 +150,12 @@ export function MapScreen() {
   }
 
   const routePoi = route ? POIS.find((p) => p.id === route) : null
-  const reports = [...myUpdates, ...UPDATES].filter((u) => u.poi && u.source !== 'official' && votes[u.id] !== 'fixed')
+  const reports = updates.filter((u) => u.poi && u.source !== 'official' && votes[u.id] !== 'fixed')
   const inv = 1 / view.k
   const selectedPoi = sheet?.kind === 'poi' ? sheet.id : null
 
   return (
-    <div style={{ position: 'absolute', inset: 0 }}>
+    <main style={{ position: 'absolute', inset: 0 }} aria-label="Festivalkarte">
       <div ref={wrap} className="map-wrap" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onWheel={onWheel}>
         <div
           style={{
@@ -198,7 +188,7 @@ export function MapScreen() {
           {visible.map((p) => (
             <Marker key={p.id} p={p} inv={inv} selected={selectedPoi === p.id || route === p.id} onClick={() => select(p)} />
           ))}
-          {layers.reports &&
+          {layers.reports && on('reports') &&
             reports.map((u) => {
               const p = POIS.find((x) => x.id === u.poi)!
               return (
@@ -222,9 +212,9 @@ export function MapScreen() {
                 </span>
               </button>
             ))}
-          {layers.friends &&
+          {layers.friends && on('location') &&
             shareLocation &&
-            FRIENDS.filter((f) => f.at && f.at !== 'camp').map((f, i) => {
+            crew.members.filter((f) => f.at && f.at !== 'camp').map((f, i) => {
               const s = stageById[f.at as keyof typeof stageById]
               const a = (i * 2.4) % (Math.PI * 2)
               return (
@@ -337,7 +327,7 @@ export function MapScreen() {
           <LocateFixed size={21} />
         </button>
       </div>
-    </div>
+    </main>
   )
 }
 

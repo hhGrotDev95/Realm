@@ -1,14 +1,14 @@
-import { AnimatePresence, motion, useDragControls, type PanInfo } from 'framer-motion'
+import { AnimatePresence, m as motion, useDragControls, type PanInfo } from 'framer-motion'
 import { Heart } from 'lucide-react'
-import { useEffect, useRef, type ReactNode } from 'react'
-import { friendById, stageById, type StageId, type UpdateSource } from './data'
+import { Component, useEffect, useRef, type ReactNode } from 'react'
+import { stageById, type StageId, type UpdateSource } from './data'
 import { useApp } from './store'
 
 export const spring = { type: 'spring', stiffness: 420, damping: 36 } as const
 
 export function Avatar({ id, size }: { id: string; size?: 'lg' | 'xl' }) {
-  const { guest } = useApp()
-  const f = id === 'me' ? { name: guest.nickname ?? 'Du', color: guest.color } : friendById[id]
+  const { guest, crew } = useApp()
+  const f = id === 'me' ? { name: guest.nickname ?? 'Du', color: guest.color } : (crew.byId[id] ?? { name: '?', color: '#55545f' })
   return (
     <span className={`avatar ${size ?? ''}`} style={{ background: f.color }} title={f.name}>
       {f.name[0]}
@@ -83,7 +83,7 @@ export function ago(min: number) {
   return `vor ${Math.round(min / 1440)} T.`
 }
 
-export function Sheet({ open, onClose, children, full }: { open: boolean; onClose: () => void; children: ReactNode; full?: boolean }) {
+export function Sheet({ open, onClose, children, full, label }: { open: boolean; onClose: () => void; children: ReactNode; full?: boolean; label: string }) {
   const controls = useDragControls()
   const ref = useRef<HTMLDivElement>(null)
   // move focus into the sheet and restore it on close
@@ -109,6 +109,7 @@ export function Sheet({ open, onClose, children, full }: { open: boolean; onClos
             tabIndex={-1}
             role="dialog"
             aria-modal
+            aria-label={label}
             style={{ outline: 'none' }}
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
@@ -135,7 +136,7 @@ export function Sheet({ open, onClose, children, full }: { open: boolean; onClos
 }
 
 export function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label: string }) {
-  return <button role="switch" aria-checked={on} aria-label={label} className={`switch ${on ? 'on' : ''}`} onClick={() => onChange(!on)} />
+  return <button type="button" role="switch" aria-checked={on} aria-label={label} className={`switch ${on ? 'on' : ''}`} onClick={() => onChange(!on)} />
 }
 
 export const fadeUp = {
@@ -146,4 +147,29 @@ export const fadeUp = {
 
 export function stagger(i: number) {
   return { ...fadeUp, transition: { delay: 0.04 * i, duration: 0.45, ease: [0.22, 1, 0.36, 1] as const } }
+}
+
+/**
+ * Catches a lazily loaded part that fails to load (e.g. offline before it was ever cached)
+ * so the rest of the app keeps working, and offers a retry.
+ */
+export class LazyBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  render() {
+    if (!this.state.failed) return this.props.children
+    return (
+      <div className="empty" role="alert">
+        <b>Gerade nicht verfügbar</b>
+        Dieser Bereich konnte ohne Netz nicht geladen werden.
+        <div style={{ marginTop: 14 }}>
+          <button className="btn secondary sm" onClick={() => this.setState({ failed: false })}>
+            Erneut versuchen
+          </button>
+        </div>
+      </div>
+    )
+  }
 }

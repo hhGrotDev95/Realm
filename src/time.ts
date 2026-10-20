@@ -20,7 +20,7 @@ export function untilLabel(a: Act, now: Clock) {
 }
 
 export function planFor(plan: string[], day: number) {
-  return plan.map((id) => actById[id]).filter((a) => a && a.day === day).sort((a, b) => a.start - b.start)
+  return plan.map((id) => actById[id]).filter((a) => a && a.day === day && !a.change?.cancelled).sort((a, b) => a.start - b.start)
 }
 
 /** Current and next planned act relative to the clock. */

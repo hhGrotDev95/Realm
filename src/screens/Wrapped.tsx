@@ -1,13 +1,14 @@
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, m as motion } from 'framer-motion'
 import { Share2, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { actById, DAYS, FRIENDS, fmt, friendsFor, stageById, STAGES, type StageId } from '../data'
+import { FESTIVAL, actById, DAYS, fmt, stageById, STAGES, type StageId } from '../data'
 import { useApp } from '../store'
 
 const DURATION = 5200
 
 export function Wrapped() {
-  const { plan, attended, closeSheet, guest, toast } = useApp()
+  const { crew } = useApp()
+  const { plan, attended, closeSheet, guest, toast, online } = useApp()
   const [i, setI] = useState(0)
   const [paused, setPaused] = useState(false)
 
@@ -16,11 +17,11 @@ export function Wrapped() {
     const seen = planned.filter((a) => attended[a.id] !== false)
     const confirmed = planned.filter((a) => attended[a.id] === true).length
     const stageCount = seen.reduce<Record<string, number>>((acc, a) => ((acc[a.stage] = (acc[a.stage] ?? 0) + 1), acc), {})
-    const fav = (Object.entries(stageCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'generator') as StageId
+    const fav = (Object.entries(stageCount).sort((a, b) => b[1] - a[1])[0]?.[0] ?? STAGES[0]?.id ?? '') as StageId
     const minutes = seen.reduce((s, a) => s + (a.end - a.start), 0)
     const latest = [...seen].sort((a, b) => b.end - a.end)[0]
     const earliest = [...seen].sort((a, b) => a.start - b.start)[0]
-    const buddy = FRIENDS.map((f) => ({ f, n: seen.filter((a) => friendsFor(a.id).includes(f.id)).length })).sort((a, b) => b.n - a.n)[0]
+    const buddy = crew.members.map((f) => ({ f, n: seen.filter((a) => crew.friendsFor(a.id).includes(f.id)).length })).sort((a, b) => b.n - a.n)[0] as { f: { name: string; color: string }; n: number } | undefined
     return { planned, seen, confirmed, fav, minutes, latest, earliest, buddy, stageCount }
   }, [plan, attended])
 
@@ -30,7 +31,7 @@ export function Wrapped() {
       body: (
         <>
           <div className="label" style={{ color: 'rgba(255,255,255,.7)' }}>
-            Realm Open Air 2027
+            {FESTIVAL.name}
           </div>
           <h3 style={{ fontSize: 48 }}>{guest.nickname ? `${guest.nickname},` : 'Hey,'} das war dein Festival.</h3>
           <p style={{ opacity: 0.8 }}>Drei Tage. Fünf Stages. Eine Crew.</p>
@@ -89,19 +90,19 @@ export function Wrapped() {
         </>
       ),
     },
-    {
+    data.buddy && {
       bg: `linear-gradient(160deg, ${data.buddy.f.color}, #101014 85%)`,
       body: (
         <>
           <p style={{ opacity: 0.8 }}>Dein Festival-Buddy</p>
-          <div className="big">{data.buddy.f.name}</div>
-          <h3>{data.buddy.n} gemeinsame Sets.</h3>
-          <p style={{ opacity: 0.8 }}>Und {(12840 * 3 + 4200).toLocaleString('de-DE')} Schritte von dir – Platz 3 in der Crew.</p>
+          <div className="big">{data.buddy?.f.name}</div>
+          <h3>{data.buddy?.n} gemeinsame Sets.</h3>
+          {!online && <p style={{ opacity: 0.8 }}>Und {(12840 * 3 + 4200).toLocaleString('de-DE')} Schritte von dir – Platz 3 in der Crew.</p>}
         </>
       ),
     },
     {
-      bg: 'linear-gradient(160deg,#a58cff,#ff6b5a)',
+      bg: 'linear-gradient(160deg, var(--brand), #ff6b5a)',
       body: (
         <>
           <h3 style={{ fontSize: 40 }}>Bis nächstes Jahr.</h3>
@@ -111,7 +112,7 @@ export function Wrapped() {
             style={{ background: '#fff', color: '#111', alignSelf: 'flex-start', marginTop: 12 }}
             onClick={(e) => {
               e.stopPropagation()
-              const text = `Mein Realm 2027: ${data.seen.length} Sets, Lieblingsstage ${stageById[data.fav].name}.`
+              const text = `Mein ${FESTIVAL.name}: ${data.seen.length} Sets, Lieblingsstage ${stageById[data.fav]?.name ?? '–'}.`
               if (navigator.share) navigator.share({ text }).catch(() => {})
               else {
                 navigator.clipboard?.writeText(text).catch(() => {})
@@ -124,7 +125,7 @@ export function Wrapped() {
         </>
       ),
     },
-  ]
+  ].filter((x): x is { bg: string; body: React.ReactElement } => !!x)
 
   useEffect(() => {
     if (paused) return

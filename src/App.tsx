@@ -1,15 +1,20 @@
-import { AnimatePresence, motion } from 'framer-motion'
-import { useEffect } from 'react'
-import { House, ListMusic, Map as MapIcon, Users } from 'lucide-react'
-import { DAYS, PHASES, fmt } from './data'
-import { Crew } from './screens/Crew'
+import { AnimatePresence, m as motion } from 'framer-motion'
+import { lazy, Suspense, useEffect } from 'react'
+import { CircleHelp, House, ListMusic, Map as MapIcon, Users } from 'lucide-react'
+import { DAYS, FESTIVAL, on, PHASES, fmt } from './data'
 import { Home } from './screens/Home'
 import { Lineup } from './screens/Lineup'
-import { MapScreen } from './screens/MapScreen'
 import { Sheets } from './sheets'
 import { useApp, type Tab } from './store'
-import { Avatar } from './ui'
-import { Wrapped } from './screens/Wrapped'
+import { Avatar, LazyBoundary } from './ui'
+
+// Less-used screens load on demand; the service worker caches them at install, so they also open offline.
+const loadMap = () => import('./screens/MapScreen')
+const loadCrew = () => import('./screens/Crew')
+const loadWrapped = () => import('./screens/Wrapped')
+const MapScreen = lazy(() => loadMap().then((m) => ({ default: m.MapScreen })))
+const Crew = lazy(() => loadCrew().then((m) => ({ default: m.Crew })))
+const Wrapped = lazy(() => loadWrapped().then((m) => ({ default: m.Wrapped })))
 
 const TABS: { id: Tab; label: string; icon: typeof House }[] = [
   { id: 'home', label: 'Home', icon: House },
@@ -19,17 +24,35 @@ const TABS: { id: Tab; label: string; icon: typeof House }[] = [
 ]
 
 export function AppBar({ floating }: { floating?: boolean }) {
-  const { phase, now, openSheet } = useApp()
-  const sub = phase === 'during' || phase === 'arrival' ? `${DAYS[now.day]?.label ?? ''} · ${fmt(now.min)}` : PHASES.find((p) => p.id === phase)!.hint
+  const { phase, now, openSheet, clockMode, msToStart } = useApp()
+  const sub =
+    phase === 'during' || phase === 'arrival'
+      ? `${DAYS[now.day]?.label ?? ''} · ${fmt(now.min)}`
+      : clockMode === 'real'
+        ? phase === 'before'
+          ? `Noch ${Math.ceil(msToStart / 86_400_000)} Tage`
+          : phase === 'departure'
+            ? 'Abreisetag'
+            : 'Bis nächstes Jahr'
+        : PHASES.find((p) => p.id === phase)!.hint
   return (
     <header className={`appbar ${floating ? 'floating' : ''}`}>
-      <div className="logo" aria-hidden>
-        R
-      </div>
+      {FESTIVAL.theme.logo ? (
+        <img className="logo logo-img" src={FESTIVAL.theme.logo} alt="" />
+      ) : (
+        <div className="logo" aria-hidden>
+          {FESTIVAL.name.charAt(0).toUpperCase()}
+        </div>
+      )}
       <div className="title">
-        <strong>Realm Open Air</strong>
+        <h1 className="appbar-h">{FESTIVAL.name}</h1>
         <span>{sub}</span>
       </div>
+      {on('faq') && (
+        <button className="icon-btn" aria-label="Infos & FAQ" onClick={() => openSheet({ kind: 'faq' })}>
+          <CircleHelp size={22} />
+        </button>
+      )}
       <button className="icon-btn" aria-label="Profil & Einstellungen" onClick={() => openSheet({ kind: 'profile' })}>
         <Avatar id="me" />
       </button>
@@ -38,7 +61,7 @@ export function AppBar({ floating }: { floating?: boolean }) {
 }
 
 export default function App() {
-  const { tab, setTab, toastMsg, meetups, declined, now, phase, sheet, closeSheet } = useApp()
+  const { tab, setTab, toastMsg, meetups, declined, now, phase, sheet, closeSheet, outbox, netOnline, online } = useApp()
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === 'Escape' && closeSheet()
     window.addEventListener('keydown', h)
@@ -53,25 +76,41 @@ export default function App() {
         Festival-Companion V2 – Prototyp. Über den Avatar oben rechts lassen sich die Festivalphasen (Vorher → Danach) umschalten.
       </div>
       <div className="device">
+        {FESTIVAL.status !== 'published' && (
+          <div className="preview-banner" role="status">
+            {FESTIVAL.status === 'draft' ? 'Vorschau · Entwurf – für Besucher noch nicht sichtbar' : 'Archiviert – nur lesbar'}
+          </div>
+        )}
         {tab !== 'map' && <AppBar />}
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
+        {/* enter-only transition: exit animations could stall while live data re-renders the old tab */}
+        <motion.div
             key={tab}
             style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', position: tab === 'map' ? 'absolute' : 'relative', inset: 0 }}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
           >
             {tab === 'home' && <Home />}
             {tab === 'lineup' && <Lineup />}
-            {tab === 'map' && <MapScreen />}
-            {tab === 'crew' && <Crew />}
+            <LazyBoundary key={tab}>
+              <Suspense fallback={<div className="screen" aria-busy="true" />}>
+                {tab === 'map' && <MapScreen />}
+                {tab === 'crew' && <Crew />}
+              </Suspense>
+            </LazyBoundary>
           </motion.div>
+
+        <AnimatePresence>
+          {online && (!netOnline || outbox.length > 0) && (
+            <motion.div className="net-pill" role="status" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}>
+              <span className={`dot ${netOnline ? 'sync' : ''}`} />
+              {netOnline ? `${outbox.length} ${outbox.length === 1 ? 'Änderung wird' : 'Änderungen werden'} gesendet …` : outbox.length ? `Offline · ${outbox.length} ${outbox.length === 1 ? 'Änderung wartet' : 'Änderungen warten'}` : 'Offline · Plan, Karte und Timetable funktionieren weiter'}
+            </motion.div>
+          )}
         </AnimatePresence>
 
         <nav className="nav" aria-label="Hauptnavigation">
-          {TABS.map((t) => {
+          {TABS.filter((t) => t.id !== 'crew' || on('crew')).map((t) => {
             const on = tab === t.id
             return (
               <button key={t.id} className={on ? 'on' : ''} aria-current={on ? 'page' : undefined} onClick={() => setTab(t.id)}>
@@ -85,7 +124,11 @@ export default function App() {
         </nav>
 
         <Sheets />
-        <AnimatePresence>{sheet?.kind === 'wrapped' && <Wrapped />}</AnimatePresence>
+        <LazyBoundary>
+          <Suspense fallback={null}>
+            <AnimatePresence>{sheet?.kind === 'wrapped' && <Wrapped />}</AnimatePresence>
+          </Suspense>
+        </LazyBoundary>
 
         <AnimatePresence>
           {toastMsg && (

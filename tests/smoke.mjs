@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { chromium } from 'playwright'
 
 const PORT = 4321
-const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore' })
+const server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort'], { stdio: 'ignore', detached: true })
 const url = `http://localhost:${PORT}`
 for (let i = 0; i < 50; i++) {
   try {
@@ -31,6 +31,22 @@ try {
     await page.getByRole('button', { name: 'Weiter' }).click()
     await page.getByText('Du bist dabei').waitFor()
   })
+  await step('timetable change is shown on Home and in the line-up', async () => {
+    await page.locator('.alert', { hasText: 'Arcturus: jetzt 22:30' }).waitFor()
+    await page.locator('nav').getByText('Line-up').click()
+    await page.locator('.act', { hasText: 'Arcturus' }).getByText('Neu 22:30 statt 22:15').waitFor()
+    await page.locator('nav').getByText('Home').click()
+  })
+  await step('FAQ bot answers from approved FAQ with source, admits what it does not know', async () => {
+    await page.getByRole('button', { name: 'Infos & FAQ' }).click()
+    await page.getByLabel('Frage an den Festival-Bot').fill('Akku leer – wo kann ich mein Handy laden?')
+    await page.getByRole('button', { name: 'Fragen' }).click()
+    await page.getByText('Quelle: Service-Seite').waitFor()
+    await page.getByLabel('Frage an den Festival-Bot').fill('Wer ist der Headliner am Samstag?')
+    await page.getByRole('button', { name: 'Fragen' }).click()
+    await page.getByText(/keine freigegebene Antwort/).waitFor()
+    await page.keyboard.press('Escape')
+  })
   await step('line-up resolves a conflict', async () => {
     await page.locator('nav').getByText('Line-up').click()
     await page.locator('.conflict').first().click()
@@ -55,6 +71,14 @@ try {
     await page.getByPlaceholder(/Nachricht/).fill('Hallo Crew')
     await page.getByRole('button', { name: 'Senden' }).click()
     await page.locator('.bubble.me', { hasText: 'Hallo Crew' }).waitFor()
+    // moderation: report someone else's message, delete your own
+    await page.locator('.bubble.them', { hasText: 'Klingt gut' }).click()
+    await page.getByRole('button', { name: 'Melden', exact: true }).click()
+    await page.getByText('Ausgeblendet – von der Crew gemeldet').waitFor()
+    page.once('dialog', (d) => d.accept())
+    await page.locator('.bubble.me', { hasText: 'Hallo Crew' }).click()
+    await page.getByRole('button', { name: 'Löschen', exact: true }).click()
+    await page.getByText('Nachricht gelöscht').waitFor()
     await page.keyboard.press('Escape')
   })
   await step('wrapped opens after the festival', async () => {
@@ -63,6 +87,40 @@ try {
     await page.getByText('Ansehen').click()
     await page.locator('.wrapped').waitFor()
   })
+  await step('real-time clock shows the actual countdown', async () => {
+    await page.locator('.wrapped [aria-label="Schließen"]').click()
+    await page.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    await page.locator('.sheet').getByText('Echtzeit').click()
+    const days = Math.ceil((new Date(2027, 6, 15, 10).getTime() - Date.now()) / 86_400_000)
+    if (days > 0) await page.getByText(`Noch ${days} Tage`).waitFor()
+  })
+  await step('offline: after ONE online visit the app and lazily loaded screens open with the server down', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 400, height: 860 } })
+    const p = await ctx.newPage()
+    p.on('pageerror', (e) => errors.push(e.message))
+    await p.goto(url)
+    await p.getByText('Als Nächstes').waitFor()
+    await p.evaluate(() => navigator.serviceWorker.ready)
+    await p.waitForTimeout(1500) // let the service worker finish installing (it caches the whole build)
+    // Playwright's setOffline does not cover service-worker fetches, so take the server down instead:
+    // from here on there is really no network, only what the service worker cached.
+    try {
+      process.kill(-server.pid)
+    } catch {}
+    await new Promise((r) => setTimeout(r, 500))
+    if (process.env.DEBUG_OFFLINE) p.on('requestfailed', (r) => console.log('  failed offline:', r.url().replace(url, '')))
+    await p.reload()
+    await p.getByText('Als Nächstes').waitFor()
+    await p.locator('nav').getByText('Map').click()
+    await p.getByPlaceholder(/Suchen/).waitFor()
+    await p.locator('nav').getByText('Crew').click()
+    await p.getByText('Wo ist meine Crew?').waitFor()
+    await p.getByRole('button', { name: 'Infos & FAQ' }).click()
+    await p.getByLabel('Frage an den Festival-Bot').waitFor()
+    await ctx.close()
+  })
+  // a fetch failing while the server is down is expected; real page errors are not
+  errors.splice(0, errors.length, ...errors.filter((e) => !/Failed to fetch|NetworkError|Load failed/.test(e)))
   if (errors.length) throw new Error('Page errors:\n' + errors.join('\n'))
   console.log('All smoke tests passed')
 } catch (e) {
@@ -70,5 +128,7 @@ try {
   process.exitCode = 1
 } finally {
   await browser.close()
-  server.kill()
+  try {
+    process.kill(-server.pid)
+  } catch {}
 }

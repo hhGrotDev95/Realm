@@ -1,7 +1,7 @@
-import { motion } from 'framer-motion'
-import { ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
+import { m as motion } from 'framer-motion'
+import { CalendarClock, Users, ArrowRight, Bus, CalendarHeart, Car, ChevronRight, CloudSun, DoorOpen, Footprints, MapPin, Navigation, PackageSearch, Share2, Sparkles, Tent, Ticket, TriangleAlert, UserPlus } from 'lucide-react'
 import { useEffect, useRef } from 'react'
-import { ACTS, actById, DAYS, FRIENDS, fmt, friendsFor, stageById, UPDATES, walkMinutes, ME } from '../data'
+import { on, dateRange, FESTIVAL, ACTS, actById, DAYS, fmt, stageById, walkMinutes, ME } from '../data'
 import { conflictClusters, isMeetupActive, useApp } from '../store'
 import { nowNext, planFor, status, untilLabel } from '../time'
 import { AvatarStack, SourceTag, StageDot, ago, stagger } from '../ui'
@@ -33,8 +33,8 @@ export function Home() {
 }
 
 function useRelevantUpdates(n = 2) {
-  const { phase, myUpdates, votes, dismissed } = useApp()
-  const all = [...myUpdates, ...UPDATES].filter((u) => u.phases.includes(phase) && votes[u.id] !== 'fixed' && !dismissed.includes(u.id))
+  const { phase, updates, votes, dismissed } = useApp()
+  const all = updates.filter((u) => u.phases.includes(phase) && votes[u.id] !== 'fixed' && !dismissed.includes(u.id))
   const rank = (u: (typeof all)[0]) => (u.severity === 'critical' ? 0 : u.severity === 'warning' ? 1 : 2) * 1000 + (u.source === 'app' ? 500 : 0) + u.ageMin
   return { urgent: all.filter((u) => u.severity !== 'info' && u.source === 'official').sort((a, b) => rank(a) - rank(b))[0], top: all.sort((a, b) => rank(a) - rank(b)).slice(0, n + 1), total: all.length }
 }
@@ -91,6 +91,7 @@ function UpdatesModule({ i, exclude }: { i: number; exclude?: string }) {
 }
 
 function NowNextHero() {
+  const { crew } = useApp()
   const { plan, now, openSheet, setTab, setFocusPoi } = useApp()
   const { live, next } = nowNext(plan, now)
   const focus = next ?? live
@@ -109,7 +110,7 @@ function NowNextHero() {
     )
   }
   const isLive = status(focus, now) === 'live'
-  const friends = friendsFor(focus.id)
+  const friends = crew.friendsFor(focus.id)
   const stage = stageById[focus.stage]
   const walk = walkMinutes(ME.x, ME.y, stage.x, stage.y)
   const pct = isLive ? ((now.min - focus.start) / (focus.end - focus.start)) * 100 : 0
@@ -188,9 +189,27 @@ function MeetupModule({ i }: { i: number }) {
 }
 
 function CrewPeek({ i }: { i: number }) {
+  const { crew } = useApp()
   const { setTab, stepsOptIn } = useApp()
-  const byStage = FRIENDS.filter((f) => f.at && f.at !== 'camp').reduce<Record<string, string[]>>((acc, f) => ((acc[f.at!] ??= []).push(f.id), acc), {})
+  const byStage = crew.members.filter((f) => f.at && f.at !== 'camp').reduce<Record<string, string[]>>((acc, f) => ((acc[f.at!] ??= []).push(f.id), acc), {})
   const top = Object.entries(byStage).sort((a, b) => b[1].length - a[1].length)[0]
+  if (!top)
+    return (
+      <motion.section {...stagger(i)}>
+        <button className="tile" onClick={() => setTab('crew')}>
+          <span className="tile-icon">
+            <Users size={20} />
+          </span>
+          <span className="grow">
+            <span style={{ fontWeight: 600 }}>{crew.members.length ? `${crew.members.length} in deiner Crew` : 'Crew starten'}</span>
+            <span className="small faint" style={{ display: 'block' }}>
+              {crew.members.length ? 'Niemand teilt gerade den Standort' : 'Freunde einladen, Meetups planen'}
+            </span>
+          </span>
+          <ChevronRight size={18} className="faint" />
+        </button>
+      </motion.section>
+    )
   return (
     <motion.section {...stagger(i)}>
       <button className="tile" onClick={() => setTab('crew')}>
@@ -229,49 +248,83 @@ function AttendPrompt({ i }: { i: number }) {
   )
 }
 
+/** Changes to acts in your plan that still lie ahead – the one thing worth interrupting for. */
+function PlanChanges({ i }: { i: number }) {
+  const { plan, now, openSheet } = useApp()
+  const changed = plan
+    .map((id) => actById[id])
+    .filter((a) => a?.change && status(a, now) !== 'past')
+    .sort((a, b) => a.day - b.day || a.start - b.start)
+  if (!changed.length) return null
+  const a = changed[0]
+  const c = a.change!
+  return (
+    <motion.button {...stagger(i)} className={`alert ${c.cancelled ? 'critical' : 'warning'}`} onClick={() => openSheet({ kind: 'act', id: a.id })}>
+      <CalendarClock className="a-ic" size={20} />
+      <span className="grow">
+        <strong>
+          {a.artist}: {c.cancelled ? 'abgesagt' : [c.moved && `jetzt ${fmt(a.start)}`, c.restaged && `auf ${stageById[a.stage].name}`].filter(Boolean).join(', ')}
+        </strong>
+        <span className="small muted">
+          Änderung in deinem Plan{changed.length > 1 ? ` · +${changed.length - 1} weitere` : ''}
+        </span>
+      </span>
+      <ChevronRight size={18} className="faint" />
+    </motion.button>
+  )
+}
+
 function During() {
   const { urgent } = useRelevantUpdates()
   return (
     <>
       <Urgent />
+      <PlanChanges i={0} />
       <NowNextHero />
-      <MeetupModule i={2} />
+      {on('crew') && <MeetupModule i={2} />}
       <UpdatesModule i={3} exclude={urgent?.id} />
       <AttendPrompt i={4} />
-      <CrewPeek i={5} />
+      {on('crew') && <CrewPeek i={5} />}
     </>
   )
 }
 
 function Countdown() {
+  const { msToStart } = useApp()
+  const total = Math.max(0, Math.floor(msToStart / 60_000))
+  const parts = [
+    [Math.floor(total / 1440), 'Tage'],
+    [Math.floor((total % 1440) / 60), 'Std.'],
+    [total % 60, 'Min.'],
+  ] as const
   return (
     <motion.div {...stagger(0)} className="hero">
-      <span className="label next">Realm Open Air 2027</span>
+      <span className="label next">{FESTIVAL.name}</span>
       <div className="row" style={{ gap: 18, margin: '14px 0 6px', alignItems: 'flex-end' }}>
-        {[
-          ['09', 'Tage'],
-          ['14', 'Std.'],
-          ['22', 'Min.'],
-        ].map(([n, l]) => (
+        {parts.map(([n, l]) => (
           <div key={l}>
-            <div className="h-display" style={{ fontSize: 52 }}>
-              {n}
+            <div className="h-display" style={{ fontSize: 52, fontVariantNumeric: 'tabular-nums' }}>
+              {String(n).padStart(2, '0')}
             </div>
             <div className="tiny muted">{l}</div>
           </div>
         ))}
       </div>
-      <p className="meta">15.–17. Juli · Lüneburger Heide</p>
+      <p className="meta">
+        {dateRange()}
+        {FESTIVAL.location ? ` · ${FESTIVAL.location}` : ''}
+      </p>
     </motion.div>
   )
 }
 
 function Before() {
-  const { plan, resolved, setTab, openSheet, requireIdentity, toast } = useApp()
+  const { plan, resolved, setTab, openSheet, requireIdentity, toast, online, inviteLink } = useApp()
   const conflicts = DAYS.flatMap((d) => conflictClusters(plan, d.idx, resolved))
   return (
     <>
       <Countdown />
+      <PlanChanges i={1} />
       <motion.section {...stagger(1)}>
         <button className="tile" onClick={() => setTab('lineup')}>
           <span className="tile-icon" style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>
@@ -301,6 +354,7 @@ function Before() {
         </motion.section>
       )}
       <UpdatesModule i={3} />
+      {on('crew') && (
       <motion.section {...stagger(4)} className="card">
         <div className="row" style={{ alignItems: 'flex-start' }}>
           <span className="tile-icon">
@@ -318,7 +372,9 @@ function Before() {
           style={{ marginTop: 14 }}
           onClick={() =>
             requireIdentity('Damit deine Freunde wissen, von wem die Einladung kommt.', () => {
-              navigator.clipboard?.writeText('https://realm.app/crew/join/7KX2').catch(() => {})
+              const link = online ? inviteLink() : `${location.origin}/?join=DEMO-CREW`
+              if (!link) return setTab('crew')
+              navigator.clipboard?.writeText(link).catch(() => {})
               toast('Einladungslink kopiert')
             })
           }
@@ -326,6 +382,7 @@ function Before() {
           <Share2 size={17} /> Einladungslink teilen
         </button>
       </motion.section>
+      )}
     </>
   )
 }
@@ -421,6 +478,7 @@ function After() {
   const seen = Object.values(attended).filter(Boolean).length
   return (
     <>
+      {on('wrapped') && (
       <motion.button
         {...stagger(0)}
         onClick={() => openSheet({ kind: 'wrapped' })}
@@ -431,7 +489,7 @@ function After() {
         <span className="label" style={{ color: 'rgba(255,255,255,.75)' }}>
           Festival Wrapped
         </span>
-        <h1 style={{ fontSize: 46 }}>Dein Realm 2027.</h1>
+        <h1 style={{ fontSize: 46 }}>Dein {FESTIVAL.name}.</h1>
         <p className="meta" style={{ color: 'rgba(255,255,255,.85)' }}>
           {seen} Sets gesehen · {plan.length} im Plan · 3 Tage
         </p>
@@ -439,6 +497,7 @@ function After() {
           Ansehen <ArrowRight size={17} />
         </span>
       </motion.button>
+      )}
       <motion.section {...stagger(1)}>
         <div className="section-h">
           <h2>Deine Timeline</h2>
@@ -478,7 +537,7 @@ function After() {
       </motion.section>
       <motion.section {...stagger(3)} className="card row">
         <Footprints size={20} className="faint" />
-        <span className="small muted grow">Realm 2028 · Early-Bird ab 1. Oktober</span>
+        <span className="small muted grow">Bis zum nächsten {FESTIVAL.name}!</span>
       </motion.section>
     </>
   )

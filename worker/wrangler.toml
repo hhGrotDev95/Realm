@@ -1,0 +1,17 @@
+name = "realm-api"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+# Comma-separated list of allowed browser origins ("*" for any).
+[vars]
+ALLOWED_ORIGINS = "*"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "realm"
+# Replace with the id printed by `wrangler d1 create realm` before deploying.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[triggers]
+crons = ["17 * * * *"]

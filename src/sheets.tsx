@@ -1,12 +1,15 @@
-import { AnimatePresence, motion } from 'framer-motion'
-import { Bell, BellRing, Check, ChevronRight, Copy, Fingerprint, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ACTS, actById, DAYS, FRIENDS, friendById, friendsFor, fmt, ME, PHASES, POIS, stageById, UPDATES, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
-import { CAT_ICON } from './screens/MapScreen'
+import { AnimatePresence, m as motion } from 'framer-motion'
+import { Flag, Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Copy, Fingerprint, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
+import { switchFestival } from './festival'
+const FaqSheet = lazy(() => import('./FaqSheet').then((m) => ({ default: m.FaqSheet })))
+import { api } from './api'
+import { on, FESTIVAL, ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
+import { CAT_ICON } from './screens/mapIcons'
 import { ActRow } from './screens/Lineup'
 import { useApp, type SheetState } from './store'
 import { status, untilLabel } from './time'
-import { Avatar, AvatarStack, Segmented, Sheet, SourceTag, StageDot, ago, spring } from './ui'
+import { Avatar, AvatarStack, Segmented, Sheet, SourceTag, StageDot, ago, spring, LazyBoundary } from './ui'
 
 export function Sheets() {
   const { sheet, closeSheet } = useApp()
@@ -17,9 +20,9 @@ export function Sheets() {
   }, [sheet])
   const open = !!sheet && sheet.kind !== 'wrapped'
   const s = sheet ?? shown
-  const full = s?.kind === 'chat' || s?.kind === 'shared' || s?.kind === 'updates'
+  const full = s?.kind === 'chat' || s?.kind === 'shared' || s?.kind === 'updates' || s?.kind === 'faq'
   return (
-    <Sheet open={open} onClose={closeSheet} full={full}>
+    <Sheet open={open} onClose={closeSheet} full={full} label={sheetLabel(s)}>
       <AnimatePresence mode="wait" initial={false}>
         <motion.div key={JSON.stringify(s)} initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.18 }}>
           {s?.kind === 'act' && <ActSheet id={s.id} />}
@@ -32,13 +35,61 @@ export function Sheets() {
           {s?.kind === 'updates' && <Updates />}
           {s?.kind === 'report' && <Report poi={s.poi} />}
           {s?.kind === 'secure' && <Secure />}
+          {s?.kind === 'restore' && <Restore />}
           {s?.kind === 'chat' && <Chat />}
           {s?.kind === 'shared' && <Shared />}
+          {s?.kind === 'members' && <Members />}
+          {s?.kind === 'faq' && (
+            <LazyBoundary>
+              <Suspense fallback={<p className="muted small">Lade …</p>}>
+                <FaqSheet q={s.q} />
+              </Suspense>
+            </LazyBoundary>
+          )}
           {s?.kind === 'steps' && <Steps />}
         </motion.div>
       </AnimatePresence>
     </Sheet>
   )
+}
+
+function sheetLabel(s: SheetState): string {
+  switch (s?.kind) {
+    case 'act':
+      return actById[s.id]?.artist ?? 'Act'
+    case 'poi':
+      return POIS.find((p) => p.id === s.id)?.name ?? 'Ort'
+    case 'resolver':
+      return 'Überschneidung entscheiden'
+    case 'meetup':
+      return 'Meetup'
+    case 'newMeetup':
+      return 'Neues Meetup'
+    case 'profile':
+      return 'Profil & Einstellungen'
+    case 'identity':
+      return 'Name wählen'
+    case 'updates':
+      return 'Updates'
+    case 'report':
+      return 'Problem melden'
+    case 'secure':
+      return 'Profil sichern'
+    case 'restore':
+      return 'Profil wiederherstellen'
+    case 'chat':
+      return 'Crew-Chat'
+    case 'shared':
+      return 'Gemeinsame Acts'
+    case 'members':
+      return 'Mitglieder'
+    case 'faq':
+      return 'Infos & FAQ'
+    case 'steps':
+      return 'Step-Challenge'
+    default:
+      return 'Dialog'
+  }
 }
 
 function goRoute(poi: string, app: ReturnType<typeof useApp>) {
@@ -52,13 +103,14 @@ function goRoute(poi: string, app: ReturnType<typeof useApp>) {
 
 /* ---------------- Act ---------------- */
 function ActSheet({ id }: { id: string }) {
+  const { crew } = useApp()
   const app = useApp()
   const { plan, toggleFav, now, reminders, toggleReminder, openSheet, requireIdentity, attended, setAttended } = app
   const a = actById[id]
   const s = stageById[a.stage]
   const st = status(a, now)
   const inPlan = plan.includes(id)
-  const friends = friendsFor(id)
+  const friends = crew.friendsFor(id)
   const tendency = Math.round(a.popularity * 100)
   const walk = walkMinutes(ME.x, ME.y, s.x, s.y)
   return (
@@ -72,6 +124,19 @@ function ActSheet({ id }: { id: string }) {
           </div>
         </div>
       </div>
+      {a.change && (
+        <div className={`alert ${a.change.cancelled ? 'critical' : 'warning'}`} style={{ marginBottom: 16 }}>
+          <TriangleAlert className="a-ic" size={20} />
+          <span className="grow">
+            <strong>
+              {a.change.cancelled
+                ? 'Dieser Auftritt wurde abgesagt'
+                : [a.change.moved && `Neue Zeit: ${fmt(a.start)}–${fmt(a.end)} (statt ${fmt(a.change.was.start)})`, a.change.restaged && `Neue Bühne: ${stageById[a.stage].name}`].filter(Boolean).join(' · ')}
+            </strong>
+            <span className="small muted">Offiziell{a.change.note ? ` · ${a.change.note}` : ''}</span>
+          </span>
+        </div>
+      )}
       <div className="sheet-actions">
         <button className={`btn ${inPlan ? 'on' : 'primary'}`} onClick={() => toggleFav(id)}>
           {inPlan ? (
@@ -117,7 +182,7 @@ function ActSheet({ id }: { id: string }) {
           <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
             {friends.map((f) => (
               <span key={f} className="chip" style={{ paddingLeft: 4 }}>
-                <Avatar id={f} /> {friendById[f].name}
+                <Avatar id={f} /> {(crew.byId[f]?.name ?? 'Gast')}
               </span>
             ))}
           </div>
@@ -126,7 +191,7 @@ function ActSheet({ id }: { id: string }) {
             Noch niemand – sei die erste Person.
           </p>
         )}
-        {st !== 'past' && (
+        {st !== 'past' && on('crew') && (
           <button
             className="btn ghost sm"
             style={{ marginTop: 10, paddingLeft: 0 }}
@@ -168,13 +233,13 @@ function ActSheet({ id }: { id: string }) {
 /* ---------------- POI ---------------- */
 function PoiSheet({ id }: { id: string }) {
   const app = useApp()
-  const { openSheet, requireIdentity, now, myUpdates, votes, vote, plan } = app
+  const { openSheet, requireIdentity, now, updates, votes, vote, plan } = app
   const p = POIS.find((x) => x.id === id)!
   const I = CAT_ICON[p.cat]
   const walk = walkMinutes(ME.x, ME.y, p.x, p.y)
-  const reports = [...myUpdates, ...UPDATES].filter((u) => u.poi === id && votes[u.id] !== 'fixed')
+  const reports = updates.filter((u) => u.poi === id && votes[u.id] !== 'fixed')
   const stageId = p.cat === 'stage' ? (p.id.replace('stage-', '') as keyof typeof stageById) : null
-  const stageActs = stageId ? ACTS.filter((a) => a.stage === stageId && a.day === Math.max(0, Math.min(2, now.day)) && status(a, now) !== 'past').slice(0, 3) : []
+  const stageActs = stageId ? ACTS.filter((a) => a.stage === stageId && a.day === Math.max(0, Math.min(DAYS.length - 1, now.day)) && status(a, now) !== 'past').slice(0, 3) : []
   const statusText = p.status === 'closed' ? 'Geschlossen' : p.status === 'busy' ? 'Geöffnet · viel los' : p.status === 'open' ? 'Geöffnet' : null
   return (
     <>
@@ -198,12 +263,16 @@ function PoiSheet({ id }: { id: string }) {
         <button className="btn primary" onClick={() => goRoute(p.id, app)}>
           <Navigation size={17} /> Route
         </button>
-        <button className="btn secondary" onClick={() => requireIdentity('Damit deine Crew weiß, wer einlädt.', () => openSheet({ kind: 'newMeetup', poi: p.id, place: p.name }))}>
-          <Users size={17} /> Hier treffen
-        </button>
-        <button className="btn ghost" onClick={() => openSheet({ kind: 'report', poi: p.id })}>
-          <TriangleAlert size={17} /> Problem melden
-        </button>
+        {on('crew') && (
+          <button className="btn secondary" onClick={() => requireIdentity('Damit deine Crew weiß, wer einlädt.', () => openSheet({ kind: 'newMeetup', poi: p.id, place: p.name }))}>
+            <Users size={17} /> Hier treffen
+          </button>
+        )}
+        {on('reports') && (
+          <button className="btn ghost" onClick={() => openSheet({ kind: 'report', poi: p.id })}>
+            <TriangleAlert size={17} /> Problem melden
+          </button>
+        )}
       </div>
       {stageActs.length > 0 && (
         <section style={{ marginBottom: 18 }}>
@@ -237,13 +306,14 @@ function PoiSheet({ id }: { id: string }) {
 
 /* ---------------- Conflict resolver ---------------- */
 function Resolver({ ids, k }: { ids: string[]; k: string }) {
+  const { crew } = useApp()
   const { resolve, closeSheet } = useApp()
   const acts = ids.map((i) => actById[i])
   const [pick, setPick] = useState<string | null>(null)
   const [battle, setBattle] = useState(false)
   const start = Math.min(...acts.map((a) => a.start))
   const end = Math.max(...acts.map((a) => a.end))
-  const maxFriends = Math.max(1, ...acts.map((a) => friendsFor(a.id).length))
+  const maxFriends = Math.max(1, ...acts.map((a) => crew.friendsFor(a.id).length))
   const totalPop = acts.reduce((s, a) => s + a.popularity, 0)
   return (
     <>
@@ -276,7 +346,7 @@ function Resolver({ ids, k }: { ids: string[]; k: string }) {
           <motion.div key="l" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {acts.map((a) => {
               const s = stageById[a.stage]
-              const f = friendsFor(a.id)
+              const f = crew.friendsFor(a.id)
               const on = pick === a.id
               return (
                 <button
@@ -389,6 +459,7 @@ function Battle({ ids, onDone }: { ids: string[]; onDone: (winner: string) => vo
 
 /* ---------------- Meetups ---------------- */
 function MeetupSheet({ id }: { id: string }) {
+  const { crew } = useApp()
   const app = useApp()
   const { meetups, rsvp, closeSheet, sendChat } = app
   const m = meetups.find((x) => x.id === id)
@@ -439,7 +510,7 @@ function MeetupSheet({ id }: { id: string }) {
       <div className="row" style={{ flexWrap: 'wrap', gap: 8 }}>
         {m.going.map((f) => (
           <span key={f} className="chip" style={{ paddingLeft: 4 }}>
-            <Avatar id={f} /> {f === 'me' ? 'Du' : friendById[f].name}
+            <Avatar id={f} /> {f === 'me' ? 'Du' : (crew.byId[f]?.name ?? 'Gast')}
           </span>
         ))}
       </div>
@@ -536,7 +607,7 @@ function NewMeetup({ actId, poi, place: initialPlace, note: initialNote }: { act
 
 /* ---------------- Updates ---------------- */
 function UpdateItem({ u, vote, voted }: { u: FestivalUpdate; vote: (id: string, v: 'still' | 'fixed') => void; voted?: 'still' | 'fixed' }) {
-  const community = u.source === 'confirmed' || u.source === 'unconfirmed'
+  const community = (u.source === 'confirmed' || u.source === 'unconfirmed') && on('reports')
   return (
     <div className="list-item" style={{ alignItems: 'flex-start', flexDirection: 'column', gap: 6 }}>
       <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
@@ -549,7 +620,7 @@ function UpdateItem({ u, vote, voted }: { u: FestivalUpdate; vote: (id: string, 
       </div>
       <div style={{ fontWeight: 600 }}>{u.title}</div>
       {u.body && <div className="small muted">{u.body}</div>}
-      {u.validMin !== undefined && <div className="tiny faint">Läuft in {u.validMin} Min. ab, wenn niemand bestätigt</div>}
+      {u.validMin !== undefined && <div className="tiny faint">{community ? `Läuft in ${u.validMin} Min. ab, wenn niemand bestätigt` : `Gültig noch ${u.validMin} Min.`}</div>}
       {community && (
         <div className="row" style={{ gap: 8, marginTop: 4 }}>
           <button className={`btn sm ${voted === 'still' ? 'on' : 'secondary'}`} onClick={() => vote(u.id, 'still')}>
@@ -565,9 +636,9 @@ function UpdateItem({ u, vote, voted }: { u: FestivalUpdate; vote: (id: string, 
 }
 
 function Updates() {
-  const { phase, myUpdates, votes, vote, openSheet } = useApp()
+  const { phase, updates, votes, vote, openSheet } = useApp()
   const [f, setF] = useState<UpdateSource | 'all'>('all')
-  const all = [...myUpdates, ...UPDATES].filter((u) => u.phases.includes(phase) && votes[u.id] !== 'fixed')
+  const all = updates.filter((u) => u.phases.includes(phase) && votes[u.id] !== 'fixed')
   const list = all.filter((u) => f === 'all' || u.source === f)
   return (
     <>
@@ -576,9 +647,9 @@ function Updates() {
           <h2>Updates</h2>
           <div className="small muted">Jede Meldung mit Quelle, Alter und Gültigkeit.</div>
         </div>
-        <button className="btn secondary sm" onClick={() => openSheet({ kind: 'report' })}>
+        {on('reports') && <button className="btn secondary sm" onClick={() => openSheet({ kind: 'report' })}>
           <Plus size={16} /> Melden
-        </button>
+        </button>}
       </div>
       <div className="chips" style={{ marginBottom: 8 }}>
         {(
@@ -710,7 +781,7 @@ function Identity({ reason }: { reason: string }) {
 }
 
 function Profile() {
-  const { guest, phase, setPhase, openSheet, reset, closeSheet, setTab, plan } = useApp()
+  const { guest, phase, setPhase, openSheet, reset, closeSheet, setTab, plan, online, deleteProfile, session, set, clockMode } = useApp()
   const [confirmReset, setConfirmReset] = useState(false)
   return (
     <>
@@ -745,10 +816,27 @@ function Profile() {
         </button>
       )}
 
+      {online && <FestivalPicker />}
       <div className="label" style={{ marginBottom: 10 }}>
-        Demo · Festivalphase
+        Uhrzeit & Festivalphase
       </div>
       <div className="list" style={{ marginBottom: 22 }}>
+        <button
+          className="list-item"
+          onClick={() => {
+            set('clockMode', 'real')
+            closeSheet()
+            setTab('home')
+          }}
+        >
+          <span className="grow">
+            <span style={{ fontWeight: 600 }}>Echtzeit</span>
+            <span className="small faint" style={{ display: 'block' }}>
+              Richtet sich nach der echten Uhr
+            </span>
+          </span>
+          {clockMode === 'real' && <Check size={18} style={{ color: 'var(--brand)' }} />}
+        </button>
         {PHASES.map((p) => (
           <button
             key={p.id}
@@ -760,12 +848,12 @@ function Profile() {
             }}
           >
             <span className="grow">
-              <span style={{ fontWeight: 600 }}>{p.label}</span>
+              <span style={{ fontWeight: 600 }}>Demo · {p.label}</span>
               <span className="small faint" style={{ display: 'block' }}>
                 {p.hint}
               </span>
             </span>
-            {phase === p.id && <Check size={18} style={{ color: 'var(--brand)' }} />}
+            {clockMode === 'demo' && phase === p.id && <Check size={18} style={{ color: 'var(--brand)' }} />}
           </button>
         ))}
       </div>
@@ -778,11 +866,18 @@ function Profile() {
           <WifiOff size={18} className="faint" />
           <span className="grow small">Offline verfügbar: Timetable, Karte, {plan.length} geplante Acts</span>
         </div>
-        <div className="list-item small faint">ID {guest.id.slice(0, 10)}… · pseudonym</div>
+        <div className="list-item small faint">
+          {online ? (session ? `ID ${session.id.slice(0, 10)}… · pseudonym · verbunden` : 'Noch kein Profil auf dem Server – entsteht beim ersten sozialen Feature') : `ID ${guest.id.slice(0, 10)}… · pseudonym · Demo-Modus`}
+        </div>
+        {online && (
+          <button className="list-item small" onClick={() => openSheet({ kind: 'restore' })}>
+            <KeyRound size={18} className="faint" /> Profil mit Code wiederherstellen
+          </button>
+        )}
         {confirmReset ? (
           <div className="list-item">
-            <span className="grow small">Alle lokalen Daten löschen?</span>
-            <button className="btn danger sm" onClick={reset}>
+            <span className="grow small">{online ? 'Profil und alle Daten auf dem Server endgültig löschen?' : 'Alle lokalen Daten löschen?'}</span>
+            <button className="btn danger sm" onClick={online ? deleteProfile : reset}>
               Löschen
             </button>
             <button className="btn ghost sm" onClick={() => setConfirmReset(false)}>
@@ -791,7 +886,7 @@ function Profile() {
           </div>
         ) : (
           <button className="list-item small" style={{ color: 'var(--crit)' }} onClick={() => setConfirmReset(true)}>
-            <RotateCcw size={18} /> Demo zurücksetzen
+            <RotateCcw size={18} /> {online ? 'Profil löschen' : 'Demo zurücksetzen'}
           </button>
         )}
       </div>
@@ -799,9 +894,52 @@ function Profile() {
   )
 }
 
+/** Every festival is its own tenant: switching reloads the app with that festival's data. */
+function FestivalPicker() {
+  const [list, setList] = useState<{ slug: string; name: string; location: string | null }[] | null>(null)
+  useEffect(() => {
+    api.festivals().then(setList, () => setList([]))
+  }, [])
+  if (!list || list.length < 2) return null
+  return (
+    <>
+      <div className="label" style={{ marginBottom: 10 }}>
+        Festival
+      </div>
+      <div className="list" style={{ marginBottom: 22 }}>
+        {list.map((f) => (
+          <button key={f.slug} className="list-item" onClick={() => f.slug !== FESTIVAL.slug && switchFestival(f.slug)} aria-current={f.slug === FESTIVAL.slug}>
+            <span className="grow">
+              <span style={{ fontWeight: 600 }}>{f.name}</span>
+              {f.location && (
+                <span className="small faint" style={{ display: 'block' }}>
+                  {f.location}
+                </span>
+              )}
+            </span>
+            {f.slug === FESTIVAL.slug && <Check size={18} style={{ color: 'var(--brand)' }} />}
+          </button>
+        ))}
+      </div>
+    </>
+  )
+}
+
 function Secure() {
-  const { secure, guest, toast, closeSheet } = useApp()
+  const { secure, guest, toast, closeSheet, online, requireIdentity } = useApp()
   const [code, setCode] = useState<string | undefined>(guest.recoveryCode)
+  const [busy, setBusy] = useState(false)
+  const makeCode = () =>
+    requireIdentity('Dein Profil braucht einen Namen, bevor es gesichert wird.', async () => {
+      setBusy(true)
+      setCode(await secure('code'))
+      setBusy(false)
+    })
+  const passkey = (label: string) => {
+    secure('passkey')
+    toast(`Mit ${label} gesichert`)
+    closeSheet()
+  }
   return (
     <>
       <div className="sheet-head">
@@ -814,7 +952,7 @@ function Secure() {
       {code ? (
         <>
           <div className="code">{code}</div>
-          <p className="small muted">Bewahre diesen Code sicher auf. Er ist der einzige Weg zurück zu deinem Profil.</p>
+          <p className="small muted">Bewahre diesen Code sicher auf. Er ist der einzige Weg zurück zu deinem Profil{online ? ' – auch auf einem neuen Gerät' : ''}. Ein neuer Code macht den alten ungültig.</p>
           <button
             className="btn secondary block"
             onClick={() => {
@@ -828,52 +966,73 @@ function Secure() {
             Fertig
           </button>
         </>
+      ) : online ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button className="btn primary block" disabled={busy} onClick={makeCode}>
+            <KeyRound size={17} /> {busy ? 'Wird erstellt …' : 'Recovery-Code erstellen'}
+          </button>
+          <p className="tiny faint" style={{ textAlign: 'center' }}>
+            Passkey sowie Apple- und Google-Anmeldung folgen in der nativen App.
+          </p>
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button
-            className="btn primary block"
-            onClick={() => {
-              secure('passkey')
-              toast('Mit Passkey gesichert')
-              closeSheet()
-            }}
-          >
+          <button className="btn primary block" onClick={() => passkey('Passkey')}>
             <Fingerprint size={18} /> Mit Passkey sichern
           </button>
           <div className="row" style={{ gap: 8 }}>
-            <button
-              className="btn secondary grow"
-              onClick={() => {
-                secure('passkey')
-                toast('Mit Apple gesichert')
-                closeSheet()
-              }}
-            >
+            <button className="btn secondary grow" onClick={() => passkey('Apple')}>
               Apple
             </button>
-            <button
-              className="btn secondary grow"
-              onClick={() => {
-                secure('passkey')
-                toast('Mit Google gesichert')
-                closeSheet()
-              }}
-            >
+            <button className="btn secondary grow" onClick={() => passkey('Google')}>
               Google
             </button>
           </div>
-          <button className="btn ghost block" onClick={() => setCode(secure('code'))}>
+          <button className="btn ghost block" onClick={makeCode}>
             <KeyRound size={17} /> Recovery-Code erstellen
           </button>
+          <p className="tiny faint" style={{ textAlign: 'center' }}>
+            Demo-Modus: Die Sicherung wird nur simuliert.
+          </p>
         </div>
       )}
     </>
   )
 }
 
+function Restore() {
+  const { restore, closeSheet } = useApp()
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  return (
+    <>
+      <div className="sheet-head">
+        <div className="grow">
+          <h2>Profil wiederherstellen</h2>
+          <div className="small muted">Gib den Recovery-Code ein, den du beim Sichern erhalten hast. Dein aktuelles Gastprofil auf diesem Gerät wird ersetzt.</div>
+        </div>
+      </div>
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault()
+          setBusy(true)
+          if (await restore(code)) closeSheet()
+          setBusy(false)
+        }}
+      >
+        <input className="field code" style={{ height: 'auto' }} placeholder="XXXX-XXXX-XXXX-XXXX" value={code} onChange={(e) => setCode(e.target.value)} autoCapitalize="characters" autoComplete="one-time-code" />
+        <button className="btn primary block" style={{ marginTop: 14 }} disabled={busy || code.replace(/[^a-z0-9]/gi, '').length < 16}>
+          {busy ? 'Wird geprüft …' : 'Wiederherstellen'}
+        </button>
+      </form>
+    </>
+  )
+}
+
 /* ---------------- Crew sub pages ---------------- */
 function Chat() {
-  const { chat, sendChat, requireIdentity, openSheet, now } = useApp()
+  const { crew } = useApp()
+  const { chat, sendChat, requireIdentity, openSheet, now, deleteMessage, flagMessage } = useApp()
   const [text, setText] = useState('')
   const [active, setActive] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null)
@@ -884,7 +1043,7 @@ function Chat() {
         <div className="grow">
           <h2 style={{ fontSize: 24 }}>Crew-Chat</h2>
           <div className="row small muted" style={{ gap: 8 }}>
-            <AvatarStack ids={FRIENDS.map((f) => f.id)} max={5} /> {FRIENDS.length + 1} Personen
+            <AvatarStack ids={crew.members.map((f) => f.id)} max={5} /> {crew.members.length + 1} Personen
           </div>
         </div>
       </div>
@@ -896,29 +1055,56 @@ function Chat() {
             <motion.div key={m.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} style={{ display: 'flex', flexDirection: 'column', alignItems: me ? 'flex-end' : 'flex-start' }}>
               {showName && (
                 <span className="tiny faint" style={{ margin: '8px 0 3px 4px' }}>
-                  {friendById[m.from].name} · {fmt(m.min)}
+                  {(crew.byId[m.from]?.name ?? 'Gast')} · {fmt(m.min)}
                 </span>
               )}
-              <button className={`bubble ${me ? 'me' : 'them'}`} style={{ textAlign: 'left' }} onClick={() => setActive(active === m.id ? null : m.id)}>
-                {m.text}
-              </button>
+              {m.deleted || (m.hidden && !me) ? (
+                <span className={`bubble ${me ? 'me' : 'them'} removed`}>{m.deleted ? 'Nachricht gelöscht' : 'Ausgeblendet – von der Crew gemeldet'}</span>
+              ) : (
+                <button className={`bubble ${me ? 'me' : 'them'} ${m.pending ? 'pending' : ''}`} style={{ textAlign: 'left' }} onClick={() => setActive(active === m.id ? null : m.id)} aria-expanded={active === m.id}>
+                  {m.text}
+                </button>
+              )}
+              {m.pending && <span className="tiny faint" style={{ marginTop: 2 }}>Wird gesendet …</span>}
+              {me && m.hidden && !m.deleted && <span className="tiny faint" style={{ marginTop: 2 }}>Von der Crew gemeldet – für andere ausgeblendet</span>}
               <AnimatePresence>
-                {active === m.id && (
-                  <motion.button
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="btn ghost sm"
-                    style={{ color: 'var(--brand)' }}
-                    onClick={() => {
-                      setActive(null)
-                      requireIdentity('Damit deine Crew weiß, wer einlädt.', () =>
-                        openSheet({ kind: 'newMeetup', note: m.text.slice(0, 60), place: /archive/i.test(m.text) ? 'Archive Entrance' : undefined, poi: /archive/i.test(m.text) ? 'stage-archive' : undefined }),
-                      )
-                    }}
-                  >
-                    <CalendarPlus size={15} /> In Meetup umwandeln
-                  </motion.button>
+                {active === m.id && !m.pending && (
+                  <motion.div className="msg-actions" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
+                    <button
+                      className="btn ghost sm"
+                      style={{ color: 'var(--brand)' }}
+                      onClick={() => {
+                        setActive(null)
+                        requireIdentity('Damit deine Crew weiß, wer einlädt.', () =>
+                          openSheet({ kind: 'newMeetup', note: m.text.slice(0, 60), place: /archive/i.test(m.text) ? 'Archive Entrance' : undefined, poi: /archive/i.test(m.text) ? 'stage-archive' : undefined }),
+                        )
+                      }}
+                    >
+                      <CalendarPlus size={15} /> In Meetup umwandeln
+                    </button>
+                    {(me || crew.owner === 'me') && (
+                      <button
+                        className="btn ghost sm"
+                        onClick={() => {
+                          setActive(null)
+                          if (confirm(me ? 'Nachricht für alle löschen?' : 'Nachricht als Crew-Gründer:in für alle löschen?')) deleteMessage(m.id)
+                        }}
+                      >
+                        <Trash2 size={15} /> Löschen
+                      </button>
+                    )}
+                    {!me && !m.flaggedByMe && (
+                      <button
+                        className="btn ghost sm"
+                        onClick={() => {
+                          setActive(null)
+                          flagMessage(m.id)
+                        }}
+                      >
+                        <Flag size={15} /> Melden
+                      </button>
+                    )}
+                  </motion.div>
                 )}
               </AnimatePresence>
             </motion.div>
@@ -948,12 +1134,58 @@ function Chat() {
   )
 }
 
+function Members() {
+  const { crew, guest, removeMember } = useApp()
+  const rows = [{ id: 'me', name: guest.nickname ?? 'Du', color: guest.color }, ...crew.members]
+  const canModerate = crew.owner === 'me' && crew.live
+  return (
+    <>
+      <div className="sheet-head">
+        <div className="grow">
+          <h2 style={{ fontSize: 24 }}>Mitglieder</h2>
+          <div className="small muted">
+            {rows.length} {rows.length === 1 ? 'Person' : 'Personen'} in {crew.name}
+          </div>
+        </div>
+      </div>
+      <div className="list">
+        {rows.map((m) => (
+          <div key={m.id} className="list-item">
+            <Avatar id={m.id} />
+            <span className="grow" style={{ fontWeight: 500 }}>
+              {m.id === 'me' ? `${m.name} (du)` : m.name}
+            </span>
+            {crew.owner === m.id && (
+              <span className="tag official">
+                <Crown size={12} /> Gründer:in
+              </span>
+            )}
+            {canModerate && m.id !== 'me' && (
+              <button
+                className="btn ghost sm"
+                aria-label={`${m.name} entfernen`}
+                onClick={() => confirm(`${m.name} aus der Crew entfernen? Die Person kann mit dem Code nicht wieder beitreten.`) && removeMember(m.id)}
+              >
+                <UserMinus size={16} /> Entfernen
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <p className="tiny faint" style={{ marginTop: 14 }}>
+        Nachrichten, die zwei Mitglieder melden, werden für alle außer der verfassenden Person ausgeblendet. {canModerate ? 'Als Gründer:in kannst du Nachrichten löschen und Mitglieder entfernen.' : ''}
+      </p>
+    </>
+  )
+}
+
 function Shared() {
+  const { crew } = useApp()
   const { plan } = useApp()
   const [day, setDay] = useState<number | 'all'>('all')
   const [friend, setFriend] = useState<string | null>(null)
   const acts = useMemo(
-    () => ACTS.filter((a) => plan.includes(a.id) && (day === 'all' || a.day === day)).filter((a) => (friend ? friendsFor(a.id).includes(friend) : friendsFor(a.id).length > 0)),
+    () => ACTS.filter((a) => plan.includes(a.id) && (day === 'all' || a.day === day)).filter((a) => (friend ? crew.friendsFor(a.id).includes(friend) : crew.friendsFor(a.id).length > 0)),
     [plan, day, friend],
   )
   return (
@@ -975,7 +1207,7 @@ function Shared() {
         ))}
       </div>
       <div className="chips" style={{ marginBottom: 6 }}>
-        {FRIENDS.map((f) => (
+        {crew.members.map((f) => (
           <button key={f.id} className={`chip ${friend === f.id ? 'on' : ''}`} style={{ paddingLeft: 4 }} onClick={() => setFriend(friend === f.id ? null : f.id)}>
             <Avatar id={f.id} /> {f.name}
           </button>
@@ -996,11 +1228,23 @@ function Shared() {
 }
 
 function Steps() {
-  const { stepsOptIn, set, guest, requireIdentity, toast } = useApp()
+  const { crew } = useApp()
+  const { stepsOptIn, set, guest, requireIdentity, toast, online, remote, now } = useApp()
+  const day = Math.max(0, Math.min(DAYS.length - 1, now.day))
   const [scope, setScope] = useState<'day' | 'fest'>('day')
-  const me = { id: 'me', name: guest.nickname ?? 'Du', steps: 12840 }
-  const rows = [...FRIENDS.map((f) => ({ id: f.id, name: f.name, steps: scope === 'day' ? f.steps : f.steps * 2 + 3100 })), { ...me, steps: scope === 'day' ? me.steps : me.steps * 2 + 2400 }].sort((a, b) => b.steps - a.steps)
-  const max = rows[0].steps
+  // demo: festival total is extrapolated; live: the server only has what native apps synced
+  const myLive = remote?.members.find((m) => m.id === remote.me)?.steps ?? []
+  const liveTotal = (steps: { day: number; total: number }[]) => (scope === 'day' ? (steps.find((x) => x.day === day)?.total ?? 0) : steps.reduce((n, x) => n + x.total, 0))
+  const meSteps = online ? liveTotal(myLive) : scope === 'day' ? 12840 : 12840 * 2 + 2400
+  const rows = [
+    ...crew.members.map((f) => ({
+      id: f.id,
+      name: f.name,
+      steps: online ? liveTotal(remote?.members.find((m) => m.id === f.id)?.steps ?? []) : scope === 'day' ? f.steps : f.steps * 2 + 3100,
+    })),
+    { id: 'me', name: guest.nickname ?? 'Du', steps: meSteps },
+  ].sort((a, b) => b.steps - a.steps)
+  const max = Math.max(1, rows[0].steps)
   if (!stepsOptIn)
     return (
       <>
@@ -1040,7 +1284,7 @@ function Steps() {
         <div className="grow">
           <span className="label">Step-Challenge</span>
           <h2>Platz {myRank}</h2>
-          <div className="small muted">von {rows.length} in deiner Crew · Top 10 % aller 842 Teilnehmenden</div>
+          <div className="small muted">von {rows.length} in deiner Crew{online ? '' : ' · Top 10 % aller 842 Teilnehmenden'}</div>
         </div>
       </div>
       <Segmented
@@ -1070,7 +1314,10 @@ function Steps() {
         ))}
       </div>
       <div className="row tiny faint" style={{ marginTop: 14 }}>
-        <Sparkles size={14} /> <span className="grow">Letzter Sync vor 4 Min. · keine Preise, nur Ehre</span>
+        <Sparkles size={14} />{' '}
+        <span className="grow">
+          {online ? (myLive.length ? `Letzter Sync vor ${Math.round((Date.now() - Math.max(...myLive.map((x) => x.syncedAt))) / 60000)} Min.` : 'Deine Schritte kommen aus der iOS-/Android-App') : 'Letzter Sync vor 4 Min.'} · keine Preise, nur Ehre
+        </span>
         <button className="btn ghost sm" onClick={() => set('stepsOptIn', false)}>
           Beenden
         </button>

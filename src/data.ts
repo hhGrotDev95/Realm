@@ -1,7 +1,11 @@
+import type { Theme } from './theme/apply'
+import { isEnabled, type ModuleKey, type ModuleState } from './modules.ts'
+import type { Faq } from './faq/match'
 // Realm — demo dataset for "Realm Open Air 2027".
 // Times are minutes after midnight of the festival day (values > 1440 = after midnight).
 
-export type StageId = 'generator' | 'archive' | 'lagoon' | 'forest' | 'observatory'
+/** Stage ids are defined per festival (e.g. 'generator' in the demo). */
+export type StageId = string
 
 export interface Stage {
   id: StageId
@@ -19,7 +23,7 @@ export const STAGES: Stage[] = [
   { id: 'forest', name: 'Forest Hall', color: '#7BE0A0', x: 220, y: 620, vibe: 'Indie · Live' },
   { id: 'observatory', name: 'Observatory', color: '#E07BFF', x: 470, y: 760, vibe: 'Ambient · Late' },
 ]
-export const stageById = Object.fromEntries(STAGES.map((s) => [s.id, s])) as Record<StageId, Stage>
+export const stageById: Record<StageId, Stage> = Object.fromEntries(STAGES.map((s) => [s.id, s]))
 
 export interface FestivalDay {
   idx: number
@@ -43,6 +47,8 @@ export interface Act {
   genre: string
   bio: string
   popularity: number // 0..1 community tendency base
+  /** set when the organizer changed the published slot */
+  change?: { cancelled: boolean; moved: boolean; restaged: boolean; note: string | null; was: { start: number; end: number; stage: StageId } }
 }
 
 const T = (h: number, m = 0) => (h < 10 ? h + 24 : h) * 60 + m
@@ -150,7 +156,7 @@ export const ACTS: Act[] = LINEUP.flatMap((rows, day) =>
   }),
 ).sort((a, b) => a.day - b.day || a.start - b.start)
 
-export const actById = Object.fromEntries(ACTS.map((a) => [a.id, a])) as Record<string, Act>
+export const actById: Record<string, Act> = Object.fromEntries(ACTS.map((a) => [a.id, a]))
 
 export interface Friend {
   id: string
@@ -243,7 +249,6 @@ export const UPDATES: FestivalUpdate[] = [
   { id: 'u1', source: 'official', severity: 'warning', title: 'Gewitterwarnung ab 22:30', body: 'Bei Blitzschlag werden die Open-Air-Bühnen kurz pausiert. Folge den Hinweisen des Personals.', place: 'Gesamtes Gelände', ageMin: 9, validMin: 180, phases: ['during'] },
   { id: 'u2', source: 'confirmed', severity: 'info', title: 'Wasserstelle Lagoon leer', place: 'Lagoon', poi: 'w2', ageMin: 14, validMin: 46, confirms: 12, phases: ['during'] },
   { id: 'u3', source: 'unconfirmed', severity: 'info', title: 'Nord-Eingang ca. 25 Min. Wartezeit', place: 'Eingang Nord', poi: 'en1', ageMin: 7, validMin: 23, confirms: 2, phases: ['during', 'arrival'] },
-  { id: 'u4', source: 'official', severity: 'info', title: 'Arcturus startet 15 Minuten später', body: 'Neue Startzeit: 22:30 Uhr auf der Generator Stage.', place: 'Generator', ageMin: 32, phases: ['during'] },
   { id: 'u5', source: 'app', severity: 'info', title: 'Offline-Modus aktiv', body: 'Timetable, Karte und dein Plan funktionieren auch ohne Netz.', ageMin: 120, phases: ['before', 'arrival', 'during'] },
   { id: 'u6', source: 'official', severity: 'info', title: 'Shuttle-Takt erhöht auf 10 Minuten', place: 'Shuttle-Terminal', poi: 'sh1', ageMin: 40, phases: ['arrival', 'departure'] },
   { id: 'u7', source: 'official', severity: 'info', title: 'Timetable ist final', body: 'Zwei Änderungen seit deinem letzten Besuch: Somna und Fjordlight haben getauscht.', ageMin: 60 * 26, phases: ['before'] },
@@ -256,6 +261,11 @@ export interface ChatMsg {
   from: string // friend id or 'me'
   text: string
   min: number // minute of day
+  pending?: boolean // queued offline, not yet on the server
+  at?: number // server timestamp (live mode)
+  deleted?: boolean
+  hidden?: boolean // flagged by the crew; text withheld from others
+  flaggedByMe?: boolean
 }
 
 export const CHAT: ChatMsg[] = [
@@ -287,3 +297,146 @@ export function fmt(min: number) {
   const m = ((min % 1440) + 1440) % 1440
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 }
+
+/** Name, place and look of the festival on screen – the demo's values until a festival is loaded. */
+export const FESTIVAL = {
+  slug: 'realm-open-air',
+  name: 'Realm Open Air',
+  location: 'Lüneburger Heide' as string | null,
+  status: 'published' as 'draft' | 'published' | 'archived',
+  theme: {} as Theme,
+  modules: {} as ModuleState,
+}
+
+/** Is an optional module available at this festival? (all on in the demo) */
+export const on = (key: ModuleKey) => isEnabled(FESTIVAL.modules, key)
+
+/** Doors open on day 0 at 10:00 local time. */
+const festivalStart = () => {
+  const [y, m, d] = DAYS[0].date.split('-').map(Number)
+  return new Date(y, m - 1, d, 10, 0)
+}
+const DAY_MS = 86_400_000
+
+/**
+ * Real-time clock. A festival day runs from 06:00 to 06:00, so a set at 01:30
+ * still belongs to the previous day (minute 1530), matching the timetable.
+ */
+export function realClock(date = new Date()): { phase: Phase; day: number; min: number; msToStart: number } {
+  const shifted = new Date(date.getTime() - 6 * 3_600_000)
+  const start = festivalStart()
+  const day0 = new Date(start.getFullYear(), start.getMonth(), start.getDate())
+  const today = new Date(shifted.getFullYear(), shifted.getMonth(), shifted.getDate())
+  const day = Math.round((today.getTime() - day0.getTime()) / DAY_MS)
+  const min = shifted.getHours() * 60 + shifted.getMinutes() + 360
+  const msToStart = start.getTime() - date.getTime()
+  const last = DAYS.length - 1
+  const phase: Phase = day < 0 ? 'before' : day === 0 && min < 14 * 60 ? (msToStart > 0 ? 'before' : 'arrival') : day <= last ? 'during' : day <= last + 1 ? 'departure' : 'after'
+  return { phase, day, min, msToStart }
+}
+
+/** Countdown shown in the "before" phase of the demo. */
+export const DEMO_MS_TO_START = ((9 * 24 + 14) * 60 + 22) * 60_000
+
+export interface TimetableChange {
+  actId: string
+  start: number | null
+  end: number | null
+  stage: StageId | null
+  cancelled: boolean
+  note: string | null
+}
+
+/** Demo stand-in for the organizer's timetable changes (matches the demo notice "Arcturus +15 Min."). */
+export const DEMO_CHANGES: TimetableChange[] = [{ actId: '1-arcturus', start: 22 * 60 + 30, end: 24 * 60, stage: null, cancelled: false, note: 'Technischer Umbau' }]
+
+const ORIGINAL = new Map(ACTS.map((a) => [a.id, { start: a.start, end: a.end, stage: a.stage }]))
+let applied = ''
+
+/**
+ * Applies organizer changes to the shared ACTS objects in place, so every screen
+ * (lists, timeline, conflicts, map sheets) sees the same, current timetable.
+ * Idempotent; passing an empty list restores the published timetable.
+ */
+export function applyTimetableChanges(changes: TimetableChange[]) {
+  const key = JSON.stringify(changes)
+  if (key === applied) return
+  applied = key
+  const byId = new Map(changes.map((c) => [c.actId, c]))
+  for (const a of ACTS) {
+    const was = ORIGINAL.get(a.id)!
+    const c = byId.get(a.id)
+    a.start = c?.start ?? was.start
+    a.end = c?.end ?? was.end
+    a.stage = c?.stage ?? was.stage
+    a.change = c
+      ? { cancelled: c.cancelled, moved: c.start !== null && c.start !== was.start, restaged: c.stage !== null && c.stage !== was.stage, note: c.note, was }
+      : undefined
+  }
+  ACTS.sort((x, y) => x.day - y.day || x.start - y.start)
+}
+
+/** The public festival document served by GET /api/festivals/:slug. */
+export interface FestivalBundle {
+  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; updatedAt: number }
+  days: FestivalDay[]
+  stages: Stage[]
+  acts: Omit<Act, 'change'>[]
+  pois: Poi[]
+  faq?: Faq[]
+}
+
+const replace = <T,>(arr: T[], items: T[]) => arr.splice(0, arr.length, ...items)
+const refill = <T,>(map: Record<string, T>, entries: [string, T][]) => {
+  for (const k of Object.keys(map)) delete map[k]
+  Object.assign(map, Object.fromEntries(entries))
+}
+
+/**
+ * Swaps the built-in demo data for a festival loaded from the API. The shared arrays and
+ * lookup maps are updated in place so every module keeps working with the same references.
+ */
+export function loadFestivalBundle(b: FestivalBundle) {
+  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {}, modules: b.festival.modules ?? {} })
+  replace(DAYS, b.days)
+  replace(STAGES, b.stages)
+  refill(stageById, STAGES.map((st) => [st.id, st]))
+  replace(ACTS, b.acts.map((a) => ({ ...a })))
+  refill(actById, ACTS.map((a) => [a.id, a]))
+  replace(POIS, b.pois)
+  replace(FAQS, b.faq ?? [])
+  ORIGINAL.clear()
+  for (const a of ACTS) ORIGINAL.set(a.id, { start: a.start, end: a.end, stage: a.stage })
+  applied = ''
+}
+
+/** "15.–17. Juli 2027" from the festival days. */
+export function dateRange() {
+  if (!DAYS.length) return ''
+  const fmtDay = (iso: string) => new Date(iso + 'T12:00:00')
+  const a = fmtDay(DAYS[0].date)
+  const b = fmtDay(DAYS[DAYS.length - 1].date)
+  const month = (d: Date) => d.toLocaleDateString('de-DE', { month: 'long' })
+  return a.getMonth() === b.getMonth()
+    ? `${a.getDate()}.–${b.getDate()}. ${month(b)} ${b.getFullYear()}`
+    : `${a.getDate()}. ${month(a)} – ${b.getDate()}. ${month(b)} ${b.getFullYear()}`
+}
+
+/** Demo FAQ (also seeded for the demo festival in migration 0008). */
+export const DEMO_FAQ: Faq[] = [
+  { id: 'einlass-zeiten', category: 'Einlass', question: 'Wann öffnet der Einlass?', keywords: 'einlass öffnungszeiten tore', answer: 'Der Einlass öffnet Donnerstag um 10:00 Uhr. Freitag und Samstag ist das Gelände ab 12:00 Uhr geöffnet, der Campingplatz durchgehend.', source: 'Infoseite Anreise', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'baendchen', category: 'Tickets', question: 'Wo bekomme ich mein Bändchen?', keywords: 'bändchen ticket umtausch wristband', answer: 'Tickets werden am Eingang Nord gegen ein Bändchen getauscht. Bitte Ticket (digital oder ausgedruckt) und Ausweis bereithalten.', source: 'Ticket-AGB', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'bändchen-verloren', category: 'Tickets', question: 'Ich habe mein Bändchen verloren – was nun?', keywords: 'bändchen verloren kaputt gerissen', answer: 'Komm mit Ausweis und Ticket-Nummer zum Info-Zelt. Gerissene Bändchen werden ersetzt, verlorene nur mit Nachweis.', source: 'Ticket-AGB', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'camping', category: 'Camping', question: 'Darf ich einen Pavillon mitbringen?', keywords: 'camping zelt pavillon gaskocher grill', answer: 'Pavillons bis 3 × 3 m sind erlaubt. Gaskocher nur mit Kartusche, offene Feuer und Holzkohlegrills sind verboten.', source: 'Campingregeln', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'mitnehmen', category: 'Gelände', question: 'Was darf ich aufs Gelände mitnehmen?', keywords: 'erlaubt verboten flaschen glas taschen', answer: 'Erlaubt sind leere Plastikflaschen bis 1,5 l, kleine Taschen und Sonnencreme. Glas, Dosen und Getränke von außen sind auf dem Konzertgelände verboten.', source: 'Hausordnung', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'wasser', category: 'Gelände', question: 'Gibt es kostenloses Trinkwasser?', keywords: 'wasser trinkwasser auffüllen', answer: 'Ja, an drei Wasserstellen (Nord, Lagoon, Forest) kannst du kostenlos auffüllen. Die Karte zeigt sie unter „Wasser“.', source: 'Geländeplan', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'essen', category: 'Essen', question: 'Gibt es veganes Essen?', keywords: 'essen vegan vegetarisch food court', answer: 'Ja, im Food Court gibt es an jedem Stand mindestens ein veganes Gericht.', source: 'Gastro-Übersicht', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'bezahlen', category: 'Essen', question: 'Kann ich mit Karte zahlen?', keywords: 'bezahlen karte bargeld cashless', answer: 'Alle Stände nehmen Karte und Handy. Bargeld wird nur am Info-Zelt angenommen.', source: 'Gastro-Übersicht', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'akku', category: 'Service', question: 'Wo kann ich mein Handy laden?', keywords: 'handy akku laden strom powerbank', answer: 'Am Info-Zelt gibt es Ladestationen und Powerbanks zum Ausleihen (5 € Pfand).', source: 'Service-Seite', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'fundsachen', category: 'Service', question: 'Wo ist das Fundbüro?', keywords: 'fundsachen verloren lost found', answer: 'Fundsachen werden im Info-Zelt gesammelt, nach dem Festival noch bis Montag 14 Uhr.', source: 'Service-Seite', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'hilfe', category: 'Sicherheit', question: 'Wo finde ich Hilfe, wenn es mir nicht gut geht?', keywords: 'sanitäter hilfe awareness notfall', answer: 'Das Sanitätszelt ist rund um die Uhr besetzt. Das Awareness-Team erreichst du am Info-Zelt. Im Notfall: 112.', source: 'Sicherheitskonzept', updatedAt: Date.UTC(2027, 5, 1) },
+  { id: 'anreise', category: 'Anreise', question: 'Wie komme ich ohne Auto hin?', keywords: 'anreise shuttle bahn bus zug', answer: 'Vom Bahnhof fährt ein Shuttle alle 15 Minuten (am Anreisetag alle 10), im Ticket enthalten.', source: 'Infoseite Anreise', updatedAt: Date.UTC(2027, 5, 1) },
+]
+
+/** The festival's published FAQ (demo answers until a festival is loaded). */
+export const FAQS: Faq[] = [...DEMO_FAQ]

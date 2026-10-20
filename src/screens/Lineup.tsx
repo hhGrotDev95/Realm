@@ -1,7 +1,7 @@
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, m as motion } from 'framer-motion'
 import { GanttChart, Heart, LayoutList, Search, SlidersHorizontal, TriangleAlert, X } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { ACTS, DAYS, fmt, friendsFor, STAGES, stageById, type Act, type StageId } from '../data'
+import { ACTS, DAYS, fmt, STAGES, stageById, type Act, type StageId } from '../data'
 import { conflictClusters, useApp } from '../store'
 import { status } from '../time'
 import { AvatarStack, FavButton, Segmented, StageDot, spring } from '../ui'
@@ -13,7 +13,7 @@ export function Lineup() {
   const app = useApp()
   const { plan, now, phase, resolved, openSheet } = app
   const live = phase === 'during' || phase === 'arrival'
-  const [day, setDay] = useState(live ? Math.max(0, Math.min(2, now.day)) : 0)
+  const [day, setDay] = useState(live ? Math.max(0, Math.min(DAYS.length - 1, now.day)) : 0)
   const [mode, setMode] = useState<Mode>(plan.length ? 'plan' : 'all')
   const [view, setView] = useState<'list' | 'timeline'>('list')
   const [q, setQ] = useState('')
@@ -215,17 +215,21 @@ function Empty({ mode, q, onAll }: { mode: Mode; q: string; onAll: () => void })
 }
 
 export function ActRow({ a, showDay }: { a: Act; showDay?: boolean }) {
+  const { crew } = useApp()
   const { now, openSheet } = useApp()
   const st = status(a, now)
-  const friends = friendsFor(a.id)
+  const friends = crew.friendsFor(a.id)
   return (
-    <motion.div layout="position" className={`act ${st}`} role="button" tabIndex={0} onClick={() => openSheet({ kind: 'act', id: a.id })} onKeyDown={(e) => e.key === 'Enter' && openSheet({ kind: 'act', id: a.id })} style={{ cursor: 'pointer' }}>
+    <motion.div layout="position" className={`act ${st} ${a.change?.cancelled ? 'cancelled' : ''}`}>
+      {/* the row and the heart are sibling controls – never nest interactive elements */}
+      <button className="act-main" onClick={() => openSheet({ kind: 'act', id: a.id })}>
       <div className="time">
         {fmt(a.start)}
         <small>{showDay ? DAYS[a.day].short : st === 'live' ? 'live' : fmt(a.end)}</small>
       </div>
       <div style={{ minWidth: 0 }}>
         <div className="name ellipsis">{a.artist}</div>
+        {a.change && <ChangeTag a={a} />}
         <div className="sub">
           <StageDot id={a.stage} />
           <span className="ellipsis">{stageById[a.stage].name}</span>
@@ -236,8 +240,22 @@ export function ActRow({ a, showDay }: { a: Act; showDay?: boolean }) {
           )}
         </div>
       </div>
+      </button>
       <FavButton id={a.id} />
     </motion.div>
+  )
+}
+
+/** Short, colour-coded hint when the organizer changed a slot. */
+export function ChangeTag({ a }: { a: Act }) {
+  const c = a.change!
+  if (c.cancelled) return <span className="tag crit" style={{ marginTop: 3 }}>Abgesagt</span>
+  return (
+    <span className="tag warn" style={{ marginTop: 3 }}>
+      {c.moved ? `Neu ${fmt(a.start)} statt ${fmt(c.was.start)}` : ''}
+      {c.moved && c.restaged ? ' · ' : ''}
+      {c.restaged ? `jetzt ${stageById[a.stage].name}` : ''}
+    </span>
   )
 }
 
@@ -273,7 +291,7 @@ function Timeline({ acts, day, onOpen }: { acts: Act[]; day: number; onOpen: (id
             {acts
               .filter((a) => a.stage === s.id)
               .map((a) => (
-                <button key={a.id} className={`tl-act ${plan.includes(a.id) ? 'on' : ''}`} style={{ top: 18, left: (a.start - start) * PX, width: (a.end - a.start) * PX - 4, borderColor: s.color }} onClick={() => onOpen(a.id)}>
+                <button key={a.id} className={`tl-act ${plan.includes(a.id) ? 'on' : ''} ${a.change?.cancelled ? 'cancelled' : ''}`} style={{ top: 18, left: (a.start - start) * PX, width: (a.end - a.start) * PX - 4, borderColor: s.color }} onClick={() => onOpen(a.id)}>
                   <b>{a.artist}</b>
                   <span>
                     {fmt(a.start)}–{fmt(a.end)}
