@@ -20,6 +20,25 @@ type Admin = { id: string; name: string; role: 'platform' | 'organizer'; festiva
 type App = { Bindings: Env; Variables: { guest: Guest; festival: Festival; admin: Admin | null } }
 
 const MIN = 60_000
+const DAY = 24 * 60 * MIN
+
+/**
+ * How long data is kept (audit F12, see docs/DATA_RETENTION.md). The hourly cron enforces every line.
+ * Deleting a guest cascades to plans, steps, crew memberships, messages, meetups, votes and flags.
+ */
+const RETENTION = {
+  guestInactive: 180 * DAY,
+  crewMessages: 60 * DAY,
+  meetups: 60 * DAY,
+  steps: 60 * DAY,
+  festivalChat: 30 * DAY,
+  reports: 1 * DAY, // after expiry
+  announcements: 1 * DAY, // after expiry
+  faqEvents: 365 * DAY,
+  importSnapshots: 180 * DAY,
+  auditLog: 730 * DAY,
+  adminSessions: 1 * DAY, // after expiry
+}
 const FLAGS_TO_HIDE = 2
 /** The public festival chat needs more voices to hide a message than a crew of friends. */
 const PUBLIC_FLAGS_TO_HIDE = 3
@@ -106,8 +125,11 @@ async function requireProofOfWork(c: Context<App>, signups: number, answer: unkn
 const auth = async (c: Context<App>, next: () => Promise<void>) => {
   const token = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '')
   if (!token) throw new HttpError(401, 'Nicht angemeldet')
-  const g = await c.env.DB.prepare('SELECT id, nickname, color FROM guests WHERE token_hash = ?').bind(await sha256(token)).first<Guest>()
-  if (!g) throw new HttpError(401, 'Sitzung ungültig')
+  const row = await c.env.DB.prepare('SELECT id, nickname, color, last_seen FROM guests WHERE token_hash = ?').bind(await sha256(token)).first<Guest & { last_seen: number | null }>()
+  if (!row) throw new HttpError(401, 'Sitzung ungültig')
+  const { last_seen, ...g } = row
+  // activity counts for the retention period (audit F12); written at most once a day
+  if (!last_seen || last_seen < Date.now() - DAY) await c.env.DB.prepare('UPDATE guests SET last_seen = ? WHERE id = ?').bind(Date.now(), g.id).run()
   c.set('guest', g)
   await next()
 }
@@ -1788,25 +1810,35 @@ app.delete('/api/admin/festivals/:slug/reports/:id', async (c) => {
   return c.body(null, 204)
 })
 
+/** Hourly housekeeping: every retention period in RETENTION, expired shares, rate windows, challenges. */
+async function housekeeping(db: D1Database, now: number) {
+  const R = RETENTION
+  await db.batch([
+    db.prepare('DELETE FROM guests WHERE COALESCE(last_seen, created_at) < ?').bind(now - R.guestInactive),
+    db.prepare('DELETE FROM messages WHERE created_at < ?').bind(now - R.crewMessages),
+    db.prepare('DELETE FROM meetups WHERE created_at < ?').bind(now - R.meetups),
+    db.prepare('DELETE FROM steps WHERE synced_at < ?').bind(now - R.steps),
+    // crews nobody belongs to any more
+    db.prepare('DELETE FROM crews WHERE NOT EXISTS (SELECT 1 FROM crew_members m WHERE m.crew_id = crews.id)'),
+    db.prepare('DELETE FROM reports WHERE expires_at < ?').bind(now - R.reports),
+    db.prepare('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?').bind(now - R.announcements),
+    db.prepare('DELETE FROM festival_messages WHERE updated_at < ?').bind(now - R.festivalChat),
+    db.prepare('DELETE FROM faq_events WHERE created_at < ?').bind(now - R.faqEvents),
+    db.prepare('DELETE FROM import_snapshots WHERE created_at < ?').bind(now - R.importSnapshots),
+    db.prepare('DELETE FROM audit_log WHERE created_at < ?').bind(now - R.auditLog),
+    db.prepare('DELETE FROM admin_sessions WHERE expires_at < ?').bind(now - R.adminSessions),
+    db.prepare('DELETE FROM admin_invites WHERE expires_at < ?').bind(now - R.adminSessions),
+    db.prepare('DELETE FROM rate WHERE window < ?').bind(now - 2 * 60 * MIN),
+    db.prepare('DELETE FROM challenges WHERE created_at < ?').bind(now - CHALLENGE_TTL),
+    // expired location shares are ended for good, not just hidden
+    db.prepare('UPDATE crew_members SET share_location = 0, location = NULL, location_at = NULL WHERE share_location = 1 AND location_at < ?').bind(now - LOCATION_TTL),
+  ])
+}
+
 export default {
   fetch: app.fetch,
-  // hourly housekeeping: drop long-expired reports/announcements and stale rate windows
   async scheduled(_: ScheduledController, env: Env) {
-    const now = Date.now()
-    await env.DB.batch([
-      env.DB.prepare('DELETE FROM reports WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
-      env.DB.prepare('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?').bind(now - 24 * 60 * MIN),
-      env.DB.prepare('DELETE FROM rate WHERE window < ?').bind(now - 2 * 60 * MIN),
-      env.DB.prepare('DELETE FROM challenges WHERE created_at < ?').bind(now - CHALLENGE_TTL),
-      env.DB.prepare('DELETE FROM admin_sessions WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
-      env.DB.prepare('DELETE FROM admin_invites WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
-      // expired location shares are ended for good, not just hidden
-      env.DB.prepare('UPDATE crew_members SET share_location = 0, location = NULL, location_at = NULL WHERE share_location = 1 AND location_at < ?').bind(now - LOCATION_TTL),
-      // the public chat is ephemeral: 30 days after the last change
-      env.DB.prepare('DELETE FROM festival_messages WHERE updated_at < ?').bind(now - 30 * 24 * 60 * MIN),
-      // FAQ-bot statistics are kept for one festival cycle
-      env.DB.prepare('DELETE FROM faq_events WHERE created_at < ?').bind(now - 365 * 24 * 60 * MIN),
-    ])
+    await housekeeping(env.DB, Date.now())
   },
 }
 

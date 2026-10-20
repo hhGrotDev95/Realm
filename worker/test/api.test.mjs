@@ -20,7 +20,7 @@ await run([
   'd1', 'execute', 'realm', '--local', '--persist-to', persist, '--command',
   "INSERT INTO festivals (id, slug, name, status, created_at, updated_at) VALUES ('fdraft', 'geheim', 'Geheimfestival', 'draft', 0, 0), ('farch', 'vorbei', 'Vorbei Fest', 'archived', 0, 0)",
 ])
-const server = spawn('npx', ['wrangler', 'dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', 'ADMIN_TOKEN:test-admin-token'], { stdio: 'ignore', detached: true })
+const server = spawn('npx', ['wrangler', 'dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', 'ADMIN_TOKEN:test-admin-token', '--test-scheduled'], { stdio: 'ignore', detached: true })
 
 for (let i = 0; ; i++) {
   try {
@@ -876,6 +876,38 @@ try {
     assert.equal((await api('DELETE', `/api/admin/accounts/${olaId}`, A, undefined, null)).status, 204)
     assert.equal((await api('GET', '/api/admin/me', ola, undefined, null)).status, 401)
     assert.equal((await api('POST', '/api/auth/login', null, { email: 'ola@realm.de', password: 'ein-sehr-langes-passwort' }, null)).status, 401)
+  })
+
+  await test('data lifecycle (audit F12): retention periods are enforced by the hourly job; activity keeps a profile', async () => {
+    const N = 'nordlicht'
+    const sql = (q) => run(['d1', 'execute', 'realm', '--local', '--persist-to', persist, '--command', q])
+    const [old, active, mate] = [await newGuest('Alt'), await newGuest('Aktiv'), await newGuest('Mate')]
+    const c = (await api('POST', '/api/crews', active.token, { name: 'Fristen' }, N)).data
+    await joinApproved(active, mate, c, N)
+    const solo = (await api('POST', '/api/crews', old.token, { name: 'Verlassen' }, N)).data
+    const oldMsg = (await api('POST', `/api/crews/${c.id}/messages`, mate.token, { text: 'vor langer Zeit' }, N)).data
+    const newMsg = (await api('POST', `/api/crews/${c.id}/messages`, mate.token, { text: 'gerade eben' }, N)).data
+    await api('POST', `/api/crews/${c.id}/meetups`, active.token, { place: 'Kai', day: 0, min: 1200, note: 'alt' }, N)
+    await api('PUT', '/api/me/steps', mate.token, { day: 0, total: 5000 }, N)
+    const day = 86_400_000
+    const now = Date.now()
+    // 181 days without activity for "Alt" and – so far – for "Aktiv"; 61-day-old message, meetup and steps
+    await sql(`UPDATE guests SET last_seen = ${now - 181 * day} WHERE id IN ('${old.id}', '${active.id}')`)
+    await sql(`UPDATE messages SET created_at = ${now - 61 * day} WHERE id = '${oldMsg.id}'`)
+    await sql(`UPDATE meetups SET created_at = ${now - 61 * day} WHERE crew_id = '${c.id}'`)
+    await sql(`UPDATE steps SET synced_at = ${now - 61 * day} WHERE guest_id = '${mate.id}'`)
+    // "Aktiv" opens the app once: that counts as activity and keeps the profile
+    assert.equal((await api('GET', '/api/me', active.token, undefined, N)).status, 200)
+    assert.equal((await fetch(`${BASE}/__scheduled?cron=17+*+*+*+*`)).status, 200)
+    assert.equal((await api('GET', '/api/me', old.token, undefined, N)).status, 401, 'inactive profile deleted')
+    assert.equal((await api('GET', '/api/me', active.token, undefined, N)).status, 200, 'active profile kept')
+    const st = (await api('GET', `/api/crews/${c.id}`, active.token, undefined, N)).data
+    assert.deepEqual(st.messages.map((m) => m.id), [newMsg.id], 'only the old message is gone')
+    assert.deepEqual(st.meetups, [])
+    assert.deepEqual(st.members.find((m) => m.id === mate.id).steps, [])
+    // the crew that only "Alt" belonged to went with the profile
+    const rows = await fetch(`${BASE}/api/crews/join`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Festival': N, Authorization: 'Bearer ' + mate.token }, body: JSON.stringify({ code: solo.code }) })
+    assert.equal(rows.status, 404)
   })
 
   await test('privacy: a location share expires on the server 2 h after it was last confirmed', async () => {

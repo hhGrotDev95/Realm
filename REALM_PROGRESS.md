@@ -347,3 +347,4 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 
 ## Prüfbericht-Behebung · Welle 6a (claude/realm-fix-wave6)
 - F14 Schriften lokal (keine Google-Verbindung mehr), F16 vollständige Snapshots inkl. Live-Änderungen und Bühnenattributen.
+- Welle 6b: F12 Löschfristen (Cron + `docs/DATA_RETENTION.md`), Profillöschung über alle Festivals. Migration `0017_guest_activity.sql`.
