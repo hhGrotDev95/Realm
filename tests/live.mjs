@@ -424,6 +424,29 @@ try {
     await visitor.locator('.map-wrap image').waitFor({ state: 'attached' })
     await visitor.getByLabel('Karte durchsuchen').fill('Schließ')
     await visitor.getByRole('button', { name: /Schließfächer/ }).first().waitFor()
+
+    // analytics: three visitors plan the same act, the bot misses the same question three times
+    const bundle = await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()
+    const falter = bundle.acts.find((a) => a.artist === 'Nachtfalter').id
+    const H = (token) => ({ 'Content-Type': 'application/json', 'X-Festival': 'testwiese-festival', ...(token ? { Authorization: 'Bearer ' + token } : {}) })
+    for (const name of ['Ida', 'Jan', 'Kim']) {
+      const g = await (await fetch(`${API}/api/guests`, { method: 'POST', headers: H(), body: JSON.stringify({ nickname: name }) })).json()
+      const r = await fetch(`${API}/api/me/plan`, { method: 'PUT', headers: H(g.token), body: JSON.stringify({ acts: [falter] }) })
+      if (!r.ok) throw new Error('plan not saved: ' + r.status)
+    }
+    await visitor.getByRole('button', { name: 'Infos & FAQ' }).click()
+    for (let i = 0; i < 3; i++) {
+      await visitor.getByLabel('Frage an den Festival-Bot').fill(i ? 'Gibt es Duschen' : 'Gibt es Duschen?')
+      await visitor.getByRole('button', { name: 'Fragen' }).click()
+      await visitor.getByText(/keine freigegebene Antwort/).waitFor()
+    }
+    await org.getByRole('tab', { name: 'Auswertung' }).click()
+    await org.locator('.bars li', { hasText: 'Nachtfalter' }).getByText('3', { exact: true }).waitFor()
+    await org.getByText('„gibt es duschen“').waitFor()
+    await org.locator('.heat td', { hasText: '3' }).first().waitFor()
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/analytics.png`, fullPage: true })
+    await org.getByRole('button', { name: '„gibt es duschen“ als erledigt markieren' }).click()
+    await org.getByText('Keine offenen Fragen', { exact: false }).waitFor()
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

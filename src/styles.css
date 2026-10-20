@@ -496,3 +496,17 @@ select.field { appearance: none; }
 .ed-pin.on circle, .ed-pin:focus-visible circle { stroke: var(--brand); stroke-width: 6; }
 .ed-label { fill: #e9ecf1; font: 600 22px Inter, system-ui, sans-serif; paint-order: stroke; stroke: #0d0f12; stroke-width: 5px; pointer-events: none; }
 .admin-sep { border: 0; border-top: 1px solid var(--line, #262b33); margin: 16px 0; }
+
+/* analytics */
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.kpi { background: var(--surface-2); border-radius: var(--r-sm); padding: 12px 14px; }
+.kpi-n { font-family: var(--display); font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.bars li { display: grid; grid-template-columns: minmax(0, 1.4fr) 1fr auto; align-items: center; gap: 10px; font-size: 14px; }
+.bars-track { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.bars-track i { display: block; height: 100%; border-radius: 0 4px 4px 0; background: var(--brand); }
+.bars-n { font-variant-numeric: tabular-nums; color: var(--text-2); min-width: 2ch; text-align: right; }
+.heat-wrap { overflow-x: auto; }
+.heat { border-collapse: separate; border-spacing: 2px; font-variant-numeric: tabular-nums; }
+.heat th[scope='row'] { text-align: left; padding-right: 10px; white-space: nowrap; font-weight: 500; }
+.heat td { width: 38px; height: 30px; text-align: center; font-size: 12px; border-radius: 6px; background: var(--surface-2); }

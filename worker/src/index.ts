@@ -129,6 +129,7 @@ function moduleFor(path: string): ModuleKey | null {
   if (path.startsWith('/api/crews') || path.startsWith('/api/meetups')) return 'crew'
   if (path.startsWith('/api/me/steps')) return 'steps'
   if (path.startsWith('/api/reports')) return 'reports'
+  if (path.startsWith('/api/faq/')) return 'faqbot'
   return null
 }
 
@@ -208,7 +209,7 @@ app.use('/api/reports', auth)
 app.use('/api/reports/*', auth)
 
 // tenant-scoped routes (the profile itself – PATCH/DELETE /api/me, recovery – is global)
-for (const path of ['/api/me/plan', '/api/me/steps', '/api/crews', '/api/crews/*', '/api/meetups/*', '/api/reports', '/api/reports/*', '/api/announcements', '/api/timetable/*'])
+for (const path of ['/api/me/plan', '/api/me/steps', '/api/crews', '/api/crews/*', '/api/meetups/*', '/api/reports', '/api/reports/*', '/api/announcements', '/api/timetable/*', '/api/faq/*'])
   app.use(path, tenant)
 app.get('/api/me', tenant)
 
@@ -785,6 +786,74 @@ app.put('/api/admin/festivals/:slug/theme', async (c) => {
   return c.json(theme)
 })
 
+/* ---------- Analytics ---------- */
+
+/** Groups smaller than this are never shown, so no single visitor can be singled out. */
+const MIN_GROUP = 3
+const normalizeQuestion = (q: string) => q.toLowerCase().replace(/\s+/g, ' ').replace(/[?!.¿¡]+$/g, '').trim().slice(0, 140)
+
+/** The FAQ bot reports anonymously whether it found an answer (no guest, no session needed). */
+app.post('/api/faq/events', async (c) => {
+  const b = await body(c)
+  const ip = c.req.header('CF-Connecting-IP') ?? 'local'
+  await rateLimit(c.env.DB, 'faq:' + ip, 60, 10 * MIN)
+  const kind = v.oneOf(b.kind, 'kind', ['hit', 'miss'] as const)
+  const f = c.get('festival')
+  if (kind === 'hit') {
+    const faqId = v.str(b.faqId, 'faqId', { max: 80 })!
+    if (!(await c.env.DB.prepare("SELECT 1 FROM faqs WHERE festival_id = ? AND id = ? AND status = 'published'").bind(f.id, faqId).first())) throw new HttpError(404, 'Antwort nicht gefunden')
+    await c.env.DB.prepare("INSERT INTO faq_events (festival_id, kind, faq_id, created_at) VALUES (?, 'hit', ?, ?)").bind(f.id, faqId, Date.now()).run()
+  } else {
+    const q = normalizeQuestion(v.str(b.question, 'Frage', { min: 3, max: 300 })!)
+    await c.env.DB.prepare("INSERT INTO faq_events (festival_id, kind, question, created_at) VALUES (?, 'miss', ?, ?)").bind(f.id, q, Date.now()).run()
+  }
+  return c.body(null, 204)
+})
+
+/**
+ * Aggregates for the organizer: interest per act (from synced plans), community activity and
+ * FAQ-bot usage. Only counts, never people; any group below MIN_GROUP is withheld.
+ */
+app.get('/api/admin/festivals/:slug/analytics', async (c) => {
+  const f = await festivalBySlug(c)
+  const db = c.env.DB
+  const [profiles, acts, crews, members, messages, meetups, reports, steps, hits, misses] = await db.batch([
+    db.prepare('SELECT COUNT(DISTINCT guest_id) AS n FROM plans WHERE festival_id = ?').bind(f.id),
+    db.prepare('SELECT act_id AS id, COUNT(*) AS n FROM plans WHERE festival_id = ? GROUP BY act_id').bind(f.id),
+    db.prepare('SELECT COUNT(*) AS n FROM crews WHERE festival_id = ?').bind(f.id),
+    db.prepare('SELECT COUNT(DISTINCT m.guest_id) AS n FROM crew_members m JOIN crews c ON c.id = m.crew_id WHERE c.festival_id = ?').bind(f.id),
+    db.prepare('SELECT COUNT(*) AS n FROM messages m JOIN crews c ON c.id = m.crew_id WHERE c.festival_id = ?').bind(f.id),
+    db.prepare('SELECT COUNT(*) AS n FROM meetups m JOIN crews c ON c.id = m.crew_id WHERE c.festival_id = ?').bind(f.id),
+    db.prepare('SELECT COUNT(*) AS n FROM reports WHERE festival_id = ?').bind(f.id),
+    db.prepare('SELECT COUNT(DISTINCT guest_id) AS n FROM steps WHERE festival_id = ?').bind(f.id),
+    db.prepare("SELECT e.faq_id AS id, q.question, COUNT(*) AS n FROM faq_events e JOIN faqs q ON q.festival_id = e.festival_id AND q.id = e.faq_id WHERE e.festival_id = ? AND e.kind = 'hit' GROUP BY e.faq_id ORDER BY n DESC LIMIT 10").bind(f.id),
+    db.prepare("SELECT question, COUNT(*) AS n, MAX(created_at) AS last FROM faq_events WHERE festival_id = ? AND kind = 'miss' GROUP BY question ORDER BY n DESC, last DESC LIMIT 20").bind(f.id),
+  ])
+  const n = (r: D1Result) => (r.results[0] as { n: number } | undefined)?.n ?? 0
+  const group = (x: number) => (x >= MIN_GROUP ? x : 0)
+  const actRows = acts.results as { id: string; n: number }[]
+  return c.json({
+    minGroup: MIN_GROUP,
+    profiles: group(n(profiles)),
+    acts: actRows.filter((a) => a.n >= MIN_GROUP).map((a) => ({ id: a.id, plans: a.n })),
+    withheldActs: actRows.filter((a) => a.n < MIN_GROUP).length,
+    community: { crews: group(n(crews)), members: group(n(members)), messages: group(n(messages)), meetups: group(n(meetups)), reports: group(n(reports)), steps: group(n(steps)) },
+    faq: {
+      hits: (hits.results as { id: string; question: string; n: number }[]).filter((h) => h.n >= MIN_GROUP),
+      // a question someone typed is shown only once several people asked it the same way
+      misses: (misses.results as { question: string; n: number; last: number }[]).filter((m) => m.n >= MIN_GROUP),
+    },
+  })
+})
+
+/** The organizer has answered (or dismissed) a missed question. */
+app.delete('/api/admin/festivals/:slug/analytics/faq-misses', async (c) => {
+  const f = await festivalBySlug(c)
+  const q = normalizeQuestion(v.str((await body(c)).question, 'Frage', { max: 300 })!)
+  await c.env.DB.prepare("DELETE FROM faq_events WHERE festival_id = ? AND kind = 'miss' AND question = ?").bind(f.id, q).run()
+  return c.body(null, 204)
+})
+
 const MAP_W = 1000
 const MAP_H = 940
 const POI_CATS = ['water', 'wc', 'food', 'medical', 'bar', 'entrance', 'camping', 'info', 'shuttle'] as const
@@ -1141,6 +1210,8 @@ export default {
       env.DB.prepare('DELETE FROM reports WHERE expires_at < ?').bind(now - 24 * 60 * MIN),
       env.DB.prepare('DELETE FROM announcements WHERE expires_at IS NOT NULL AND expires_at < ?').bind(now - 24 * 60 * MIN),
       env.DB.prepare('DELETE FROM rate WHERE window < ?').bind(now - 2 * 60 * MIN),
+      // FAQ-bot statistics are kept for one festival cycle
+      env.DB.prepare('DELETE FROM faq_events WHERE created_at < ?').bind(now - 365 * 24 * 60 * MIN),
     ])
   },
 }
