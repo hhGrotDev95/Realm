@@ -173,6 +173,38 @@ try {
     if (report.clipped.length || report.toolbarRight > 320 || report.overflow > 0) throw new Error('narrow layout: ' + JSON.stringify(report))
     await ctx.close()
   })
+  await step('map on a narrow phone (audit D08): every marker visible – none under the controls, off screen or covered', async () => {
+    for (const [w, h] of [[320, 568], [320, 640]]) {
+      const ctx = await browser.newContext({ viewport: { width: w, height: h }, locale: 'de-DE' })
+      const p = await ctx.newPage()
+      watch(p, 'map320')
+      await p.goto(url)
+      await p.locator('nav').getByText('Map').click()
+      await p.locator('.map-wrap button[aria-label]').first().waitFor()
+      await p.waitForTimeout(500)
+      const r = await p.evaluate(() => {
+        const R = (e) => e.getBoundingClientRect()
+        const controls = [...document.querySelectorAll('.map-search, .map-overlay-top .chips, .map-fabs .fab, nav')].map(R)
+        const markers = [...document.querySelectorAll('.map-wrap button[aria-label]')].map((e) => ({ n: e.getAttribute('aria-label'), badge: !!e.dataset.badgeFor, r: R(e.firstElementChild ?? e) }))
+        const inter = (a, b) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top))
+        const overlaps = []
+        for (let i = 0; i < markers.length; i++)
+          for (let j = i + 1; j < markers.length; j++) {
+            if (markers[i].badge || markers[j].badge) continue // report badges sit on top of their marker by design
+            const o = inter(markers[i].r, markers[j].r) / Math.min(markers[i].r.width * markers[i].r.height, markers[j].r.width * markers[j].r.height)
+            if (o > 0.25) overlaps.push(`${markers[i].n} × ${markers[j].n}`)
+          }
+        return {
+          underControls: markers.filter((m) => controls.some((c) => inter(m.r, c) > 0)).map((m) => m.n),
+          offscreen: markers.filter((m) => m.r.left < 0 || m.r.right > innerWidth || m.r.top < 0).map((m) => m.n),
+          overlaps,
+          hiddenBadges: [...document.querySelectorAll('.map-wrap [data-badge-for]')].filter((e) => { const b = R(e); return !e.contains(document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2)) }).map((e) => e.getAttribute('aria-label')),
+        }
+      })
+      if (Object.values(r).some((x) => x.length)) throw new Error(`${w}×${h}: ` + JSON.stringify(r))
+      await ctx.close()
+    }
+  })
   await step('reminders (audit F15): festival time zone, armed again after a reload, really cancelled when switched off', async () => {
     // a phone in New York, the festival in Berlin; 21:30 Berlin on the second day (2027-07-16)
     const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE', timezoneId: 'America/New_York', permissions: ['notifications'] })

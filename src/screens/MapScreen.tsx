@@ -23,6 +23,8 @@ export function MapScreen() {
   const { crew } = useApp()
   const { here, openSheet, focusPoi, setFocusPoi, shareLocation, myPins, updates, votes, sheet, set, toast, requireIdentity } = useApp()
   const wrap = useRef<HTMLDivElement>(null)
+  const topRef = useRef<HTMLDivElement>(null)
+  const fabsRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 0.5 })
   const [animate, setAnimate] = useState(false)
   const [cat, setCat] = useState<PoiCat | null>(null)
@@ -46,11 +48,24 @@ export function MapScreen() {
     window.setTimeout(() => setAnimate(false), 450)
   }, [])
 
+  // first view (audit D08): every important marker inside the free area – below search and filters, left of
+  // the buttons, above the navigation – instead of a map twice the screen's width on a narrow phone
   useLayoutEffect(() => {
     const el = wrap.current!
-    const k = Math.max(el.clientWidth / W, (el.clientHeight * 0.8) / H) * 1.05
-    const c = here ?? { x: W / 2, y: H / 2 }
-    setView({ k, x: el.clientWidth / 2 - c.x * k, y: el.clientHeight / 2 - c.y * k })
+    const box = el.getBoundingClientRect()
+    const top = (topRef.current?.getBoundingClientRect().bottom ?? box.top) - box.top + 12
+    const fabs = fabsRef.current?.getBoundingClientRect()
+    const right = fabs && box.width < 600 ? fabs.left - box.left - 8 : box.width - 12
+    const navTop = document.querySelector('nav')?.getBoundingClientRect().top ?? box.bottom
+    const bottom = Math.min(box.height, navTop - box.top) - 12
+    const pts = [...visible, ...(here ? [here] : [])]
+    if (!pts.length) return // an empty draft preview has no marker bounds to fit
+    const [x0, x1] = [Math.min(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.x))]
+    const [y0, y1] = [Math.min(...pts.map((p) => p.y)), Math.max(...pts.map((p) => p.y))]
+    // markers keep their pixel size at any zoom: leave room for half a marker around the box
+    const k = Math.min(1.2, Math.max(MIN_K, Math.min((right - 12 - 2 * 24) / Math.max(1, x1 - x0), (bottom - top - 2 * 24) / Math.max(1, y1 - y0))))
+    setView({ k, x: (12 + right) / 2 - ((x0 + x1) / 2) * k, y: (top + bottom) / 2 - ((y0 + y1) / 2) * k })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // handle deep links from other screens: "route:<poi>" or "poi:<poi>"
@@ -93,7 +108,7 @@ export function MapScreen() {
 
   const zoomAt = (factor: number, cx: number, cy: number) =>
     setView((v) => {
-      const k = Math.min(2.4, Math.max(0.3, v.k * factor))
+      const k = Math.min(2.4, Math.max(MIN_K, v.k * factor))
       const f = k / v.k
       return { k, x: cx - (cx - v.x) * f, y: cy - (cy - v.y) * f }
     })
@@ -190,13 +205,14 @@ export function MapScreen() {
             </svg>
           )}
           {visible.map((p) => (
-            <Marker key={p.id} p={p} inv={inv} selected={selectedPoi === p.id || route === p.id} onClick={() => select(p)} />
+            <Marker key={p.id} p={p} inv={inv} compact={view.k < COMPACT_K} selected={selectedPoi === p.id || route === p.id} onClick={() => select(p)} />
           ))}
           {layers.reports && on('reports') &&
             reports.map((u) => {
               const p = POIS.find((x) => x.id === u.poi)!
               return (
-                <button key={u.id} className="map-pin" onClick={() => openSheet({ kind: 'poi', id: p.id })} style={pinStyle(p.x + 22, p.y - 22, inv)} aria-label={u.title}>
+                // a badge on the corner of its marker, a fixed distance in pixels at any zoom (audit D08)
+                <button key={u.id} className="map-pin" data-badge-for={p.id} onClick={() => openSheet({ kind: 'poi', id: p.id })} style={{ ...pinStyle(p.x, p.y, inv, [18, -18]), zIndex: 5 }} aria-label={u.title}>
                   <span style={{ width: 22, height: 22, borderRadius: 8, background: 'var(--warn)', color: '#2a1b00', display: 'grid', placeItems: 'center', boxShadow: '0 0 0 2px #0d0f12' }}>
                     <TriangleAlert size={13} strokeWidth={2.6} />
                   </span>
@@ -211,13 +227,15 @@ export function MapScreen() {
                 aria-label={pin.name}
                 onClick={() => toast(pin.name, { label: t('Entfernen'), run: () => set('myPins', myPins.filter((x) => x.id !== pin.id)) })}
               >
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px 3px 4px', borderRadius: 99, background: '#fff', color: '#111', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
-                  <MapPin size={13} /> {pin.name}
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4, padding: view.k < COMPACT_K ? 4 : '3px 8px 3px 4px', borderRadius: 99, background: '#fff', color: '#111', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  <MapPin size={13} /> {view.k >= COMPACT_K && pin.name}
                 </span>
               </button>
             ))}
+          {/* in the compact overview the crew's avatars would cover stage markers; the crew screen lists them */}
           {layers.friends && on('location') &&
             shareLocation &&
+            view.k >= COMPACT_K &&
             crew.members.filter((f) => f.at && f.at !== 'camp').map((f, i) => {
               const s = stageById[f.at as keyof typeof stageById]
               const a = (i * 2.4) % (Math.PI * 2)
@@ -238,7 +256,7 @@ export function MapScreen() {
       </div>
 
       <AppBar floating />
-      <div className="map-overlay-top" style={{ top: 58 }}>
+      <div ref={topRef} className="map-overlay-top" style={{ top: 58 }}>
         <div className="map-search">
           <Search size={18} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Suchen · lange drücken für Pin')} aria-label={t('Karte durchsuchen')} />
@@ -299,7 +317,7 @@ export function MapScreen() {
         )}
       </AnimatePresence>
 
-      <div className="map-fabs">
+      <div ref={fabsRef} className="map-fabs">
         <div style={{ position: 'relative' }}>
           <button className={`fab ${layersOpen ? 'active' : ''}`} aria-label={t('Ebenen')} onClick={() => setLayersOpen((v) => !v)}>
             <Layers size={21} />
@@ -341,18 +359,23 @@ export function MapScreen() {
   )
 }
 
-function pinStyle(x: number, y: number, inv: number): React.CSSProperties {
-  return { position: 'absolute', left: x, top: y, transform: `translate(-50%, -50%) scale(${inv})`, zIndex: 2 }
+/** A marker at map position x/y that keeps its pixel size; `px` shifts it by screen pixels (badges). */
+function pinStyle(x: number, y: number, inv: number, px: [number, number] = [0, 0]): React.CSSProperties {
+  return { position: 'absolute', left: x, top: y, transform: `translate(-50%, -50%) scale(${inv}) translate(${px[0]}px, ${px[1]}px)`, zIndex: 2 }
 }
 
 
 
-function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: boolean; onClick: () => void }) {
+/** zoomed far out (the overview on a narrow phone), stages show their symbol only, so markers do not cover each other */
+const COMPACT_K = 0.5
+const MIN_K = 0.25
+
+function Marker({ p, inv, selected, compact, onClick }: { p: Poi; inv: number; selected: boolean; compact: boolean; onClick: () => void }) {
   const I = CAT_ICON[p.cat]
   const stage = p.cat === 'stage' ? stageById[p.id.replace('stage-', '') as keyof typeof stageById] : null
   const closed = p.status === 'closed'
   return (
-    <button onClick={onClick} style={{ ...pinStyle(p.x, p.y, inv), zIndex: selected ? 4 : stage ? 3 : 2 }} aria-label={p.name}>
+    <button onClick={onClick} data-poi={p.id} style={{ ...pinStyle(p.x, p.y, inv), zIndex: selected ? 4 : stage ? 3 : 2 }} aria-label={p.name}>
       <motion.span
         animate={{ scale: selected ? 1.18 : 1 }}
         transition={{ type: 'spring', stiffness: 500, damping: 25 }}
@@ -360,7 +383,7 @@ function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: 
           display: 'flex',
           alignItems: 'center',
           gap: 6,
-          padding: stage ? '6px 12px 6px 6px' : 0,
+          padding: stage ? (compact && !selected ? 5 : '6px 12px 6px 6px') : 0,
           width: stage ? undefined : 32,
           height: stage ? undefined : 32,
           justifyContent: 'center',
@@ -378,7 +401,7 @@ function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: 
             <span style={{ width: 22, height: 22, borderRadius: 99, background: stage.color, color: '#111', display: 'grid', placeItems: 'center' }}>
               <I size={12} strokeWidth={2.6} />
             </span>
-            {stage.name}
+            {(!compact || selected) && stage.name}
           </>
         ) : (
           <I size={17} strokeWidth={2.2} />
