@@ -99,7 +99,7 @@ function initial(): Persisted {
     shareLocation: true,
     myPlace: null,
     stepsOptIn: false,
-    myPins: [{ id: 'pin1', name: 'Unser Banner', x: 600, y: 170 }],
+    myPins: [{ id: 'pin1', name: 'Unser Banner', x: 680, y: 230 }],
     dismissed: [],
     session: null,
     crewRef: null,
