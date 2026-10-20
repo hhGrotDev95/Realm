@@ -16,7 +16,10 @@ const browser = await launch()
 const page = await browser.newPage({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
 await page.addInitScript(promiseScrollIntoView)
 const errors = []
-page.on('pageerror', (e) => errors.push(e.message))
+/** set when the offline step takes the server down: network errors after that are expected */
+let serverDownAt = Infinity
+const onError = (e) => errors.push({ message: e.message, at: Date.now() })
+page.on('pageerror', onError)
 const step = async (name, fn) => {
   await fn()
   await page.waitForTimeout(350)
@@ -116,7 +119,7 @@ try {
   await step('English browser gets the English app; the language can be switched in the profile', async () => {
     const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'en-US' })
     const p = await ctx.newPage()
-    p.on('pageerror', (e) => errors.push(e.message))
+    p.on('pageerror', onError)
     await p.goto(url)
     await p.getByText('Up next').waitFor()
     if ((await p.evaluate(() => document.documentElement.lang)) !== 'en') throw new Error('html lang not set to en')
@@ -149,7 +152,7 @@ try {
   await step('offline: after ONE online visit the app and lazily loaded screens open with the server down', async () => {
     const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
     const p = await ctx.newPage()
-    p.on('pageerror', (e) => errors.push(e.message))
+    p.on('pageerror', onError)
     await p.goto(url)
     await p.getByText('Als Nächstes').waitFor()
     await p.evaluate(() => navigator.serviceWorker.ready)
@@ -157,6 +160,7 @@ try {
     // Playwright's setOffline does not cover service-worker fetches, so take the server down instead:
     // from here on there is really no network, only what the service worker cached.
     try {
+      serverDownAt = Date.now()
       process.kill(-server.pid)
     } catch {}
     await new Promise((r) => setTimeout(r, 500))
@@ -172,8 +176,11 @@ try {
     await ctx.close()
   })
   // a fetch failing while the server is down is expected; real page errors are not
-  errors.splice(0, errors.length, ...errors.filter((e) => !/Failed to fetch|NetworkError|Load failed/.test(e)))
-  if (errors.length) throw new Error('Page errors:\n' + errors.join('\n'))
+  // a request failing once the server is down is expected (wording differs per engine: Chromium,
+  // Firefox, WebKit incl. a lazy module that could not be fetched); before that, every error counts
+  const network = /Failed to fetch|NetworkError|Load failed|Importing a module script failed/
+  errors.splice(0, errors.length, ...errors.filter((e) => !(e.at >= serverDownAt && network.test(e.message))))
+  if (errors.length) throw new Error('Page errors:\n' + errors.map((e) => e.message).join('\n'))
   console.log('All smoke tests passed')
 } catch (e) {
   console.error(e)
