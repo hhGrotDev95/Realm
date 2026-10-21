@@ -459,7 +459,7 @@ try {
     await ben.getByLabel('Meldegrund', { exact: true }).selectOption('harassment')
     await ben.getByLabel('Erläuterung (optional)').fill('Bitte durch den Veranstalter prüfen')
     await ben.getByRole('button', { name: 'Meldung absenden' }).click()
-    await ben.getByText('Gemeldet – danke').waitFor()
+    await ben.getByText('Gemeldet – danke').first().waitFor()
     const mod = await user()
     await mod.setViewportSize({ width: 1200, height: 900 })
     await mod.goto(`${WEB}/#admin`)
