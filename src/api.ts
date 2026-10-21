@@ -207,6 +207,8 @@ export type OutboxOp =
   // privacy decisions: queued with priority and kept until the server confirms them (audit F02)
   | { id: string; kind: 'location'; crewId: string; share: boolean; location: string | null }
   | { id: string; kind: 'deleteSteps' }
+  // the whole plan; only the newest one is kept in the queue
+  | { id: string; kind: 'plan'; acts: string[] }
 
 /** Ops that carry a privacy decision; only the newest one per target matters. */
 export const privacyKey = (op: OutboxOp) => (op.kind === 'location' ? `location:${op.crewId}` : op.kind === 'deleteSteps' ? 'deleteSteps' : null)
@@ -227,6 +229,8 @@ export function execute(op: OutboxOp): Promise<unknown> {
       return api.setLocation(op.crewId, op.share, op.location)
     case 'deleteSteps':
       return api.deleteSteps()
+    case 'plan':
+      return api.setPlan(op.acts)
   }
 }
 

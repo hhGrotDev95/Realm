@@ -3,6 +3,7 @@ import { t } from './i18n'
 import { adminApi, api, online, setFestival } from './api'
 import { FESTIVAL, loadFestivalBundle as loadBundle, type FestivalBundle } from './data'
 import { applyTheme } from './theme/apply'
+import { BUNDLE_PREFIX, saveLocal } from './storage'
 
 /** Loads the data and applies the festival's branding in one go. */
 const loadFestivalBundle = (b: FestivalBundle) => {
@@ -12,7 +13,7 @@ const loadFestivalBundle = (b: FestivalBundle) => {
 
 export const DEFAULT_FESTIVAL = (import.meta.env.VITE_FESTIVAL as string | undefined) || 'realm-open-air'
 const PICK_KEY = 'realm.festival'
-const bundleKey = (slug: string) => `realm.bundle:${slug}`
+const bundleKey = (slug: string) => BUNDLE_PREFIX + slug
 
 const safe = <T,>(fn: () => T, fallback: T): T => {
   try {
@@ -70,7 +71,8 @@ export async function bootFestival(): Promise<BootResult> {
   const fetchFresh = async () => {
     const b = await api.festival(slug)
     if (!isBundle(b)) throw new Error(t('Festivaldaten unvollständig'))
-    safe(() => localStorage.setItem(bundleKey(slug), JSON.stringify(b)), undefined)
+    // a full storage makes room from other caches; the visitor's own state still comes first (see storage.ts)
+    safe(() => saveLocal(bundleKey(slug), JSON.stringify(b), slug), false)
     return b
   }
   if (cached) {

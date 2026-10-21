@@ -5,6 +5,7 @@ import { ageSince } from './aging'
 import { pollDelay, POLL_ACTIVE_MS } from './sync'
 import { reminderPlan } from './reminders'
 import { DEFAULT_FESTIVAL } from './festival'
+import { askPersistentStorage, saveLocal } from './storage'
 import { on, ACTS, fmt, POIS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, actTime, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
@@ -57,6 +58,8 @@ interface Persisted {
   reportsFetchedAt: number
   pendingJoin: string | null
   outbox: OutboxOp[]
+  /** `<session>:<acts>` of the plan the server last accepted – a plan that differs is queued for sync */
+  planSynced: string | null
   announcements: { items: Announcement[]; fetchedAt: number } | null
   timetableChanges: TimetableChange[] | null
 }
@@ -108,6 +111,7 @@ function initial(): Persisted {
     reportsFetchedAt: 0,
     pendingJoin: null,
     outbox: [],
+    planSynced: null,
     announcements: null,
     timetableChanges: null,
   }
@@ -150,6 +154,8 @@ function safeSession(key: string): string | null {
 }
 
 const MAX_BACKOFF_MS = 120_000
+
+const planSignature = (session: string | undefined, plan: string[]) => `${session ?? ''}:${[...plan].sort().join(',')}`
 
 /** The position the app may use: the place the visitor picked; in the demo a marked demo position. */
 export type Here = { x: number; y: number; label: string; demo: boolean }
@@ -269,17 +275,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const pending = useRef<(() => void) | null>(null)
   const toastTimer = useRef<number>(0)
 
+  // a full browser storage first gives up cached festival documents; if even that does not help, the
+  // visitor learns once that changes will not survive a restart instead of losing them silently
+  const storageWarned = useRef(false)
   useEffect(() => {
-    try {
-      localStorage.setItem(storageKey(), JSON.stringify(s))
-    } catch {}
+    if (saveLocal(storageKey(), JSON.stringify(s), FESTIVAL.slug) || storageWarned.current) return
+    storageWarned.current = true
+    toastRef.current(t('Speicher voll – Änderungen bleiben nach dem Schließen nicht erhalten. Gib im Browser Speicher frei.'))
   }, [s])
+  // something worth keeping exists: ask the browser not to evict it under storage pressure
+  useEffect(() => {
+    if (s.plan.length || s.session) askPersistentStorage()
+  }, [s.plan.length > 0, !!s.session])
 
   const toast: Ctx['toast'] = useCallback((msg, action) => {
     window.clearTimeout(toastTimer.current)
     setToast({ id: Date.now(), msg, action: action && { label: action.label, run: () => (action.run(), setToast(null)) } })
     toastTimer.current = window.setTimeout(() => setToast(null), 3800)
   }, [])
+  const toastRef = useRef(toast)
 
   const setTab = useCallback(
     (t: Tab) => {
@@ -377,6 +391,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           await execute(op)
           sent++
+          if (op.kind === 'plan') {
+            const synced = planSignature(sRef.current.session?.id, op.acts)
+            setS((p) => ({ ...p, planSynced: synced }))
+          }
           const msg = confirmations.current.get(op.id)
           if (msg) toast(msg)
         } catch (e) {
@@ -502,12 +520,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(id)
   }, [])
 
-  // plan sync (debounced)
+  // plan sync (debounced) through the outbox: a change made offline or during a failed request is sent
+  // once the network is back – also after a restart – so crew, restore and analytics see the real plan
+  const planSig = planSignature(s.session?.id, s.plan)
   useEffect(() => {
-    if (!online || !s.session) return
-    const t = window.setTimeout(() => api.setPlan(s.plan).catch(() => {}), 800)
-    return () => window.clearTimeout(t)
-  }, [s.plan, s.session?.id])
+    if (!online || !s.session || planSig === s.planSynced) return
+    const timer = window.setTimeout(() => {
+      const op: OutboxOp = { id: opId('pl'), kind: 'plan', acts: [...sRef.current.plan] }
+      const next = (list: OutboxOp[]) => [...list.filter((o) => o.kind !== 'plan'), op]
+      setS((p) => ({ ...p, outbox: next(p.outbox) }))
+      sRef.current = { ...sRef.current, outbox: next(sRef.current.outbox) }
+      void flush()
+    }, 800)
+    return () => window.clearTimeout(timer)
+  }, [planSig, s.planSynced])
 
   /**
    * Privacy decisions go through the outbox with priority: a newer decision replaces an older

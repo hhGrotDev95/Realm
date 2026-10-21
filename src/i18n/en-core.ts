@@ -77,6 +77,7 @@ export const EN_CORE: Record<string, string> = {
   "Noch keine Crew": "No crew yet",
   "Demo-Crew": "Demo crew",
   "Offline – wird gesendet, sobald du wieder Netz hast": "Offline – will be sent once you’re back online",
+  "Speicher voll – Änderungen bleiben nach dem Schließen nicht erhalten. Gib im Browser Speicher frei.": "Storage full – changes won’t survive closing the app. Free up storage in your browser.",
   "Gemeldet – die Nachricht ist ausgeblendet": "Reported – the message is hidden",
   "Gemeldet – die Nachricht ist jetzt ausgeblendet": "Reported – the message is now hidden",
   "Gemeldet – danke": "Reported – thanks",
