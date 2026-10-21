@@ -1,4 +1,5 @@
-import { Flag, Send, ShieldCheck, Trash2 } from 'lucide-react'
+import { ReportAbuse } from './Moderation'
+import { Send, ShieldCheck, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, opId, type PublicMessage } from './api'
 import { FESTIVAL } from './data'
@@ -99,7 +100,7 @@ export function FestivalChat() {
                 </span>
               )}
               {m.text === null ? (
-                <span className={`bubble ${me ? 'me' : 'them'} removed`}>{m.deleted ? t('Nachricht gelöscht') : t('Ausgeblendet – von mehreren gemeldet')}</span>
+                <span className={`bubble ${me ? 'me' : 'them'} removed`}>{m.moderationReason ? t('Vom Veranstalter entfernt: {reason}', { reason: m.moderationReason }) : m.deleted ? t('Nachricht gelöscht') : t('Ausgeblendet – von mehreren gemeldet')}</span>
               ) : (
                 <button className={`bubble ${me ? 'me' : 'them'}`} style={{ textAlign: 'left' }} onClick={() => setActive(active === m.id ? null : m.id)} aria-expanded={active === m.id}>
                   {m.text}
@@ -123,25 +124,10 @@ export function FestivalChat() {
                       <Trash2 size={15} /> {t('Löschen')}
                     </button>
                   ) : (
-                    !m.flaggedByMe && (
-                      <button
-                        className="btn ghost sm"
-                        onClick={() => {
-                          setActive(null)
-                          requireIdentity(t('Meldungen brauchen einen Namen, damit Missbrauch erkennbar bleibt.'), async () => {
-                            try {
-                              const r = await api.flagFestivalChat(m.id)
-                              merge([{ ...m, flaggedByMe: true, hidden: r.hidden, text: r.hidden ? null : m.text }])
-                              toast(r.hidden ? t('Gemeldet – die Nachricht ist jetzt ausgeblendet') : t('Gemeldet – danke'))
-                            } catch (e) {
-                              toast(e instanceof ApiError ? e.message : t('Etwas ist schiefgelaufen'))
-                            }
-                          })
-                        }}
-                      >
-                        <Flag size={15} /> {t('Melden')}
-                      </button>
-                    )
+                    !m.flaggedByMe && <ReportAbuse submit={async (reason) => {
+                      const r = await api.flagFestivalChat(m.id, reason)
+                      merge([{ ...m, flaggedByMe: true, hidden: r.hidden, text: r.hidden ? null : m.text }])
+                    }} />
                   )}
                 </div>
               )}

@@ -77,8 +77,6 @@ export const EN_CORE: Record<string, string> = {
   "Noch keine Crew": "No crew yet",
   "Demo-Crew": "Demo crew",
   "Offline – wird gesendet, sobald du wieder Netz hast": "Offline – will be sent once you’re back online",
-  "Gemeldet – die Nachricht ist ausgeblendet": "Reported – the message is hidden",
-  "Gemeldet – die Nachricht ist jetzt ausgeblendet": "Reported – the message is now hidden",
   "Gemeldet – danke": "Reported – thanks",
   "Im Demo-Modus können keine Mitglieder entfernt werden": "Members can’t be removed in demo mode",
   "Crew „{name}“ gegründet": "Crew “{name}” created",

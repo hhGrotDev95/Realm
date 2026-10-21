@@ -355,6 +355,7 @@ export function AccessPanel({ token, flash, slug }: { token: string; flash: Flas
                 <span style={{ minWidth: 90, fontWeight: 600 }}>{l.by}</span>
                 <span className="grow" style={{ wordBreak: 'break-all' }}>
                   {l.action}
+                  {l.reason && <span style={{ display: 'block', overflowWrap: 'anywhere' }}>{l.reason}</span>}
                 </span>
               </div>
             ))}

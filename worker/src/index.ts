@@ -18,7 +18,7 @@ type Guest = { id: string; nickname: string | null; color: string }
 type Festival = { id: string; slug: string; status: 'draft' | 'published' | 'archived'; stages: string[]; modules: ModuleState }
 /** Who is working in the console: a personal account, or the platform key (break-glass, CLI) */
 type Admin = { id: string; name: string; role: 'platform' | 'organizer'; festivals: Set<string>; session: string | null; totp: boolean; mfaReady: boolean }
-type App = { Bindings: Env; Variables: { guest: Guest; festival: Festival; admin: Admin | null } }
+type App = { Bindings: Env; Variables: { guest: Guest; festival: Festival; admin: Admin | null; auditRecorded: boolean } }
 
 const MIN = 60_000
 const DAY = 24 * 60 * MIN
@@ -43,6 +43,55 @@ const RETENTION = {
 const FLAGS_TO_HIDE = 2
 /** The public festival chat needs more voices to hide a message than a crew of friends. */
 const PUBLIC_FLAGS_TO_HIDE = 3
+const FLAG_CATEGORIES = ['spam', 'harassment', 'hate', 'illegal', 'other'] as const
+async function flagReason(c: Context<App>) {
+  const b = await body(c)
+  return {
+    category: v.oneOf(b.category, 'Meldegrund', FLAG_CATEGORIES),
+    detail: v.str(b.detail, 'Erläuterung', { max: 1000, optional: true }) ?? '',
+  }
+}
+type FlagReasonRow = { category: string; detail: string; at: number }
+/** A bounded number of queries also keeps a full moderation queue within D1's request limits. */
+async function loadFlagReasons(db: D1Database, table: 'message_flags' | 'festival_message_flags' | 'report_flags', ids: string[]) {
+  const reasons = new Map<string, FlagReasonRow[]>()
+  const column = table === 'report_flags' ? 'report_id' : 'message_id'
+  const targets = [...new Set(ids)]
+  for (let start = 0; start < targets.length; start += 80) {
+    const chunk = targets.slice(start, start + 80)
+    const rows = await db.prepare(`
+      SELECT target_id, category, detail, at FROM (
+        SELECT ${column} AS target_id, category, detail, created_at AS at,
+          ROW_NUMBER() OVER (PARTITION BY ${column} ORDER BY created_at, guest_id) AS position
+        FROM ${table} WHERE ${column} IN (${chunk.map(() => '?').join(',')})
+      ) WHERE position <= 100 ORDER BY target_id, position
+    `).bind(...chunk).all<FlagReasonRow & { target_id: string }>()
+    for (const { target_id, ...reason } of rows.results) {
+      const targetReasons = reasons.get(target_id) ?? []
+      targetReasons.push(reason)
+      reasons.set(target_id, targetReasons)
+    }
+  }
+  return reasons
+}
+async function decisionReason(c: Context<App>) {
+  return v.str((await body(c)).reason, 'Begründung', { min: 3, max: 1000 })!
+}
+/** Decision, author notification and change log are one transaction. No silent moderation. */
+async function recordDecision(c: Context<App>, f: { id: string }, kind: string, target: string, author: string, action: string, reason: string, mutation: D1PreparedStatement) {
+  const a = c.get('admin')!
+  const now = Date.now()
+  const result = await c.env.DB.batch([
+    mutation,
+    c.env.DB.prepare('INSERT INTO audit_log (admin_id, admin_name, festival, action, status, reason, created_at) SELECT ?, ?, ?, ?, 204, ?, ? WHERE changes() > 0')
+      .bind(a.id, a.name, c.req.param('slug'), `${action} ${kind}/${target}`, reason, now),
+    c.env.DB.prepare('INSERT INTO moderation_decisions (id, festival_id, guest_id, kind, target_id, action, reason, created_at) SELECT ?, ?, ?, ?, ?, ?, ?, ? WHERE changes() > 0')
+      .bind(randomId('md'), f.id, author, kind, target, action, reason, now),
+  ])
+  if (!result[0].meta.changes) throw new HttpError(404, 'Inhalt nicht gefunden')
+  c.set('auditRecorded', true)
+}
+
 /** A location share ends on its own when the app has not confirmed it for this long. */
 const LOCATION_TTL = 120 * MIN
 const REPORT_TTL = 60 * MIN
@@ -354,7 +403,7 @@ app.use('/api/festival-chat', auth)
 app.use('/api/festival-chat/*', auth)
 
 // tenant-scoped routes (the profile itself – PATCH/DELETE /api/me, recovery – is global)
-for (const path of ['/api/me/plan', '/api/me/steps', '/api/crews', '/api/crews/*', '/api/meetups/*', '/api/reports', '/api/reports/*', '/api/announcements', '/api/timetable/*', '/api/faq/*', '/api/festival-chat', '/api/festival-chat/*'])
+for (const path of ['/api/me/moderation', '/api/me/plan', '/api/me/steps', '/api/crews', '/api/crews/*', '/api/meetups/*', '/api/reports', '/api/reports/*', '/api/announcements', '/api/timetable/*', '/api/faq/*', '/api/festival-chat', '/api/festival-chat/*'])
   app.use(path, tenant)
 app.get('/api/me', tenant)
 
@@ -514,7 +563,7 @@ app.get('/api/crews/:id', async (c) => {
     db.prepare('SELECT s.guest_id, s.day, s.total, s.synced_at FROM steps s JOIN crew_members m ON m.guest_id = s.guest_id WHERE m.crew_id = ? AND m.approved = 1 AND s.festival_id = ?').bind(crewId, c.get('festival').id),
     db.prepare(
       `SELECT * FROM (
-         SELECT m.id, m.guest_id, m.text, m.created_at, m.deleted,
+         SELECT m.id, m.guest_id, m.text, m.created_at, m.deleted, m.restored, m.moderation_reason,
            (SELECT COUNT(*) FROM message_flags f WHERE f.message_id = m.id) AS flags,
            EXISTS (SELECT 1 FROM message_flags f WHERE f.message_id = m.id AND f.guest_id = ?3) AS flagged_by_me
          FROM messages m
@@ -554,8 +603,8 @@ app.get('/api/crews/:id', async (c) => {
     messages: (chatOn ? (messages.results as R[]) : []).map((m) => {
       const deleted = !!m.deleted
       // hidden messages stay readable for their author, so they know what happened
-      const hidden = !deleted && (m.flags as number) >= FLAGS_TO_HIDE
-      return { id: m.id, from: m.guest_id, text: deleted || (hidden && m.guest_id !== g.id) ? null : m.text, at: m.created_at, deleted, hidden, flaggedByMe: !!m.flagged_by_me }
+      const hidden = !deleted && !m.restored && (m.flags as number) >= FLAGS_TO_HIDE
+      return { id: m.id, from: m.guest_id, text: deleted || (hidden && m.guest_id !== g.id) ? null : m.text, at: m.created_at, deleted, hidden, moderationReason: m.guest_id === g.id ? m.moderation_reason : undefined, flaggedByMe: !!m.flagged_by_me }
     }),
     meetups: (meetups.results as R[]).map((m) => ({
       id: m.id,
@@ -630,13 +679,14 @@ app.post('/api/crews/:id/messages/:msgId/flag', async (c) => {
   const { m, g } = await messageFor(c)
   if (m.guest_id === g.id) throw new HttpError(400, 'Eigene Nachrichten kannst du löschen statt melden')
   await rateLimit(c.env.DB, 'flag:' + g.id, 30, 60 * MIN)
+  const { category, detail } = await flagReason(c)
   const now = Date.now()
   await c.env.DB.batch([
-    c.env.DB.prepare('INSERT OR IGNORE INTO message_flags (message_id, guest_id, created_at) VALUES (?, ?, ?)').bind(m.id, g.id, now),
+    c.env.DB.prepare('INSERT OR IGNORE INTO message_flags (message_id, guest_id, created_at, category, detail) VALUES (?, ?, ?, ?, ?)').bind(m.id, g.id, now, category, detail),
     c.env.DB.prepare('UPDATE messages SET updated_at = ? WHERE id = ?').bind(now, m.id),
   ])
-  const n = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM message_flags WHERE message_id = ?').bind(m.id).first<{ n: number }>()
-  return c.json({ id: m.id, flags: n?.n ?? 0, hidden: (n?.n ?? 0) >= FLAGS_TO_HIDE })
+  const n = await c.env.DB.prepare('SELECT restored, (SELECT COUNT(*) FROM message_flags WHERE message_id = messages.id) AS n FROM messages WHERE id = ?').bind(m.id).first<{ n: number; restored: number }>()
+  return c.json({ id: m.id, flags: n?.n ?? 0, hidden: !n?.restored && (n?.n ?? 0) >= FLAGS_TO_HIDE })
 })
 
 // The owner removes a member or declines a join request: that profile is banned and the invite code renewed.
@@ -739,7 +789,7 @@ const admin = async (c: Context<App>, next: () => Promise<void>) => {
   if (!a.mfaReady && !MFA_FREE.test(c.req.path)) throw new HttpError(403, a.totp ? 'Bitte den Code aus der Authenticator-App eingeben' : 'Bitte zuerst die Zwei-Faktor-Anmeldung einrichten', { mfa: a.totp ? 'verify' : 'setup' })
   await next()
   // change log: who changed what, when – successful writes only (errors are thrown past this point)
-  if (c.req.method !== 'GET' && c.res.status < 400 && !c.req.path.startsWith('/api/admin/totp')) {
+  if (!c.get('auditRecorded') && c.req.method !== 'GET' && c.res.status < 400 && !c.req.path.startsWith('/api/admin/totp')) {
     const festival = c.req.path.match(/^\/api\/admin\/festivals\/([^/]+)/)?.[1] ?? c.req.header('X-Festival') ?? null
     await c.env.DB.prepare('INSERT INTO audit_log (admin_id, admin_name, festival, action, status, created_at) VALUES (?, ?, ?, ?, ?, ?)')
       .bind(a.id, a.name, festival, `${c.req.method} ${c.req.path}`, c.res.status, Date.now())
@@ -944,9 +994,9 @@ app.get('/api/admin/audit', async (c) => {
     if (!f || !canAccess(a, f.id)) throw new HttpError(404, 'Festival nicht gefunden')
   } else if (a.role !== 'platform') throw new HttpError(400, 'festival fehlt')
   const rows = slug
-    ? await c.env.DB.prepare('SELECT admin_name, festival, action, status, created_at FROM audit_log WHERE festival = ? ORDER BY id DESC LIMIT 200').bind(slug).all<Record<string, unknown>>()
-    : await c.env.DB.prepare('SELECT admin_name, festival, action, status, created_at FROM audit_log ORDER BY id DESC LIMIT 200').all<Record<string, unknown>>()
-  return c.json(rows.results.map((r) => ({ by: r.admin_name, festival: r.festival, action: r.action, status: r.status, at: r.created_at })))
+    ? await c.env.DB.prepare('SELECT admin_name, festival, action, status, reason, created_at FROM audit_log WHERE festival = ? ORDER BY id DESC LIMIT 200').bind(slug).all<Record<string, unknown>>()
+    : await c.env.DB.prepare('SELECT admin_name, festival, action, status, reason, created_at FROM audit_log ORDER BY id DESC LIMIT 200').all<Record<string, unknown>>()
+  return c.json(rows.results.map((r) => ({ by: r.admin_name, festival: r.festival, action: r.action, status: r.status, reason: r.reason, at: r.created_at })))
 })
 
 app.get('/api/admin/festivals', async (c) => {
@@ -1308,8 +1358,8 @@ app.put('/api/admin/festivals/:slug/theme', async (c) => {
 
 /* ---------- Festival chat (opt-in module) ---------- */
 
-type PublicMsgRow = { id: string; guest_id: string; nickname: string | null; color: string; text: string; created_at: number; updated_at: number; deleted: number; restored: number; flags: number; mine_flag: number }
-const PUBLIC_MSG_SELECT = `SELECT m.id, m.guest_id, g.nickname, g.color, m.text, m.created_at, m.updated_at, m.deleted, m.restored,
+type PublicMsgRow = { id: string; guest_id: string; nickname: string | null; color: string; text: string; created_at: number; updated_at: number; deleted: number; restored: number; moderation_reason: string | null; flags: number; mine_flag: number }
+const PUBLIC_MSG_SELECT = `SELECT m.id, m.guest_id, g.nickname, g.color, m.text, m.created_at, m.updated_at, m.deleted, m.restored, m.moderation_reason,
   (SELECT COUNT(*) FROM festival_message_flags f WHERE f.message_id = m.id) AS flags,
   (SELECT COUNT(*) FROM festival_message_flags f WHERE f.message_id = m.id AND f.guest_id = ?) AS mine_flag
   FROM festival_messages m JOIN guests g ON g.id = m.guest_id`
@@ -1318,7 +1368,7 @@ const PUBLIC_MSG_SELECT = `SELECT m.id, m.guest_id, g.nickname, g.color, m.text,
 function publicMessage(r: PublicMsgRow, me: string) {
   const hidden = !r.restored && r.flags >= PUBLIC_FLAGS_TO_HIDE
   const withheld = !!r.deleted || (hidden && r.guest_id !== me)
-  return { id: r.id, from: r.guest_id === me ? 'me' : r.guest_id, name: r.nickname ?? 'Gast', color: r.color, text: withheld ? null : r.text, at: r.created_at, deleted: !!r.deleted || undefined, hidden: hidden || undefined, flaggedByMe: !!r.mine_flag || undefined }
+  return { id: r.id, from: r.guest_id === me ? 'me' : r.guest_id, name: r.nickname ?? 'Gast', color: r.color, text: withheld ? null : r.text, at: r.created_at, deleted: !!r.deleted || undefined, hidden: hidden || undefined, moderationReason: r.guest_id === me ? r.moderation_reason : undefined, flaggedByMe: !!r.mine_flag || undefined }
 }
 
 app.get('/api/festival-chat', async (c) => {
@@ -1363,35 +1413,60 @@ app.post('/api/festival-chat/:id/flag', async (c) => {
   requireName(g)
   if (m.guest_id === g.id) throw new HttpError(400, 'Eigene Nachrichten kannst du löschen statt melden')
   await rateLimit(c.env.DB, 'fflag:' + g.id, 30, 60 * MIN)
+  const { category, detail } = await flagReason(c)
   const now = Date.now()
   await c.env.DB.batch([
-    c.env.DB.prepare('INSERT OR IGNORE INTO festival_message_flags (message_id, guest_id, created_at) VALUES (?, ?, ?)').bind(m.id, g.id, now),
+    c.env.DB.prepare('INSERT OR IGNORE INTO festival_message_flags (message_id, guest_id, created_at, category, detail) VALUES (?, ?, ?, ?, ?)').bind(m.id, g.id, now, category, detail),
     c.env.DB.prepare('UPDATE festival_messages SET updated_at = ? WHERE id = ?').bind(now, m.id),
   ])
   const r = await c.env.DB.prepare('SELECT restored, (SELECT COUNT(*) FROM festival_message_flags WHERE message_id = ?) AS n FROM festival_messages WHERE id = ?').bind(m.id, m.id).first<{ restored: number; n: number }>()
   return c.json({ id: m.id, hidden: !r?.restored && (r?.n ?? 0) >= PUBLIC_FLAGS_TO_HIDE })
 })
 
-/** Organizer moderation: everything incl. hidden messages and flag counts, newest first. */
+/** Public messages and reported crew messages only; private conversations stay private. */
 app.get('/api/admin/festivals/:slug/chat', async (c) => {
   const f = await festivalBySlug(c)
-  const rows = await c.env.DB.prepare(`${PUBLIC_MSG_SELECT} WHERE m.festival_id = ? AND m.deleted = 0 ORDER BY (flags >= ${PUBLIC_FLAGS_TO_HIDE} AND m.restored = 0) DESC, m.created_at DESC LIMIT 200`).bind('', f.id).all<PublicMsgRow>()
-  return c.json(rows.results.map((r) => ({ id: r.id, name: r.nickname ?? 'Gast', text: r.text, at: r.created_at, flags: r.flags, hidden: !r.restored && r.flags >= PUBLIC_FLAGS_TO_HIDE, restored: !!r.restored })))
+  const kind = v.oneOf(c.req.query('kind') ?? 'festival', 'Art', ['festival', 'crew'] as const)
+  const db = c.env.DB
+  const rows = kind === 'festival'
+    ? await db.prepare(`${PUBLIC_MSG_SELECT} WHERE m.festival_id = ? AND m.deleted = 0 ORDER BY (flags > 0 AND m.restored = 0) DESC, m.created_at DESC LIMIT 200`).bind('', f.id).all<PublicMsgRow>()
+    : await db.prepare(`SELECT m.*, g.nickname, (SELECT COUNT(*) FROM message_flags fl WHERE fl.message_id = m.id) AS flags
+        FROM messages m JOIN crews cr ON cr.id = m.crew_id JOIN guests g ON g.id = m.guest_id
+        WHERE cr.festival_id = ? AND m.deleted = 0 AND EXISTS (SELECT 1 FROM message_flags fl WHERE fl.message_id = m.id)
+        ORDER BY m.restored, m.created_at DESC LIMIT 200`).bind(f.id).all<PublicMsgRow>()
+  const flagTable = kind === 'festival' ? 'festival_message_flags' : 'message_flags'
+  const reasons = await loadFlagReasons(db, flagTable, rows.results.map((r) => r.id))
+  const result = rows.results.map((r) => ({
+    id: r.id, kind, name: r.nickname ?? 'Gast', text: r.text, at: r.created_at, flags: r.flags,
+    hidden: !r.restored && r.flags >= (kind === 'festival' ? PUBLIC_FLAGS_TO_HIDE : FLAGS_TO_HIDE), restored: !!r.restored,
+    reasons: reasons.get(r.id) ?? [],
+  }))
+  return c.json(result)
 })
 
-app.delete('/api/admin/festivals/:slug/chat/:id', async (c) => {
+async function moderateChat(c: Context<App>, action: 'remove' | 'keep') {
   const f = await festivalBySlug(c)
-  const res = await c.env.DB.prepare("UPDATE festival_messages SET deleted = 2, text = '', updated_at = ? WHERE id = ? AND festival_id = ? AND deleted = 0").bind(Date.now(), c.req.param('id'), f.id).run()
-  if (!res.meta.changes) throw new HttpError(404, 'Nachricht nicht gefunden')
+  const kind = v.oneOf(c.req.query('kind') ?? 'festival', 'Art', ['festival', 'crew'] as const)
+  const reason = await decisionReason(c)
+  const id = c.req.param('id')!
+  const table = kind === 'festival' ? 'festival_messages' : 'messages'
+  const scope = kind === 'festival' ? 'festival_id = ?' : 'crew_id IN (SELECT id FROM crews WHERE festival_id = ?) AND EXISTS (SELECT 1 FROM message_flags WHERE message_id = messages.id)'
+  const row = await c.env.DB.prepare(`SELECT guest_id FROM ${table} WHERE id = ? AND ${scope} AND deleted = 0`).bind(id, f.id).first<{ guest_id: string }>()
+  if (!row) throw new HttpError(404, 'Nachricht nicht gefunden')
+  const mutation = action === 'remove'
+    ? c.env.DB.prepare(`UPDATE ${table} SET deleted = 2, text = '', moderation_reason = ?, updated_at = ? WHERE id = ? AND deleted = 0`).bind(reason, Date.now(), id)
+    : c.env.DB.prepare(`UPDATE ${table} SET restored = 1, updated_at = ? WHERE id = ? AND deleted = 0`).bind(Date.now(), id)
+  await recordDecision(c, f, kind, id, row.guest_id, action, reason, mutation)
   return c.body(null, 204)
-})
+}
+app.delete('/api/admin/festivals/:slug/chat/:id', (c) => moderateChat(c, 'remove'))
+app.post('/api/admin/festivals/:slug/chat/:id/restore', (c) => moderateChat(c, 'keep'))
 
-/** Flags were unfounded: show the message again; new flags no longer hide it. */
-app.post('/api/admin/festivals/:slug/chat/:id/restore', async (c) => {
-  const f = await festivalBySlug(c)
-  const res = await c.env.DB.prepare('UPDATE festival_messages SET restored = 1, updated_at = ? WHERE id = ? AND festival_id = ? AND deleted = 0').bind(Date.now(), c.req.param('id'), f.id).run()
-  if (!res.meta.changes) throw new HttpError(404, 'Nachricht nicht gefunden')
-  return c.body(null, 204)
+/** Authenticated authors can read decisions even after leaving a crew or after a report expires. */
+app.get('/api/me/moderation', async (c) => {
+  const rows = await c.env.DB.prepare('SELECT kind, target_id AS targetId, action, reason, created_at AS at FROM moderation_decisions WHERE guest_id = ? AND festival_id = ? ORDER BY created_at DESC LIMIT 100')
+    .bind(c.get('guest').id, c.get('festival').id).all()
+  return c.json(rows.results)
 })
 
 /* ---------- Analytics ---------- */
@@ -1766,7 +1841,7 @@ app.get('/api/reports', async (c) => {
        (SELECT COUNT(*) FROM votes WHERE report_id = r.id AND kind = 'still' AND guest_id != r.guest_id) AS still,
        (SELECT COUNT(*) FROM votes WHERE report_id = r.id AND kind = 'fixed' AND guest_id != r.guest_id) AS fixed,
        (SELECT kind FROM votes WHERE report_id = r.id AND guest_id = ?) AS my_vote
-     FROM reports r WHERE r.festival_id = ? AND r.expires_at > ? ORDER BY r.created_at DESC LIMIT 100`,
+     FROM reports r WHERE r.festival_id = ? AND r.expires_at > ? AND r.moderation_reason IS NULL ORDER BY r.created_at DESC LIMIT 100`,
   )
     .bind(g.id, c.get('festival').id, now)
     .all<Record<string, unknown>>()
@@ -1815,6 +1890,25 @@ app.post('/api/reports', async (c) => {
   return c.json({ ...r, source: 'unconfirmed', confirms: 1, mine: true, myVote: null, ageMin: 0, validMin: REPORT_TTL / MIN }, 201)
 })
 
+app.post('/api/reports/:id/flag', async (c) => {
+  const g = c.get('guest')
+  requireName(g)
+  const id = c.req.param('id')
+  const row = await c.env.DB.prepare('SELECT guest_id FROM reports WHERE id = ? AND festival_id = ? AND expires_at > ? AND moderation_reason IS NULL')
+    .bind(id, c.get('festival').id, Date.now()).first<{ guest_id: string }>()
+  if (!row) throw new HttpError(404, 'Meldung nicht gefunden')
+  if (row.guest_id === g.id) throw new HttpError(400, 'Die eigene Meldung kannst du zurückziehen')
+  const { category, detail } = await flagReason(c)
+  await rateLimit(c.env.DB, 'rflag:' + g.id, 30, 60 * MIN)
+  await c.env.DB.batch([
+    c.env.DB.prepare('INSERT OR IGNORE INTO report_flags (report_id, guest_id, category, detail, created_at) VALUES (?, ?, ?, ?, ?)')
+      .bind(id, g.id, category, detail, Date.now()),
+    // Only a newly inserted flag reopens review; retrying an existing flag preserves the decision.
+    c.env.DB.prepare('UPDATE reports SET reviewed = 0 WHERE id = ? AND moderation_reason IS NULL AND changes() > 0').bind(id),
+  ])
+  return c.body(null, 204)
+})
+
 app.put('/api/reports/:id/vote', async (c) => {
   const g = c.get('guest')
   requireName(g)
@@ -1822,13 +1916,13 @@ app.put('/api/reports/:id/vote', async (c) => {
   const kind = v.oneOf((await body(c)).kind, 'kind', ['still', 'fixed'] as const)
   const id = c.req.param('id')
   const now = Date.now()
-  const r = await c.env.DB.prepare('SELECT id, guest_id, expires_at FROM reports WHERE id = ? AND festival_id = ? AND expires_at > ?').bind(id, c.get('festival').id, now).first<{ id: string; guest_id: string; expires_at: number }>()
+  const r = await c.env.DB.prepare('SELECT id, guest_id, expires_at FROM reports WHERE id = ? AND festival_id = ? AND expires_at > ? AND moderation_reason IS NULL').bind(id, c.get('festival').id, now).first<{ id: string; guest_id: string; expires_at: number }>()
   if (!r) throw new HttpError(404, 'Meldung ist abgelaufen')
   if (r.guest_id === g.id && kind === 'still') throw new HttpError(400, 'Die eigene Meldung zählt schon – du kannst sie nur zurückziehen')
   await c.env.DB.prepare('INSERT INTO votes (report_id, guest_id, kind, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(report_id, guest_id) DO UPDATE SET kind = excluded.kind, created_at = excluded.created_at').bind(id, g.id, kind, now).run()
   if (kind === 'still') {
     // confirmations keep a report alive, but never beyond REPORT_MAX_LIFE after it was made
-    await c.env.DB.prepare('UPDATE reports SET expires_at = MIN(created_at + ?, MAX(expires_at, ?)) WHERE id = ?').bind(REPORT_MAX_LIFE, now + STILL_EXTENDS, id).run()
+    await c.env.DB.prepare('UPDATE reports SET expires_at = MIN(created_at + ?, MAX(expires_at, ?)) WHERE id = ? AND moderation_reason IS NULL').bind(REPORT_MAX_LIFE, now + STILL_EXTENDS, id).run()
   } else if (r.guest_id === g.id) {
     // the reporter can retire their own report; "fixed" from others is shown, but only the organizer or time ends it
     await c.env.DB.prepare('UPDATE reports SET expires_at = ? WHERE id = ?').bind(now, id).run()
@@ -1840,14 +1934,15 @@ app.put('/api/reports/:id/vote', async (c) => {
 app.get('/api/admin/festivals/:slug/reports', async (c) => {
   const f = await festivalBySlug(c)
   const rows = await c.env.DB.prepare(
-    `SELECT r.id, r.title, r.place, r.created_at, r.expires_at, r.verified, g.nickname,
+    `SELECT r.id, r.title, r.place, r.created_at, r.expires_at, r.verified, r.reviewed, g.nickname,
        (SELECT COUNT(*) FROM votes WHERE report_id = r.id AND kind = 'still' AND guest_id != r.guest_id) AS still,
        (SELECT COUNT(*) FROM votes WHERE report_id = r.id AND kind = 'fixed' AND guest_id != r.guest_id) AS fixed
-     FROM reports r LEFT JOIN guests g ON g.id = r.guest_id WHERE r.festival_id = ? AND r.expires_at > ? ORDER BY r.created_at DESC LIMIT 100`,
+     FROM reports r LEFT JOIN guests g ON g.id = r.guest_id WHERE r.festival_id = ? AND r.moderation_reason IS NULL AND (r.expires_at > ? OR EXISTS (SELECT 1 FROM report_flags fl WHERE fl.report_id = r.id)) ORDER BY r.created_at DESC LIMIT 100`,
   )
     .bind(f.id, Date.now())
     .all<Record<string, unknown>>()
-  return c.json(rows.results.map((r) => ({ id: r.id, title: r.title, place: r.place, by: r.nickname ?? 'Gast', at: r.created_at, expiresAt: r.expires_at, verified: !!r.verified, reporters: 1 + (r.still as number), fixedVotes: r.fixed })))
+  const reasons = await loadFlagReasons(c.env.DB, 'report_flags', rows.results.map((r) => r.id as string))
+  return c.json(rows.results.map((r) => ({ id: r.id, reasons: reasons.get(r.id as string) ?? [], title: r.title, place: r.place, by: r.nickname ?? 'Gast', at: r.created_at, expiresAt: r.expires_at, verified: !!r.verified, reviewed: !!r.reviewed, reporters: 1 + (r.still as number), fixedVotes: r.fixed })))
 })
 
 app.put('/api/admin/festivals/:slug/reports/:id', async (c) => {
@@ -1858,13 +1953,21 @@ app.put('/api/admin/festivals/:slug/reports/:id', async (c) => {
   return c.json({ verified })
 })
 
-app.delete('/api/admin/festivals/:slug/reports/:id', async (c) => {
+async function moderateReport(c: Context<App>, action: 'remove' | 'keep') {
   const f = await festivalBySlug(c)
-  const now = Date.now()
-  const res = await c.env.DB.prepare('UPDATE reports SET expires_at = ? WHERE id = ? AND festival_id = ? AND expires_at > ?').bind(now, c.req.param('id'), f.id, now).run()
-  if (!res.meta.changes) throw new HttpError(404, 'Meldung nicht gefunden')
+  const reason = await decisionReason(c)
+  const id = c.req.param('id')!
+  const r = await c.env.DB.prepare('SELECT guest_id FROM reports WHERE id = ? AND festival_id = ? AND moderation_reason IS NULL')
+    .bind(id, f.id).first<{ guest_id: string }>()
+  if (!r) throw new HttpError(404, 'Meldung nicht gefunden')
+  const mutation = action === 'remove'
+    ? c.env.DB.prepare('UPDATE reports SET expires_at = MIN(expires_at, ?), moderation_reason = ? WHERE id = ? AND moderation_reason IS NULL').bind(Date.now(), reason, id)
+    : c.env.DB.prepare('UPDATE reports SET reviewed = 1 WHERE id = ? AND moderation_reason IS NULL').bind(id)
+  await recordDecision(c, f, 'report', id, r.guest_id, action, reason, mutation)
   return c.body(null, 204)
-})
+}
+app.delete('/api/admin/festivals/:slug/reports/:id', (c) => moderateReport(c, 'remove'))
+app.post('/api/admin/festivals/:slug/reports/:id/review', (c) => moderateReport(c, 'keep'))
 
 /** Hourly housekeeping: every retention period in RETENTION, expired shares, rate windows, challenges. */
 async function housekeeping(db: D1Database, now: number) {
@@ -1881,6 +1984,7 @@ async function housekeeping(db: D1Database, now: number) {
     db.prepare('DELETE FROM festival_messages WHERE updated_at < ?').bind(now - R.festivalChat),
     db.prepare('DELETE FROM faq_events WHERE created_at < ?').bind(now - R.faqEvents),
     db.prepare('DELETE FROM import_snapshots WHERE created_at < ?').bind(now - R.importSnapshots),
+    db.prepare('DELETE FROM moderation_decisions WHERE created_at < ?').bind(now - 60 * DAY),
     db.prepare('DELETE FROM audit_log WHERE created_at < ?').bind(now - R.auditLog),
     db.prepare('DELETE FROM admin_sessions WHERE expires_at < ?').bind(now - R.adminSessions),
     db.prepare('DELETE FROM admin_invites WHERE expires_at < ?').bind(now - R.adminSessions),
@@ -1897,4 +2001,3 @@ export default {
     await housekeeping(env.DB, Date.now())
   },
 }
-

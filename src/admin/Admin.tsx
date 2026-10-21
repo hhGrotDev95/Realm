@@ -213,7 +213,7 @@ const TABS: { id: Tab; label: string; icon: typeof Megaphone; draftOnly?: boolea
   { id: 'faq', label: 'FAQ', icon: CircleHelp },
   { id: 'branding', label: 'Branding', icon: Palette },
   { id: 'modules', label: 'Module', icon: ToggleRight },
-  { id: 'chat', label: 'Chat-Moderation', icon: MessagesSquare, module: 'festivalchat' },
+  { id: 'chat', label: 'Chat-Moderation', icon: MessagesSquare },
   { id: 'analytics', label: 'Auswertung', icon: BarChart3 },
   { id: 'settings', label: 'Status', icon: Settings2 },
   { id: 'legal', label: 'Recht', icon: Scale },

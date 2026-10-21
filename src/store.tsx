@@ -1,3 +1,4 @@
+import type { FlagReason } from './api'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, execute, online, opId, privacyKey, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
 import { lang, t } from './i18n'
@@ -236,7 +237,7 @@ interface Ctx extends Persisted {
   inviteLink: () => string | null
   netOnline: boolean
   deleteMessage: (id: string) => void
-  flagMessage: (id: string) => void
+  flagMessage: (id: string, reason: FlagReason) => Promise<void>
   removeMember: (id: string) => void
   approveMember: (id: string) => void
   setApproveJoins: (v: boolean) => void
@@ -309,7 +310,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         chat: [
           // incremental polls only carry new messages: keep the ones we already have
           ...(incremental && p.crewRef?.id === cs.crew.id ? p.chat.filter((m) => !m.pending && !cs.messages.some((n) => n.id === m.id)) : []),
-          ...cs.messages.map((m) => ({ id: m.id, from: me(m.from), text: m.text ?? '', min: minuteOfDay(m.at), at: m.at, deleted: m.deleted, hidden: m.hidden, flaggedByMe: m.flaggedByMe })),
+          ...cs.messages.map((m) => ({ id: m.id, from: me(m.from), text: m.text ?? '', min: minuteOfDay(m.at), at: m.at, deleted: m.deleted, moderationReason: m.moderationReason, hidden: m.hidden, flaggedByMe: m.flaggedByMe })),
           ...queued.flatMap((o) => (o.kind === 'message' && o.crewId === cs.crew.id ? [{ id: o.id, from: 'me', text: o.text, min: minuteOfDay(o.at), pending: true }] : [])),
         ],
         meetups: [
@@ -564,7 +565,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const openSheet = useCallback((sh: SheetState) => setStack((st) => (sh ? [...st, sh] : st)), [])
-  const closeSheet = useCallback(() => setStack((st) => st.slice(0, -1)), [])
+  const closeSheet = useCallback(() => {
+    // Cancelling identity must also cancel the action it was requested for.
+    if (stack[stack.length - 1]?.kind === 'identity') pending.current = null
+    setStack((st) => st.slice(0, -1))
+  }, [stack])
 
   // the timetable everyone sees: published slots plus the organizer's changes (cached offline)
   applyTimetableChanges(online ? (s.timetableChanges ?? []) : DEMO_CHANGES)
@@ -687,19 +692,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!crewId) return
         api.deleteMessage(crewId, id).then(() => (mark(), refresh()), fail)
       },
-      flagMessage: (id) =>
-        requireIdentity(t('Meldungen brauchen einen Namen, damit Missbrauch erkennbar bleibt.'), () => {
-          const mark = (hidden: boolean) => setS((p) => ({ ...p, chat: p.chat.map((m) => (m.id === id ? { ...m, flaggedByMe: true, hidden: m.hidden || hidden } : m)) }))
-          if (!online) {
-            mark(true)
-            return toast(t('Gemeldet – die Nachricht ist ausgeblendet'))
-          }
-          if (!crewId) return
-          api.flagMessage(crewId, id).then((r) => {
-            mark(r.hidden)
-            toast(r.hidden ? t('Gemeldet – die Nachricht ist jetzt ausgeblendet') : t('Gemeldet – danke'))
-          }, fail)
-        }),
+      flagMessage: async (id, reason) => {
+        const mark = (hidden: boolean) => setS((p) => ({ ...p, chat: p.chat.map((m) => (m.id === id ? { ...m, flaggedByMe: true, hidden: m.hidden || hidden } : m)) }))
+        if (!online) { mark(true); return }
+        if (!crewId) throw new Error(t('Etwas ist schiefgelaufen'))
+        const r = await api.flagMessage(crewId, id, reason)
+        mark(r.hidden)
+      },
       removeMember: (id) => {
         if (!online || !crewId) return toast(t('Im Demo-Modus können keine Mitglieder entfernt werden'))
         api.removeMember(crewId, id).then(({ code }) => {
@@ -946,4 +945,3 @@ export function conflictClusters(plan: string[], day: number, resolved: Record<s
 export function isMeetupActive(m: Meetup, now: { day: number; min: number }) {
   return m.day > now.day || (m.day === now.day && m.min + 30 >= now.min)
 }
-
