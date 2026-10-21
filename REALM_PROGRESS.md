@@ -354,3 +354,15 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - **Welle 7a – Abschlussprüfung (20.10.2026):** vorhandenen WIP-Stand mit D08 und #32 zusammengeführt. Der Festival-Chat benutzt bereits `name(visitor, 'Uma')`; der gemeinsame Helfer prüft jetzt zusätzlich, dass „Weiter“ vor der Altersbestätigung gesperrt ist. Lokal bestanden: Import/Unit, Build, Smoke, a11y, vollständiger Live-Test sowie 41 API-Tests und Migrationstest mit 19 Migrationen. Finale Rechtstexte und Betreiberentscheidungen bleiben offen; technische Bereitstellung ist keine rechtliche Freigabe.
 
 - PR #32 gemergt (`cfea513`, CI `39402205182` grün); D08 als PR #33 gemergt (`d40a6fc`, CI `39403712434` grün auf Head `6fb071b`). D08 enthält zusätzlich einen Schutz für leere Markerlisten.
+
+## Runde: Plan übersteht Funkloch und vollen Speicher (21.10.2026, Branch `ccr-c4b0523e-4xuz1d`)
+- **Behobener Fehler:** Der Plan wurde per `api.setPlan(...).catch(() => {})` direkt gesendet. Änderungen offline oder bei fehlgeschlagener Anfrage kamen nie beim Server an (Crew-Avatare, Auswertung und „Profil wiederherstellen“ auf neuem Gerät sahen einen alten Plan). Jetzt läuft der Plan über die Outbox als `kind: 'plan'` (nur der neueste bleibt in der Schlange), überlebt Neustarts und wird nach dem Wiederverbinden ohne Reload zugestellt. `planSynced` (`<Session>:<Acts>`) verhindert unnötige Uploads bei jedem Start.
+- **Voller Browserspeicher** (`src/storage.ts`): Bisher scheiterte `localStorage.setItem` stumm – mit Geländeplänen (bis ~650 kB je Festival) im Festival-Cache konnte der eigene Plan verloren gehen. Jetzt weichen zuerst Caches anderer Festivals, dann das Geländeplan-Bild des aktuellen Festivals; hilft nichts, kommt einmal ein ehrlicher Hinweis. Der Festival-Cache wird notfalls ohne Bild gespeichert statt gar nicht.
+- `navigator.storage.persist()` wird angefragt, sobald ein Plan oder Server-Profil existiert (verringert Löschung durch den Browser unter Speicherdruck).
+- Geprüft: typecheck, `test:import` (neu: `tests/storage.test.mts`, 6 Prüfungen), build, `test:e2e`, `test:a11y`, `test:live` (26 Schritte, neu: „offline plan change survives a reload and reaches the server after reconnect“), Worker 41 API-Tests + Migrationstest. Firefox/WebKit-Job nur in der CI (lokal nicht ausgeführt).
+- Offen/Hinweis: PR #26 (D08, Branch `ccr-c4b0523e-ltc4vo`) ist noch offen, inhaltlich aber durch PR #33 ersetzt – Schließen braucht deine Entscheidung.
+
+### Nächste Schritte (aktuell)
+1. Erinnerungen und „Warst du da?“ (`attended`) liegen nur lokal – Server-Sicherung analog zum Plan prüfen, damit „Profil wiederherstellen“ sie mitbringt.
+2. Schritt 8 Push: blockiert (VAPID-Schlüssel + Deployment). Ebenso F17-Staging-Lasttest.
+3. Veranstalter-Konsole und Server-Fehlermeldungen auf Englisch (aus Schritt 7 offen).

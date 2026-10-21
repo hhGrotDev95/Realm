@@ -173,6 +173,30 @@ try {
     await ben.keyboard.press('Escape')
   })
 
+  await step('offline plan change survives a reload and reaches the server after reconnect', async () => {
+    const serverPlan = async () => {
+      const tok = await ben.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:realm-open-air')).session.token)
+      const r = await fetch(`${API}/api/me`, { headers: { Authorization: 'Bearer ' + tok, 'X-Festival': 'realm-open-air' } })
+      return (await r.json()).plan
+    }
+    const before = await serverPlan()
+    await nav(ben, 'Line-up')
+    await ben.context().setOffline(true)
+    await ben.locator('.act', { hasText: 'Arcturus' }).getByRole('button', { name: 'Zum Plan hinzufügen' }).click()
+    await ben.getByText(/Offline · 1 Änderung wartet/).waitFor()
+    await ben.reload().catch(() => {}) // the queued plan must survive a restart while offline
+    await ben.context().setOffline(false)
+    // no reload after reconnecting: the queue itself must deliver (a fresh start would hide a lost change)
+    if (!ben.url().startsWith(WEB)) await ben.goto(WEB)
+    await ben.getByText(/Offline · 1 Änderung wartet/).waitFor({ state: 'detached', timeout: 20000 })
+    for (let i = 0; i < 50; i++) {
+      const plan = await serverPlan()
+      if (plan.length === before.length + 1 && plan.some((id) => id.includes('arcturus'))) return nav(ben, 'Crew')
+      await ben.waitForTimeout(300)
+    }
+    throw new Error('plan change made offline never reached the server: ' + JSON.stringify(await serverPlan()))
+  })
+
   await step('a hanging request times out and does not block the outbox (audit F17)', async () => {
     // the first send hangs forever (a stalled festival network); the old client waited endlessly and sent nothing after it
     let hung = false
