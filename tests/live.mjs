@@ -466,7 +466,7 @@ try {
     await mod.getByRole('button', { name: 'Plattform-Schlüssel verwenden' }).click()
     await mod.getByLabel('Schlüssel').fill('e2e-admin')
     await mod.getByRole('button', { name: 'Anmelden', exact: true }).click()
-    await mod.getByLabel('Festival', { exact: true }).selectOption('realm-open-air')
+    await mod.getByRole('combobox', { name: 'Festival', exact: true }).selectOption('realm-open-air')
     await mod.getByRole('tab', { name: 'Chat-Moderation' }).click()
     await mod.locator('.card').getByLabel('Bereich', { exact: true }).selectOption('crew')
     const reported = mod.locator('.list-item', { hasText: 'Bitte melden' })
