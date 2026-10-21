@@ -709,8 +709,18 @@ try {
     const spammer = await (await fetch(`${API}/api/guests`, { method: 'POST', headers: H(), body: JSON.stringify({ nickname: 'Spam' }) })).json()
     const spam = await (await fetch(`${API}/api/festival-chat`, { method: 'POST', headers: T(spammer.token), body: JSON.stringify({ text: 'Billige Tickets hier!!!' }) })).json()
     await visitor.locator('.bubble.them', { hasText: 'Billige Tickets' }).waitFor({ timeout: 15000 }) // arrives by polling
-    // First-time reporters must retain their selected reason through the identity dialog.
+    // Reading festival chat requires a guest session. An unnamed guest must retain the
+    // selected report reason through the first named action's identity dialog.
+    const unnamedResponse = await fetch(`${API}/api/guests`, { method: 'POST', headers: H(), body: '{}' })
+    if (!unnamedResponse.ok) throw new Error('unnamed reporter setup failed: ' + unnamedResponse.status)
+    const unnamed = await unnamedResponse.json()
     const firstReporter = await user()
+    await firstReporter.addInitScript(({ id, token }) => {
+      localStorage.setItem('realm.v2:testwiese-festival', JSON.stringify({
+        session: { id, token }, guest: { id, nickname: null, color: '#A58CFF', secured: null },
+        clockMode: 'demo', phase: 'during',
+      }))
+    }, { id: unnamed.id, token: unnamed.token })
     await firstReporter.goto(`${WEB}/?f=testwiese-festival`)
     await firstReporter.getByRole('button', { name: /Festival-Chat/ }).first().click()
     await firstReporter.locator('.bubble.them', { hasText: 'Billige Tickets' }).click()
