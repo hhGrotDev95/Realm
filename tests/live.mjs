@@ -485,12 +485,36 @@ try {
     await mod.getByLabel('Schlüssel').fill('e2e-admin')
     await mod.getByRole('button', { name: 'Anmelden', exact: true }).click()
     await mod.getByRole('combobox', { name: 'Festival', exact: true }).selectOption('realm-open-air')
+    // Deliver the old festival response after the selected crew response. It must not
+    // replace the current list or erase the decision form.
+    const oldChatPattern = '**/api/admin/festivals/realm-open-air/chat?kind=festival'
+    let releaseOldChat
+    const oldChatGate = new Promise((resolve) => { releaseOldChat = resolve })
+    let oldChatStarted
+    const oldChatRequest = new Promise((resolve) => { oldChatStarted = resolve })
+    await mod.route(oldChatPattern, async (route) => {
+      const response = await route.fetch()
+      oldChatStarted()
+      await oldChatGate
+      await route.fulfill({ response })
+    })
     await mod.getByRole('tab', { name: 'Chat-Moderation' }).click()
+    await oldChatRequest
     await mod.locator('.card').getByLabel('Bereich', { exact: true }).selectOption('crew')
     const reported = mod.locator('.list-item', { hasText: 'Bitte melden' })
     await reported.getByText('Belästigung oder Drohung: Bitte durch den Veranstalter prüfen').waitFor()
+    const decision = 'Verstoß gegen die Crew-Regeln nach Prüfung.'
+    await reported.getByLabel('Begründung der Entscheidung').fill(decision)
+    const oldChatResponse = mod.waitForResponse((r) => r.url().endsWith('/chat?kind=festival'))
+    releaseOldChat()
+    await (await oldChatResponse).finished()
+    await mod.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await mod.unroute(oldChatPattern)
+    if (await mod.locator('.card').getByLabel('Bereich', { exact: true }).inputValue() !== 'crew' ||
+        await reported.getByLabel('Begründung der Entscheidung').inputValue() !== decision) {
+      throw new Error('late festival response replaced the crew decision draft')
+    }
     if (await mod.getByText('Wir treffen uns').count()) throw new Error('unreported crew text exposed in moderation')
-    await reported.getByLabel('Begründung der Entscheidung').fill('Verstoß gegen die Crew-Regeln nach Prüfung.')
     mod.once('dialog', (d) => d.accept())
     await reported.getByRole('button', { name: /löschen/ }).click()
     await lea.getByText('Vom Veranstalter entfernt: Verstoß gegen die Crew-Regeln nach Prüfung.').waitFor({ timeout: 20000 })

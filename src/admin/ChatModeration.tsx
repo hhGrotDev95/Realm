@@ -1,6 +1,6 @@
 import { DecisionReason, FlagReasons } from './ModerationReason'
 import { Eye, RefreshCw, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { adminApi } from '../api'
 
 type Flash = (k: 'ok' | 'err', t: string) => void
@@ -14,9 +14,19 @@ export function ChatModeration({ token, flash, slug }: { token: string; flash: F
   const [reasons, setReasons] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [rows, setRows] = useState<Row[] | null>(null)
-  const load = useCallback(() => admin.chat(slug, kind).then(setRows, (e) => flash('err', errText(e))), [admin, slug, kind, flash])
+  const request = useRef(0)
+  const load = useCallback(async () => {
+    const sequence = ++request.current
+    try {
+      const result = await admin.chat(slug, kind)
+      if (sequence === request.current) setRows(result)
+    } catch (e) {
+      if (sequence === request.current) flash('err', errText(e))
+    }
+  }, [admin, slug, kind, flash])
   useEffect(() => {
     load()
+    return () => { request.current++ }
   }, [load])
   const act = async (fn: () => Promise<void>, ok: string) => {
     if (busy) return
@@ -41,7 +51,7 @@ export function ChatModeration({ token, flash, slug }: { token: string; flash: F
         </button>
       </div>
       <label className="admin-field">Bereich
-        <select className="field" aria-label="Bereich" value={kind} disabled={busy} onChange={(e) => { setRows(null); setKind(e.target.value as typeof kind) }}>
+        <select className="field" aria-label="Bereich" value={kind} disabled={busy} onChange={(e) => { request.current++; setRows(null); setKind(e.target.value as typeof kind) }}>
           <option value="festival">Festival-Chat</option>
           <option value="crew">Gemeldete Crew-Nachrichten</option>
         </select>
