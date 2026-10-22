@@ -89,6 +89,7 @@ export interface RemoteMessage {
   from: string
   text: string | null
   at: number
+  moderationReason?: string | null
   deleted?: boolean
   hidden?: boolean
   flaggedByMe?: boolean
@@ -103,6 +104,8 @@ export interface CrewState {
   messages: RemoteMessage[]
   meetups: RemoteMeetup[]
 }
+export type FlagReason = { category: 'spam' | 'harassment' | 'hate' | 'illegal' | 'other'; detail?: string }
+export type ModerationFlag = { category: string; detail: string; at: number }
 export interface RemoteReport {
   id: string
   title: string
@@ -138,6 +141,7 @@ export interface PublicMessage {
   color: string
   text: string | null
   at: number
+  moderationReason?: string | null
   deleted?: boolean
   hidden?: boolean
   flaggedByMe?: boolean
@@ -174,7 +178,7 @@ export const api = {
   crew: (id: string, since?: number) => call<CrewState | CrewPending>('GET', `/api/crews/${id}${since ? `?since=${since}` : ''}`),
   setLocation: (id: string, share: boolean, location: string | null) => call('PUT', `/api/crews/${id}/location`, { share, location }),
   deleteMessage: (crewId: string, id: string) => call<void>('DELETE', `/api/crews/${crewId}/messages/${id}`),
-  flagMessage: (crewId: string, id: string) => call<{ hidden: boolean }>('POST', `/api/crews/${crewId}/messages/${id}/flag`),
+  flagMessage: (crewId: string, id: string, reason: FlagReason) => call<{ hidden: boolean }>('POST', `/api/crews/${crewId}/messages/${id}/flag`, reason),
   removeMember: (crewId: string, guestId: string) => call<{ code: string }>('DELETE', `/api/crews/${crewId}/members/${guestId}`),
   approveMember: (crewId: string, guestId: string) => call<void>('POST', `/api/crews/${crewId}/members/${guestId}/approve`),
   setApproveJoins: (crewId: string, approveJoins: boolean) => call<{ approveJoins: boolean }>('PATCH', `/api/crews/${crewId}`, { approveJoins }),
@@ -190,7 +194,9 @@ export const api = {
   festivalChat: (since?: number) => call<{ serverTime: number; messages: PublicMessage[] }>('GET', '/api/festival-chat' + (since ? `?since=${since}` : '')),
   postFestivalChat: (text: string, id?: string) => call<PublicMessage>('POST', '/api/festival-chat', { id, text }),
   deleteFestivalChat: (id: string) => call<void>('DELETE', `/api/festival-chat/${id}`),
-  flagFestivalChat: (id: string) => call<{ hidden: boolean }>('POST', `/api/festival-chat/${id}/flag`),
+  flagReport: (id: string, reason: FlagReason) => call<void>('POST', `/api/reports/${id}/flag`, reason),
+  moderation: () => call<{ kind: string; targetId: string; action: string; reason: string; at: number }[]>('GET', '/api/me/moderation'),
+  flagFestivalChat: (id: string, reason: FlagReason) => call<{ hidden: boolean }>('POST', `/api/festival-chat/${id}/flag`, reason),
   /** Anonymous FAQ-bot statistics for the organizer (no session needed). */
   faqEvent: (e: { kind: 'hit'; faqId: string } | { kind: 'miss'; question: string }) => call<void>('POST', '/api/faq/events', e),
 }
@@ -307,7 +313,7 @@ export const adminApi = (adminToken: string) => {
     invite: (email: string, festival: string) => req<{ token: string; email: string; expiresAt: number }>('POST', '/api/admin/invites', { email, festival }),
     accounts: (festival: string) => req<{ id: string; name: string; email: string; role: string; totp: boolean; disabled: boolean }[]>('GET', `/api/admin/accounts?festival=${encodeURIComponent(festival)}`),
     removeAccess: (id: string, festival: string) => req<void>('DELETE', `/api/admin/accounts/${id}/festivals/${festival}`),
-    audit: (festival: string) => req<{ by: string; festival: string | null; action: string; status: number; at: number }[]>('GET', `/api/admin/audit?festival=${encodeURIComponent(festival)}`),
+    audit: (festival: string) => req<{ by: string; festival: string | null; action: string; status: number; reason: string | null; at: number }[]>('GET', `/api/admin/audit?festival=${encodeURIComponent(festival)}`),
     festivals: () => req<{ slug: string; name: string; status: string }[]>('GET', '/api/admin/festivals'),
     bundle: (slug: string) => req<FestivalBundle>('GET', `/api/festivals/${encodeURIComponent(slug)}`),
     // reads go through the admin token too, so drafts work
@@ -326,12 +332,13 @@ export const adminApi = (adminToken: string) => {
     setModules: (slug: string, modules: Record<string, boolean>) => req<Record<string, boolean>>('PUT', `/api/admin/festivals/${slug}/modules`, modules),
     setTheme: (slug: string, theme: { brand?: string; font?: string; logo?: string }) => req<Record<string, string>>('PUT', `/api/admin/festivals/${slug}/theme`, theme),
     saveMap: (slug: string, m: { siteMap?: string | null; stages?: { id: string; x: number; y: number }[]; pois?: Poi[] }) => req<{ stages: number; pois: number }>('PUT', `/api/admin/festivals/${slug}/map`, m),
-    chat: (slug: string) => req<{ id: string; name: string; text: string; at: number; flags: number; hidden: boolean; restored: boolean }[]>('GET', `/api/admin/festivals/${slug}/chat`),
-    deleteChat: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/chat/${id}`),
-    restoreChat: (slug: string, id: string) => req<void>('POST', `/api/admin/festivals/${slug}/chat/${id}/restore`),
-    reports: (slug: string) => req<{ id: string; title: string; place: string | null; by: string; at: number; expiresAt: number; verified: boolean; reporters: number; fixedVotes: number }[]>('GET', `/api/admin/festivals/${slug}/reports`),
+    chat: (slug: string, kind: 'festival' | 'crew' = 'festival') => req<{ id: string; kind: 'festival' | 'crew'; reasons: ModerationFlag[]; name: string; text: string; at: number; flags: number; hidden: boolean; restored: boolean }[]>('GET', `/api/admin/festivals/${slug}/chat?kind=${kind}`),
+    deleteChat: (slug: string, id: string, reason: string, kind: 'festival' | 'crew' = 'festival') => req<void>('DELETE', `/api/admin/festivals/${slug}/chat/${id}?kind=${kind}`, { reason }),
+    restoreChat: (slug: string, id: string, reason: string, kind: 'festival' | 'crew' = 'festival') => req<void>('POST', `/api/admin/festivals/${slug}/chat/${id}/restore?kind=${kind}`, { reason }),
+    reports: (slug: string) => req<{ id: string; reasons: ModerationFlag[]; title: string; place: string | null; by: string; at: number; expiresAt: number; verified: boolean; reviewed: boolean; reporters: number; fixedVotes: number }[]>('GET', `/api/admin/festivals/${slug}/reports`),
     verifyReport: (slug: string, id: string, verified: boolean) => req<{ verified: boolean }>('PUT', `/api/admin/festivals/${slug}/reports/${id}`, { verified }),
-    endReport: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/reports/${id}`),
+    reviewReport: (slug: string, id: string, reason: string) => req<void>('POST', `/api/admin/festivals/${slug}/reports/${id}/review`, { reason }),
+    endReport: (slug: string, id: string, reason: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/reports/${id}`, { reason }),
     analytics: (slug: string) => req<Analytics>('GET', `/api/admin/festivals/${slug}/analytics`),
     dismissFaqMiss: (slug: string, question: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/analytics/faq-misses`, { question }),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),

@@ -1,10 +1,11 @@
 name: CI
+# Playwright 1.56 requires a supported OS; ubuntu-latest can move independently.
 on:
   push:
   pull_request:
 jobs:
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -21,7 +22,7 @@ jobs:
 
   # the visitor app in the other engines visitors use (audit F07 surfaced in one browser only)
   browsers:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -40,7 +41,7 @@ jobs:
           BROWSER: ${{ matrix.browser }}
 
   api:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: worker
@@ -56,7 +57,7 @@ jobs:
       - run: npm test
 
   live:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [web, api]
     steps:
       - uses: actions/checkout@v4

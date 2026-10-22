@@ -269,6 +269,7 @@ export interface ChatMsg {
   min: number // minute of day
   pending?: boolean // queued offline, not yet on the server
   at?: number // server timestamp (live mode)
+  moderationReason?: string | null
   deleted?: boolean
   hidden?: boolean // flagged by the crew; text withheld from others
   flaggedByMe?: boolean

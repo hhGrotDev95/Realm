@@ -21,6 +21,8 @@ Stand Welle 6b. Die Fristen stehen als `RETENTION` in `worker/src/index.ts`; der
 | Offizielle Meldungen | Information | 1 Tag nach Ablauf | Cron |
 | Import-Snapshots | Rückgängig machen | 180 Tage | Cron |
 | Änderungsprotokoll der Konsole | Nachvollziehbarkeit | 2 Jahre | Cron |
+| Meldegründe für Inhalte | Moderationsprüfung | mit dem gemeldeten Inhalt | Fremdschlüssel-Kaskade |
+| Moderationsentscheidungen im Gastprofil | Begründung für betroffene Autoren | 60 Tage; bei Profillöschung sofort | Cron / Kaskade; Entscheidungsbegründung im Konsolenprotokoll bleibt gemäß dessen Frist |
 | Konsolen-Sitzungen, Einladungen | Anmeldung | 1 Tag nach Ablauf | Cron |
 | Rate-Limit-Zähler, Anmelde-Aufgaben | Missbrauchsschutz | 2 Std. bzw. 10 Min. | Cron |
 

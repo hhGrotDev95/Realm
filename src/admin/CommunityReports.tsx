@@ -1,3 +1,4 @@
+import { DecisionReason, FlagReasons } from './ModerationReason'
 import { BadgeCheck, RefreshCw, Undo2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { adminApi } from '../api'
@@ -12,19 +13,23 @@ const errText = (e: unknown) => (e instanceof Error ? e.message : 'Fehler')
  */
 export function CommunityReports({ token, flash, slug }: { token: string; flash: Flash; slug: string }) {
   const admin = useMemo(() => adminApi(token), [token])
+  const [reasons, setReasons] = useState<Record<string, string>>({})
+  const [busy, setBusy] = useState(false)
   const [rows, setRows] = useState<Row[] | null>(null)
   const load = useCallback(() => admin.reports(slug).then(setRows, (e) => flash('err', errText(e))), [admin, slug, flash])
   useEffect(() => {
     load()
   }, [load])
   const act = async (fn: () => Promise<unknown>, ok: string) => {
+    if (busy) return
+    setBusy(true)
     try {
       await fn()
       flash('ok', ok)
       load()
     } catch (e) {
       flash('err', errText(e))
-    }
+    } finally { setBusy(false) }
   }
   return (
     <div className="card">
@@ -46,7 +51,7 @@ export function CommunityReports({ token, flash, slug }: { token: string; flash:
       ) : (
         <div className="list">
           {rows.map((r) => (
-            <div key={r.id} className="list-item" style={{ alignItems: 'flex-start' }}>
+            <div key={r.id} className="list-item" style={{ alignItems: 'stretch', flexDirection: 'column' }}>
               <span className="grow">
                 <span className="tiny faint" style={{ display: 'block' }}>
                   {r.by} · {new Date(r.at).toLocaleTimeString('de-DE', { timeStyle: 'short' })} · von {r.reporters} {r.reporters === 1 ? 'Person' : 'Personen'} gemeldet
@@ -60,6 +65,10 @@ export function CommunityReports({ token, flash, slug }: { token: string; flash:
                   </span>
                 )}
               </span>
+              <FlagReasons reasons={r.reasons} />
+              {r.reviewed && <span className="tag">geprüft und beibehalten</span>}
+              <DecisionReason value={reasons[r.id] ?? ''} change={(v) => setReasons((p) => ({ ...p, [r.id]: v }))} />
+              {r.reasons.length > 0 && !r.reviewed && <button type="button" className="btn ghost sm" disabled={busy || (reasons[r.id]?.trim().length ?? 0) < 3} onClick={() => act(() => admin.reviewReport(slug, r.id, reasons[r.id].trim()), 'Meldung geprüft und beibehalten')}>Inhalt beibehalten</button>}
               {r.verified ? (
                 <button type="button" className="btn ghost sm" onClick={() => act(() => admin.verifyReport(slug, r.id, false), 'Nicht mehr offiziell')}>
                   <Undo2 size={15} /> Zurücknehmen
@@ -69,7 +78,7 @@ export function CommunityReports({ token, flash, slug }: { token: string; flash:
                   <BadgeCheck size={15} /> Bestätigen
                 </button>
               )}
-              <button type="button" className="btn ghost sm" aria-label={`„${r.title}“ beenden`} onClick={() => act(() => admin.endReport(slug, r.id), 'Meldung beendet')}>
+              <button type="button" className="btn ghost sm" aria-label={`„${r.title}“ beenden`} disabled={busy || (reasons[r.id]?.trim().length ?? 0) < 3} onClick={() => act(() => admin.endReport(slug, r.id, reasons[r.id].trim()), 'Meldung beendet')}>
                 <X size={15} /> Beenden
               </button>
             </div>

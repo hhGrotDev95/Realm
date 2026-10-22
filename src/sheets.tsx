@@ -1,5 +1,6 @@
+import { ReportAbuse, ModerationInbox } from './Moderation'
 import { AnimatePresence, m as motion } from 'framer-motion'
-import { Flag, Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Copy, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
+import { Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Copy, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { switchFestival } from './festival'
 const FaqSheet = lazy(() => import('./FaqSheet').then((m) => ({ default: m.FaqSheet })))
@@ -734,6 +735,7 @@ function UpdateItem({ u, vote, voted }: { u: FestivalUpdate; vote: (id: string, 
       {u.body && <div className="small muted">{u.body}</div>}
       {community && <div className="tiny faint">{people === 1 ? t('Von 1 Person gemeldet · nicht geprüft') : t('Von {n} Personen gemeldet · nicht geprüft', { n: people })}{u.fixedVotes ? ' · ' + t('{n} sagen: behoben', { n: u.fixedVotes }) : ''}</div>}
       {u.validMin !== undefined && <div className="tiny faint">{community ? t('Läuft in {n} Min. ab, wenn niemand bestätigt', { n: u.validMin }) : t('Gültig noch {n} Min.', { n: u.validMin })}</div>}
+      {u.mine === false && on('reports') && <ReportAbuse label={t('Inhalt melden')} submit={(reason) => api.flagReport(u.id, reason)} />}
       {community && u.mine && (
         <div className="row" style={{ gap: 8, marginTop: 4 }}>
           <button className="btn ghost sm" onClick={() => vote(u.id, 'fixed')}>
@@ -938,6 +940,7 @@ function Profile() {
   const [confirmReset, setConfirmReset] = useState(false)
   return (
     <>
+      <ModerationInbox />
       <div className="row" style={{ gap: 14, marginBottom: 22 }}>
         <Avatar id="me" size="lg" />
         <div className="grow">
@@ -1221,7 +1224,7 @@ function Chat() {
                 </span>
               )}
               {m.deleted || (m.hidden && !me) ? (
-                <span className={`bubble ${me ? 'me' : 'them'} removed`}>{m.deleted ? t('Nachricht gelöscht') : t('Ausgeblendet – von der Crew gemeldet')}</span>
+                <span className={`bubble ${me ? 'me' : 'them'} removed`}>{m.moderationReason ? t('Vom Veranstalter entfernt: {reason}', { reason: m.moderationReason }) : m.deleted ? t('Nachricht gelöscht') : t('Ausgeblendet – von der Crew gemeldet')}</span>
               ) : (
                 <button className={`bubble ${me ? 'me' : 'them'} ${m.pending ? 'pending' : ''}`} style={{ textAlign: 'left' }} onClick={() => setActive(active === m.id ? null : m.id)} aria-expanded={active === m.id}>
                   {m.text}
@@ -1230,7 +1233,7 @@ function Chat() {
               {m.pending && <span className="tiny faint" style={{ marginTop: 2 }}>{t('Wird gesendet …')}</span>}
               {me && m.hidden && !m.deleted && <span className="tiny faint" style={{ marginTop: 2 }}>{t('Von der Crew gemeldet – für andere ausgeblendet')}</span>}
               <AnimatePresence>
-                {active === m.id && !m.pending && (
+                {active === m.id && !m.pending && !m.deleted && !(m.hidden && !me) && (
                   <motion.div className="msg-actions" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
                     <button
                       className="btn ghost sm"
@@ -1255,17 +1258,7 @@ function Chat() {
                         <Trash2 size={15} /> {t('Löschen')}
                       </button>
                     )}
-                    {!me && !m.flaggedByMe && (
-                      <button
-                        className="btn ghost sm"
-                        onClick={() => {
-                          setActive(null)
-                          flagMessage(m.id)
-                        }}
-                      >
-                        <Flag size={15} /> {t('Melden')}
-                      </button>
-                    )}
+                    {!me && !m.flaggedByMe && <ReportAbuse submit={async (reason) => { await flagMessage(m.id, reason); setActive(null) }} />}
                   </motion.div>
                 )}
               </AnimatePresence>

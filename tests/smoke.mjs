@@ -118,10 +118,12 @@ try {
     // moderation: report someone else's message, delete your own
     await page.locator('.bubble.them', { hasText: 'Klingt gut' }).click()
     await page.getByRole('button', { name: 'Melden', exact: true }).click()
+    await page.getByLabel('Meldegrund', { exact: true }).selectOption('spam')
+    await page.getByRole('button', { name: 'Meldung absenden' }).click()
     await page.getByText('Ausgeblendet – von der Crew gemeldet').waitFor()
     page.once('dialog', (d) => d.accept())
     await page.locator('.bubble.me', { hasText: 'Hallo Crew' }).click()
-    await page.getByRole('button', { name: 'Löschen', exact: true }).click()
+    await page.locator('.bubble.me', { hasText: 'Hallo Crew' }).locator('..').getByRole('button', { name: 'Löschen', exact: true }).click()
     await page.getByText('Nachricht gelöscht').waitFor()
     await page.keyboard.press('Escape')
   })

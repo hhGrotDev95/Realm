@@ -271,6 +271,11 @@ try {
     await item.getByRole('button', { name: /Stimmt noch/ }).click()
     await ben.getByText('Danke – als weiterhin gültig bestätigt').waitFor()
     await item.getByText('Von 2 Personen gemeldet · nicht geprüft').waitFor()
+    await item.getByRole('button', { name: 'Inhalt melden', exact: true }).click()
+    await item.getByLabel('Meldegrund', { exact: true }).selectOption('other')
+    await item.getByLabel('Erläuterung (optional)').fill('Wasser ist wieder vorhanden')
+    await item.getByRole('button', { name: 'Meldung absenden' }).click()
+    await ben.getByText('Gemeldet – danke').first().waitFor()
     await ben.keyboard.press('Escape')
     await lea.reload()
     await lea.locator('.section-h button', { hasText: 'Alle' }).click()
@@ -300,6 +305,14 @@ try {
   })
 
   await step('new messages arrive incrementally without a reload', async () => {
+    const polls = []
+    const observe = async (r) => {
+      if (r.request().method() === 'GET' && /\/api\/crews\/[^/?]+(?:\?|$)/.test(r.url())) {
+        const data = await r.json().catch(() => ({}))
+        polls.push({ at: Date.now(), status: r.status(), messages: data.messages?.map((m) => ({ id: m.id, text: m.text })) })
+      }
+    }
+    lea.on('response', observe)
     for (const p of [lea, ben]) {
       await p.keyboard.press('Escape')
       await p.keyboard.press('Escape')
@@ -309,8 +322,22 @@ try {
     await lea.getByRole('button', { name: /^Crew-Chat/ }).click()
     await ben.getByRole('button', { name: /^Crew-Chat/ }).click()
     await ben.getByPlaceholder(/Nachricht/).fill('Inkrementell 👋')
+    const sent = ben.waitForResponse((r) => r.request().method() === 'POST' && /\/api\/crews\/[^/]+\/messages$/.test(r.url()))
     await ben.getByRole('button', { name: 'Senden' }).click()
-    await lea.locator('.bubble.them', { hasText: 'Inkrementell 👋' }).waitFor({ timeout: 20000 })
+    const response = await sent
+    if (!response.ok()) throw new Error(`incremental message rejected: ${response.status()} ${await response.text()}`)
+    await ben.locator('.bubble.me', { hasText: 'Inkrementell 👋' }).waitFor()
+    try {
+      await lea.locator('.bubble.them', { hasText: 'Inkrementell 👋' }).waitFor({ timeout: 20000 })
+    } catch (e) {
+      console.error('Incremental receiver diagnostics', { polls, browser: await lea.evaluate(() => ({
+        online: navigator.onLine, visibility: document.visibilityState,
+        bubbles: [...document.querySelectorAll('.bubble')].map((el) => el.textContent),
+      })) })
+      throw e
+    } finally {
+      lea.off('response', observe)
+    }
     if ((await lea.locator('.bubble', { hasText: 'Treffen am Archive?' }).count()) !== 1) throw new Error('older messages lost or duplicated after incremental merge')
     await lea.keyboard.press('Escape')
     await ben.keyboard.press('Escape')
@@ -446,9 +473,42 @@ try {
     await lea.getByRole('button', { name: 'Senden' }).click()
     await ben.locator('.bubble.them', { hasText: 'Bitte melden' }).click({ timeout: 20000 })
     await ben.getByRole('button', { name: 'Melden', exact: true }).click()
-    await ben.getByText('Gemeldet – danke').waitFor()
+    if (await ben.getByRole('button', { name: 'Meldung absenden' }).isEnabled()) throw new Error('a report requires a reason category')
+    await ben.getByLabel('Meldegrund', { exact: true }).selectOption('harassment')
+    await ben.getByLabel('Erläuterung (optional)').fill('Bitte durch den Veranstalter prüfen')
+    await ben.getByRole('button', { name: 'Meldung absenden' }).click()
+    await ben.getByText('Gemeldet – danke').first().waitFor()
+    const mod = await user()
+    await mod.setViewportSize({ width: 1200, height: 900 })
+    await mod.goto(`${WEB}/#admin`)
+    await mod.getByRole('button', { name: 'Plattform-Schlüssel verwenden' }).click()
+    await mod.getByLabel('Schlüssel').fill('e2e-admin')
+    await mod.getByRole('button', { name: 'Anmelden', exact: true }).click()
+    await mod.getByRole('combobox', { name: 'Festival', exact: true }).selectOption('realm-open-air')
+    await mod.getByRole('tab', { name: 'Chat-Moderation' }).click()
+    await mod.locator('.card').getByLabel('Bereich', { exact: true }).selectOption('crew')
+    const reported = mod.locator('.list-item', { hasText: 'Bitte melden' })
+    await reported.getByText('Belästigung oder Drohung: Bitte durch den Veranstalter prüfen').waitFor()
+    if (await mod.getByText('Wir treffen uns').count()) throw new Error('unreported crew text exposed in moderation')
+    await reported.getByLabel('Begründung der Entscheidung').fill('Verstoß gegen die Crew-Regeln nach Prüfung.')
+    mod.once('dialog', (d) => d.accept())
+    await reported.getByRole('button', { name: /löschen/ }).click()
+    await lea.getByText('Vom Veranstalter entfernt: Verstoß gegen die Crew-Regeln nach Prüfung.').waitFor({ timeout: 20000 })
     await lea.keyboard.press('Escape')
     await ben.keyboard.press('Escape')
+    await mod.getByRole('tab', { name: 'Meldungen', exact: true }).click()
+    const reportRow = mod.locator('.list-item', { hasText: 'Wasser leer: Wasserstelle Nord' })
+    await reportRow.getByText('Anderer Grund: Wasser ist wieder vorhanden').waitFor()
+    if (await reportRow.getByRole('button', { name: /beenden/ }).isEnabled()) throw new Error('ending a report requires a reason')
+    await reportRow.getByLabel('Begründung der Entscheidung').fill('Vor Ort geprüft: Wasser ist wieder vorhanden.')
+    await reportRow.getByRole('button', { name: /beenden/ }).click()
+    await reportRow.waitFor({ state: 'detached' })
+    await lea.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    await lea.getByText('Vom Veranstalter entfernt: Vor Ort geprüft: Wasser ist wieder vorhanden.').waitFor()
+    await lea.keyboard.press('Escape')
+    await mod.getByRole('tab', { name: 'Zugang' }).click()
+    await mod.getByLabel('Änderungsprotokoll').getByText('Vor Ort geprüft: Wasser ist wieder vorhanden.').waitFor()
+    await mod.close()
   })
 
   await step('tenants: switching festival shows other data and keeps crews apart', async () => {
@@ -667,9 +727,31 @@ try {
     const spammer = await (await fetch(`${API}/api/guests`, { method: 'POST', headers: H(), body: JSON.stringify({ nickname: 'Spam' }) })).json()
     const spam = await (await fetch(`${API}/api/festival-chat`, { method: 'POST', headers: T(spammer.token), body: JSON.stringify({ text: 'Billige Tickets hier!!!' }) })).json()
     await visitor.locator('.bubble.them', { hasText: 'Billige Tickets' }).waitFor({ timeout: 15000 }) // arrives by polling
+    // Reading festival chat requires a guest session. An unnamed guest must retain the
+    // selected report reason through the first named action's identity dialog.
+    const unnamedResponse = await fetch(`${API}/api/guests`, { method: 'POST', headers: H(), body: '{}' })
+    if (!unnamedResponse.ok) throw new Error('unnamed reporter setup failed: ' + unnamedResponse.status)
+    const unnamed = await unnamedResponse.json()
+    const firstReporter = await user()
+    await firstReporter.addInitScript(({ id, token }) => {
+      localStorage.setItem('realm.v2:testwiese-festival', JSON.stringify({
+        session: { id, token }, guest: { id, nickname: null, color: '#A58CFF', secured: null },
+        clockMode: 'demo', phase: 'during',
+      }))
+    }, { id: unnamed.id, token: unnamed.token })
+    await firstReporter.goto(`${WEB}/?f=testwiese-festival`)
+    await firstReporter.getByRole('button', { name: /Festival-Chat/ }).first().click()
+    await firstReporter.locator('.bubble.them', { hasText: 'Billige Tickets' }).click()
+    await firstReporter.getByRole('button', { name: 'Melden', exact: true }).click()
+    await firstReporter.getByLabel('Meldegrund', { exact: true }).selectOption('spam')
+    await firstReporter.getByLabel('Erläuterung (optional)').fill('Unverlangte Ticketwerbung')
+    await firstReporter.getByRole('button', { name: 'Meldung absenden' }).click()
+    await name(firstReporter, 'Erstmeldung')
+    await firstReporter.getByText('Gemeldet – danke').first().waitFor()
+    await firstReporter.context().close()
     for (const name of ['V1', 'V2', 'V3']) {
       const g = await (await fetch(`${API}/api/guests`, { method: 'POST', headers: H(), body: JSON.stringify({ nickname: name }) })).json()
-      const r = await fetch(`${API}/api/festival-chat/${spam.id}/flag`, { method: 'POST', headers: T(g.token) })
+      const r = await fetch(`${API}/api/festival-chat/${spam.id}/flag`, { method: 'POST', headers: T(g.token), body: JSON.stringify({ category: 'spam', detail: 'Unverlangte Ticketwerbung' }) })
       if (!r.ok) throw new Error('flag failed: ' + r.status)
     }
     await visitor.getByText('Ausgeblendet – von mehreren gemeldet').waitFor({ timeout: 15000 })
@@ -680,6 +762,9 @@ try {
     const row = org.locator('.list-item', { hasText: 'Billige Tickets' })
     await row.getByText('ausgeblendet', { exact: true }).waitFor()
     if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/chat-moderation.png`, fullPage: true })
+    await row.getByText('Spam oder Werbung: Unverlangte Ticketwerbung').first().waitFor()
+    if (await row.getByRole('button', { name: /löschen/ }).isEnabled()) throw new Error('moderation requires a reason')
+    await row.getByLabel('Begründung der Entscheidung').fill('Unverlangte Ticketwerbung verstößt gegen die Chatregeln.')
     org.once('dialog', (d) => d.accept())
     await row.getByRole('button', { name: /löschen/ }).click()
     await org.getByText('Nachricht gelöscht').waitFor()
@@ -687,6 +772,13 @@ try {
     await row.waitFor({ state: 'detached', timeout: 10000 }).catch(() => {
       throw new Error('deleted message still listed')
     })
+    const ownRow = org.locator('.list-item', { hasText: 'Wer teilt sich ein Taxi zum Bahnhof?' })
+    await ownRow.getByLabel('Begründung der Entscheidung').fill('Testentscheidung: Beitrag entfernt.')
+    org.once('dialog', (d) => d.accept())
+    await ownRow.getByRole('button', { name: /löschen/ }).click()
+    await visitor.getByRole('button', { name: /Festival-Chat/ }).first().click()
+    await visitor.getByText('Vom Veranstalter entfernt: Testentscheidung: Beitrag entfernt.').waitFor({ timeout: 15000 })
+    await visitor.keyboard.press('Escape')
     // English content: an English visitor gets the organizer's English FAQ and announcement
     await org.getByRole('tab', { name: 'FAQ' }).click()
     await org.locator('.list-item', { hasText: 'Gibt es Schließfächer?' }).click()

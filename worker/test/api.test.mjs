@@ -197,10 +197,10 @@ try {
     assert.equal((await api('DELETE', `/api/crews/${crew.id}/messages/${own.id}`, ben.token)).status, 404)
 
     // flags: not your own, idempotent per person, hidden at two
-    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, eve.token)).status, 400)
-    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, ben.token)).data.hidden, false)
-    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, ben.token)).data.flags, 1)
-    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, lea.token)).data.hidden, true)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, eve.token, { category: 'spam', detail: 'Unverlangte Werbung' })).status, 400)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, ben.token, { category: 'spam', detail: 'Unverlangte Werbung' })).data.hidden, false)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, ben.token, { category: 'spam', detail: 'Unverlangte Werbung' })).data.flags, 1)
+    assert.equal((await api('POST', `/api/crews/${crew.id}/messages/${spam.id}/flag`, lea.token, { category: 'spam', detail: 'Unverlangte Werbung' })).data.hidden, true)
 
     // incremental polls carry the deletion and the hide
     const inc = (await api('GET', `/api/crews/${crew.id}?since=${since}`, lea.token)).data.messages
@@ -629,19 +629,19 @@ try {
     const t0 = (await read(pia)).serverTime
     assert.deepEqual((await read(pia)).messages.map((m) => [m.name, m.text]), [['Ola', 'Wer kommt mit zum Pier?'], ['Rex', 'Kauft Tickets bei mir!!!']])
     // two flags are not enough in public, the third hides it from everyone but the author
-    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, ola.token, undefined, N)).data.hidden, false)
-    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, pia.token, undefined, N)).data.hidden, false)
-    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, quinn.token, undefined, N)).data.hidden, true)
-    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, rex.token, undefined, N)).status, 400, 'no flagging of own messages')
+    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, ola.token, { category: 'spam', detail: 'Unverlangte Werbung' }, N)).data.hidden, false)
+    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, pia.token, { category: 'spam', detail: 'Unverlangte Werbung' }, N)).data.hidden, false)
+    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, quinn.token, { category: 'spam', detail: 'Unverlangte Werbung' }, N)).data.hidden, true)
+    assert.equal((await api('POST', `/api/festival-chat/${spam.id}/flag`, rex.token, { category: 'spam', detail: 'Unverlangte Werbung' }, N)).status, 400, 'no flagging of own messages')
     const changed = (await read(pia, t0)).messages
     assert.deepEqual(changed.map((m) => [m.id, m.text, m.hidden]), [[spam.id, null, true]], 'incremental poll delivers the hide')
     assert.equal((await read(rex)).messages.find((m) => m.id === spam.id).text, 'Kauft Tickets bei mir!!!', 'the author still sees it')
     // organizer: hidden messages first; restore keeps it visible, delete removes the text for all
     const mod = (await api('GET', '/api/admin/festivals/nordlicht/chat', A, undefined, null)).data
     assert.deepEqual([mod[0].id, mod[0].flags, mod[0].hidden], [spam.id, 3, true])
-    assert.equal((await api('POST', `/api/admin/festivals/nordlicht/chat/${spam.id}/restore`, A, undefined, null)).status, 204)
+    assert.equal((await api('POST', `/api/admin/festivals/nordlicht/chat/${spam.id}/restore`, A, { reason: 'Nach Prüfung: unerwünschte Werbung' }, null)).status, 204)
     assert.equal((await read(pia)).messages.find((m) => m.id === spam.id).text, 'Kauft Tickets bei mir!!!')
-    assert.equal((await api('DELETE', `/api/admin/festivals/nordlicht/chat/${spam.id}`, A, undefined, null)).status, 204)
+    assert.equal((await api('DELETE', `/api/admin/festivals/nordlicht/chat/${spam.id}`, A, { reason: 'Nach Prüfung: unerwünschte Werbung' }, null)).status, 204)
     const gone = (await read(rex)).messages.find((m) => m.id === spam.id)
     assert.deepEqual([gone.text, gone.deleted], [null, true])
     // authors delete their own, not others'
@@ -651,6 +651,76 @@ try {
     assert.equal((await api('GET', '/api/festival-chat', ola.token, undefined, 'realm-open-air')).status, 403)
     await api('PUT', '/api/admin/festivals/nordlicht/modules', A, {}, null)
     assert.equal((await say(ola, 'noch da?')).status, 403, 'switching it off again closes the chat')
+  })
+
+  await test('moderation (Welle 7b): categories, private crew scope, mandatory reasons, audit and author decisions', async () => {
+    const A = 'test-admin-token', N = 'nordlicht'
+    const [author, reporter, outsider] = [await newGuest('Autor'), await newGuest('Meldend'), await newGuest('Außen')]
+    const c = (await api('POST', '/api/crews', author.token, { name: 'Privat' }, N)).data
+    await joinApproved(author, reporter, c, N)
+    const privateMsg = (await api('POST', `/api/crews/${c.id}/messages`, author.token, { text: 'Nicht gemeldet und privat' }, N)).data
+    const msg = (await api('POST', `/api/crews/${c.id}/messages`, author.token, { text: 'Zu prüfender Inhalt' }, N)).data
+    const flag = `/api/crews/${c.id}/messages/${msg.id}/flag`
+    assert.equal((await api('POST', flag, outsider.token, { category: 'spam' }, N)).status, 404, 'unrelated guests cannot discover crew content')
+    assert.equal((await api('POST', flag, reporter.token, {}, N)).status, 400)
+    assert.equal((await api('POST', flag, reporter.token, { category: 'invented' }, N)).status, 400)
+    assert.equal((await api('POST', flag, reporter.token, { category: 'harassment', detail: 'Konkrete Drohung' }, N)).status, 200)
+    const list = (await api('GET', `/api/admin/festivals/${N}/chat?kind=crew`, A, undefined, null)).data
+    assert.ok(!list.some((r) => r.id === privateMsg.id), 'unreported private messages must never be listed')
+    assert.deepEqual(list.find((r) => r.id === msg.id).reasons.map((r) => [r.category, r.detail]), [['harassment', 'Konkrete Drohung']])
+    const remove = `/api/admin/festivals/${N}/chat/${msg.id}?kind=crew`
+    assert.equal((await api('DELETE', remove, A, {}, null)).status, 400)
+    assert.equal((await api('DELETE', remove, A, { reason: '   ' }, null)).status, 400)
+    assert.equal((await api('DELETE', remove, reporter.token, { reason: 'Keine Berechtigung' }, null)).status, 401)
+    assert.equal((await api('DELETE', `/api/admin/festivals/realm-open-air/chat/${msg.id}?kind=crew`, A, { reason: 'Falsches Festival' }, null)).status, 404)
+    assert.equal((await api('DELETE', `/api/admin/festivals/${N}/chat/${privateMsg.id}?kind=crew`, A, { reason: 'Nicht gemeldet' }, null)).status, 404)
+    const keep = `/api/admin/festivals/${N}/chat/${msg.id}/restore?kind=crew`
+    assert.equal((await api('POST', keep, A, { reason: 'Nach Prüfung zunächst beibehalten' }, null)).status, 204)
+    const reason = 'Drohung nach Prüfung entfernt; Verstoß gegen die Community-Regeln.'
+    assert.equal((await api('DELETE', remove, A, { reason }, null)).status, 204)
+    const own = (await api('GET', `/api/crews/${c.id}`, author.token, undefined, N)).data.messages.find((r) => r.id === msg.id)
+    assert.deepEqual([own.deleted, own.text, own.moderationReason], [true, null, reason])
+    const other = (await api('GET', `/api/crews/${c.id}`, reporter.token, undefined, N)).data.messages.find((r) => r.id === msg.id)
+    assert.equal(other.moderationReason, undefined, 'author reason is not exposed to other crew members')
+    const log = (await api('GET', `/api/admin/audit?festival=${N}`, A, undefined, null)).data
+    assert.ok(log.some((r) => r.action === `remove crew/${msg.id}` && r.reason === reason))
+    await api('POST', `/api/crews/${c.id}/leave`, author.token, undefined, N)
+    const decisions = (await api('GET', '/api/me/moderation', author.token, undefined, N)).data
+    assert.ok(decisions.some((r) => r.targetId === msg.id && r.reason === reason), 'decision survives leaving the crew')
+    assert.ok(!(await api('GET', '/api/me/moderation', reporter.token, undefined, N)).data.some((r) => r.targetId === msg.id))
+    assert.ok(!(await api('GET', '/api/me/moderation', author.token)).data.some((r) => r.targetId === msg.id), 'decisions are festival-scoped')
+
+    const report = (await api('POST', '/api/reports', author.token, { title: 'Unzutreffende Meldung' }, N)).data
+    assert.equal((await api('POST', `/api/reports/${report.id}/flag`, reporter.token, {}, N)).status, 400)
+    assert.equal((await api('POST', `/api/reports/${report.id}/flag`, reporter.token, { category: 'other', detail: 'Bitte prüfen' }, N)).status, 204)
+    assert.equal((await api('POST', `/api/reports/${report.id}/flag`, reporter.token, { category: 'other' })).status, 404, 'foreign festival report is not reachable')
+    const reports = (await api('GET', `/api/admin/festivals/${N}/reports`, A, undefined, null)).data
+    assert.equal(reports.find((r) => r.id === report.id).reasons[0].detail, 'Bitte prüfen')
+    assert.equal((await api('DELETE', `/api/admin/festivals/${N}/reports/${report.id}`, A, {}, null)).status, 400)
+    assert.equal((await api('POST', `/api/admin/festivals/${N}/reports/${report.id}/review`, A, { reason: 'Prüfung ohne Beanstandung' }, null)).status, 204)
+    const reviewed = async () => (await api('GET', `/api/admin/festivals/${N}/reports`, A, undefined, null)).data.find((r) => r.id === report.id).reviewed
+    assert.equal(await reviewed(), true)
+    await api('POST', `/api/reports/${report.id}/flag`, reporter.token, { category: 'other' }, N)
+    assert.equal(await reviewed(), true, 'duplicate report does not reopen a completed review')
+    await api('POST', `/api/reports/${report.id}/flag`, outsider.token, { category: 'illegal', detail: 'Neue konkrete Hinweise' }, N)
+    assert.equal(await reviewed(), false, 'a new reporter reopens the review')
+    assert.equal((await api('DELETE', `/api/admin/festivals/${N}/reports/${report.id}`, A, { reason: 'Nach erneuter Prüfung sachlich falsch' }, null)).status, 204)
+    assert.equal((await api('PUT', `/api/reports/${report.id}/vote`, reporter.token, { kind: 'still' }, N)).status, 404, 'removed report cannot be revived')
+    assert.ok(!(await api('GET', '/api/reports', reporter.token, undefined, N)).data.some((r) => r.id === report.id))
+    assert.ok((await api('GET', '/api/me/moderation', author.token, undefined, N)).data.some((r) => r.targetId === report.id && r.action === 'remove'))
+
+    assert.equal((await api('PUT', '/api/admin/festivals/nordlicht/modules', A, { festivalchat: true }, null)).status, 200)
+    const publicMsg = (await api('POST', '/api/festival-chat', author.token, { text: 'Öffentlich zu prüfen' }, N)).data
+    assert.equal((await api('POST', `/api/festival-chat/${publicMsg.id}/flag`, reporter.token, {}, N)).status, 400)
+    assert.equal((await api('POST', `/api/festival-chat/${publicMsg.id}/flag`, reporter.token, { category: 'illegal', detail: 'Begründeter Verdacht' }, N)).status, 200)
+    const publicRemove = `/api/admin/festivals/${N}/chat/${publicMsg.id}`
+    assert.equal((await api('DELETE', publicRemove, A, {}, null)).status, 400)
+    assert.equal((await api('DELETE', publicRemove, A, { reason: 'Nach Prüfung entfernt' }, null)).status, 204)
+    const gone = (await api('GET', '/api/festival-chat', author.token, undefined, N)).data.messages.find((r) => r.id === publicMsg.id)
+    assert.deepEqual([gone.text, gone.moderationReason], [null, 'Nach Prüfung entfernt'])
+    assert.ok((await api('GET', '/api/me/moderation', author.token, undefined, N)).data.some((r) => r.targetId === publicMsg.id))
+    await api('PUT', '/api/admin/festivals/nordlicht/modules', A, { festivalchat: false }, null)
+    assert.ok((await api('GET', '/api/me/moderation', author.token, undefined, N)).data.some((r) => r.targetId === publicMsg.id), 'decisions remain accessible when the content module is disabled')
   })
 
   await test('English content: FAQ and announcements carry an optional English version', async () => {
@@ -795,7 +865,7 @@ try {
     assert.equal((await get()).source, 'official')
     const list = (await api('GET', '/api/admin/festivals/nordlicht/reports', A, undefined, null)).data
     assert.deepEqual(list.find((z) => z.id === r.id).verified, true)
-    assert.equal((await api('DELETE', `/api/admin/festivals/nordlicht/reports/${r.id}`, A, undefined, null)).status, 204)
+    assert.equal((await api('DELETE', `/api/admin/festivals/nordlicht/reports/${r.id}`, A, { reason: 'Nach Prüfung: unerwünschte Werbung' }, null)).status, 204)
     assert.equal(await get(), undefined)
   })
 
@@ -859,6 +929,9 @@ try {
     assert.deepEqual((await api('GET', '/api/admin/festivals', ola, undefined, null)).data.map((f) => f.slug), [R])
     assert.equal((await api('PUT', `/api/admin/festivals/${R}/faq/ola-test`, ola, { question: 'Gibt es Pfand?', answer: 'Ja, 2 Euro.', category: 'Allgemein', status: 'draft' }, null)).status, 200)
     for (const [m, path, b, f] of [
+      ['GET', '/api/admin/festivals/nordlicht/chat?kind=crew', undefined, null],
+      ['DELETE', '/api/admin/festivals/nordlicht/chat/example?kind=crew', { reason: 'Nicht zuständig' }, null],
+      ['GET', '/api/admin/festivals/nordlicht/reports', undefined, null],
       ['GET', '/api/admin/festivals/nordlicht/faq', undefined, null],
       ['PUT', '/api/admin/festivals/nordlicht/faq/x', { question: 'Gekapert?', answer: 'Nein.', category: 'Allgemein' }, null],
       ['PATCH', '/api/admin/festivals/nordlicht', { status: 'archived' }, null],
