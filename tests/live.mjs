@@ -305,6 +305,14 @@ try {
   })
 
   await step('new messages arrive incrementally without a reload', async () => {
+    const polls = []
+    const observe = async (r) => {
+      if (r.request().method() === 'GET' && /\/api\/crews\/[^/?]+(?:\?|$)/.test(r.url())) {
+        const data = await r.json().catch(() => ({}))
+        polls.push({ at: Date.now(), status: r.status(), messages: data.messages?.map((m) => ({ id: m.id, text: m.text })) })
+      }
+    }
+    lea.on('response', observe)
     for (const p of [lea, ben]) {
       await p.keyboard.press('Escape')
       await p.keyboard.press('Escape')
@@ -319,7 +327,17 @@ try {
     const response = await sent
     if (!response.ok()) throw new Error(`incremental message rejected: ${response.status()} ${await response.text()}`)
     await ben.locator('.bubble.me', { hasText: 'Inkrementell 👋' }).waitFor()
-    await lea.locator('.bubble.them', { hasText: 'Inkrementell 👋' }).waitFor({ timeout: 20000 })
+    try {
+      await lea.locator('.bubble.them', { hasText: 'Inkrementell 👋' }).waitFor({ timeout: 20000 })
+    } catch (e) {
+      console.error('Incremental receiver diagnostics', { polls, browser: await lea.evaluate(() => ({
+        online: navigator.onLine, visibility: document.visibilityState,
+        bubbles: [...document.querySelectorAll('.bubble')].map((el) => el.textContent),
+      })) })
+      throw e
+    } finally {
+      lea.off('response', observe)
+    }
     if ((await lea.locator('.bubble', { hasText: 'Treffen am Archive?' }).count()) !== 1) throw new Error('older messages lost or duplicated after incremental merge')
     await lea.keyboard.press('Escape')
     await ben.keyboard.press('Escape')
