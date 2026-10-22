@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { api, ApiError, execute, online, opId, privacyKey, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
+import { api, ApiError, execute, online, opId, privacyKey, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type PlanMarks, type RemoteReport, type Session } from './api'
 import { lang, t } from './i18n'
 import { ageSince } from './aging'
 import { pollDelay, POLL_ACTIVE_MS } from './sync'
@@ -155,7 +155,13 @@ function safeSession(key: string): string | null {
 
 const MAX_BACKOFF_MS = 120_000
 
-const planSignature = (session: string | undefined, plan: string[]) => `${session ?? ''}:${[...plan].sort().join(',')}`
+/** Reminders that are on and every answered "Were you there?" – what the server backs up next to the plan. */
+const planMarks = (p: Pick<Persisted, 'reminders' | 'attended'>): PlanMarks => ({
+  reminders: Object.keys(p.reminders).filter((id) => p.reminders[id]).sort(),
+  attended: Object.fromEntries(Object.keys(p.attended).sort().map((id) => [id, !!p.attended[id]])),
+})
+const planSignature = (session: string | undefined, plan: string[], marks: PlanMarks) =>
+  `${session ?? ''}:${[...plan].sort().join(',')}:${marks.reminders.join(',')}:${Object.entries(marks.attended).map(([id, v]) => `${id}=${+v}`).join(',')}`
 
 /** The position the app may use: the place the visitor picked; in the demo a marked demo position. */
 export type Here = { x: number; y: number; label: string; demo: boolean }
@@ -392,7 +398,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           await execute(op)
           sent++
           if (op.kind === 'plan') {
-            const synced = planSignature(sRef.current.session?.id, op.acts)
+            const synced = planSignature(sRef.current.session?.id, op.acts, { reminders: op.reminders ?? [], attended: op.attended ?? {} })
             setS((p) => ({ ...p, planSynced: synced }))
           }
           const msg = confirmations.current.get(op.id)
@@ -522,11 +528,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // plan sync (debounced) through the outbox: a change made offline or during a failed request is sent
   // once the network is back – also after a restart – so crew, restore and analytics see the real plan
-  const planSig = planSignature(s.session?.id, s.plan)
+  const planSig = planSignature(s.session?.id, s.plan, planMarks(s))
   useEffect(() => {
     if (!online || !s.session || planSig === s.planSynced) return
     const timer = window.setTimeout(() => {
-      const op: OutboxOp = { id: opId('pl'), kind: 'plan', acts: [...sRef.current.plan] }
+      const op: OutboxOp = { id: opId('pl'), kind: 'plan', acts: [...sRef.current.plan], ...planMarks(sRef.current) }
       const next = (list: OutboxOp[]) => [...list.filter((o) => o.kind !== 'plan'), op]
       setS((p) => ({ ...p, outbox: next(p.outbox) }))
       sRef.current = { ...sRef.current, outbox: next(sRef.current.outbox) }
@@ -794,7 +800,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setToken(g.token)
           setS((p) => ({ ...p, session: { id: g.id, token: g.token }, crewRef: null, remote: null, guest: { ...p.guest, id: g.id, nickname: g.nickname, color: g.color, secured: 'code' } }))
           const me = await api.me()
-          setS((p) => ({ ...p, crewRef: me.crews[0] ?? null, plan: me.plan.length ? me.plan : p.plan }))
+          // the backup completes this device: saved reminders and answers are added, nothing local is lost
+          setS((p) => ({
+            ...p,
+            crewRef: me.crews[0] ?? null,
+            plan: me.plan.length ? me.plan : p.plan,
+            reminders: { ...p.reminders, ...Object.fromEntries((me.reminders ?? []).filter((id) => actById[id]).map((id) => [id, true])) },
+            attended: { ...p.attended, ...Object.fromEntries(Object.entries(me.attended ?? {}).filter(([id]) => actById[id])) },
+          }))
           toast(t('Profil wiederhergestellt'))
           return true
         } catch (e) {

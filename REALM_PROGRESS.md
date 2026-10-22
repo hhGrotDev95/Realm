@@ -362,7 +362,16 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - Geprüft: typecheck, `test:import` (neu: `tests/storage.test.mts`, 6 Prüfungen), build, `test:e2e`, `test:a11y`, `test:live` (26 Schritte, neu: „offline plan change survives a reload and reaches the server after reconnect“), Worker 41 API-Tests + Migrationstest. Firefox/WebKit-Job nur in der CI (lokal nicht ausgeführt).
 - Offen/Hinweis: PR #26 (D08, Branch `ccr-c4b0523e-ltc4vo`) ist noch offen, inhaltlich aber durch PR #33 ersetzt – Schließen braucht deine Entscheidung.
 
+## Runde: Erinnerungen und „Warst du da?“ kommen beim Wiederherstellen mit (22.10.2026, Branch `ccr-c4b0523e-s9bhkw`)
+- Ausgangslage: Der Branch war auf dem Stand von PR #13; neu auf `main` (PR #34) aufgesetzt. Die Runde vom 21.10. (`ccr-c4b0523e-4xuz1d`, nie als PR eingereicht) ist hier per Cherry-Pick enthalten und erneut geprüft – dieser Branch ersetzt sie.
+- **Lücke:** Erinnerungen und Antworten auf „Warst du da?“ lagen nur im Browser. Wer sein Profil per Recovery-Code auf einem neuen Handy wiederherstellte, bekam Plan und Crew zurück, aber keine Erinnerungen und keinen Rückblick-Stand.
+- Migration `0020_plan_marks.sql` (`plan_marks`: Erinnerung, Antwort ja/nein/offen je Act; Kaskade mit Gast und Festival). `PUT /api/me/plan` nimmt optional `reminders` (Act-IDs) und `attended` (Act-ID → bool) an, validiert sie (400 bei falscher Form), verwirft unbekannte Acts. Fehlen beide Felder (ältere App, ältere Outbox-Einträge), bleiben gespeicherte Werte erhalten. `GET /api/me` liefert beides.
+- App: Plan-Abgleich über die Outbox trägt die Markierungen mit; die Signatur umfasst sie, also lösen auch reine Erinnerungs-/Antwortänderungen einen (entprellten) Abgleich aus. Wiederherstellen ergänzt lokale Werte um die gesicherten (nichts Lokales geht verloren).
+- Datenschutz: Markierungen sind weder für die Crew noch in der Auswertung sichtbar; Löschkonzept ergänzt (`docs/DATA_RETENTION.md`).
+- Geprüft (lokal, Chromium): Web-Typecheck, Worker-Typecheck, `test:import` (alle Unit-Tests inkl. 6 Speicher-Prüfungen), Build, Worker `npm test` (42 API-Tests, neu „reminders and attendance are backed up …“, + Migrationstest mit 20 Migrationen), `test:e2e`, `test:a11y` (0 Befunde), `test:live` (alle Szenarien; der Wiederherstellen-Schritt setzt jetzt eine Erinnerung und erwartet sie auf dem neuen Gerät). Nicht geprüft: Firefox/WebKit (nur CI); nicht gegengeprüft, dass der neue Live-Schritt am alten Stand rot wäre.
+
 ### Nächste Schritte (aktuell)
-1. Erinnerungen und „Warst du da?“ (`attended`) liegen nur lokal – Server-Sicherung analog zum Plan prüfen, damit „Profil wiederherstellen“ sie mitbringt.
-2. Schritt 8 Push: blockiert (VAPID-Schlüssel + Deployment). Ebenso F17-Staging-Lasttest.
-3. Veranstalter-Konsole und Server-Fehlermeldungen auf Englisch (aus Schritt 7 offen).
+1. **Entscheidung nötig:** PR für diesen Branch öffnen und nach grüner CI mergen (Absprache vom 20.10.) – die Routine öffnet ohne ausdrückliche Anweisung keine PRs. Danach `ccr-c4b0523e-4xuz1d` löschen (vollständig hier enthalten).
+2. PR #26 (`ccr-c4b0523e-ltc4vo`, D08) ist durch PR #33 ersetzt – schließen. PR #35 (Welle 7b, Codex) ist offen und wurde nicht angefasst.
+3. Veranstalter-Konsole und Server-Fehlermeldungen auf Englisch (aus Schritt 7 offen) – nächste unabhängige Aufgabe.
+4. Blockiert: Schritt 8 Push (VAPID-Schlüssel + Deployment), F17-Staging-Lasttest (Deployment), finale Rechtstexte (Betreiber).

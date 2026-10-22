@@ -10,6 +10,7 @@ Stand Welle 6b. Die Fristen stehen als `RETENTION` in `worker/src/index.ts`; der
 | --- | --- | --- | --- |
 | Gastprofil (Name, Farbe, Token-Hash, Recovery-Hash) | Crew-Funktionen, Wiedererkennung | 180 Tage nach der letzten Aktivität | Cron; löscht kaskadierend Pläne, Schritte, Mitgliedschaften, Nachrichten, Meetups, Stimmen, Meldungen |
 | Pläne (gemerkte Acts) | Crew-Übersicht, Auswertung in Summen | mit dem Gastprofil | Kaskade |
+| Erinnerungen und „Warst du da?“-Antworten | Wiederherstellen auf neuem Gerät (nicht in Crew oder Auswertung sichtbar) | mit dem Gastprofil | Kaskade |
 | Crew-Chat | Austausch in der Crew | 60 Tage nach dem Senden | Cron |
 | Meetups | Treffen planen | 60 Tage nach dem Anlegen | Cron |
 | Schritte (Tagessummen) | Step-Challenge | 60 Tage nach dem Abgleich; sofort beim Abschalten | Cron / Modul-Schalter |

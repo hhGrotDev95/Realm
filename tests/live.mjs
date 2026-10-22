@@ -741,6 +741,21 @@ try {
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {
     await ben.keyboard.press('Escape')
+    // a reminder is backed up next to the plan and must come back with the profile
+    const meOf = async (p) => {
+      const tok = await p.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:realm-open-air')).session.token)
+      return (await fetch(`${API}/api/me`, { headers: { Authorization: 'Bearer ' + tok, 'X-Festival': 'realm-open-air' } })).json()
+    }
+    await nav(ben, 'Line-up')
+    await ben.locator('.act', { hasText: 'Arcturus' }).first().click()
+    await ben.locator('.sheet').getByRole('heading', { name: 'Arcturus' }).waitFor()
+    await ben.locator('.sheet').getByRole('button', { name: 'Erinnerung', pressed: false }).click()
+    await ben.locator('.sheet').getByRole('button', { name: 'Erinnerung', pressed: true }).waitFor()
+    await ben.keyboard.press('Escape')
+    for (let i = 0; !(await meOf(ben)).reminders?.some((id) => id.includes('arcturus')); i++) {
+      if (i > 50) throw new Error('reminder never reached the server: ' + JSON.stringify(await meOf(ben)))
+      await ben.waitForTimeout(300)
+    }
     await ben.getByRole('button', { name: 'Profil & Einstellungen' }).click()
     await ben.getByText('Profil sichern').click()
     await ben.getByRole('button', { name: /Recovery-Code erstellen/ }).click()
@@ -752,6 +767,10 @@ try {
     await fresh.getByPlaceholder('XXXX-XXXX-XXXX-XXXX').fill(recovery)
     await fresh.getByRole('button', { name: 'Wiederherstellen' }).click()
     await fresh.getByText('Profil wiederhergestellt').waitFor()
+    await fresh.keyboard.press('Escape')
+    await nav(fresh, 'Line-up')
+    await fresh.locator('.act', { hasText: 'Arcturus' }).first().click()
+    await fresh.locator('.sheet').getByRole('button', { name: 'Erinnerung', pressed: true }).waitFor()
     await fresh.keyboard.press('Escape')
     await nav(fresh, 'Crew')
     await fresh.getByText('Zeltplatz 14', { exact: true }).waitFor({ timeout: 15000 })

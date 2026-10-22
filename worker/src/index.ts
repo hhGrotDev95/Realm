@@ -25,7 +25,7 @@ const DAY = 24 * 60 * MIN
 
 /**
  * How long data is kept (audit F12, see docs/DATA_RETENTION.md). The hourly cron enforces every line.
- * Deleting a guest cascades to plans, steps, crew memberships, messages, meetups, votes and flags.
+ * Deleting a guest cascades to plans (and their reminders/attendance marks), steps, crew memberships, messages, meetups, votes and flags.
  */
 const RETENTION = {
   guestInactive: 180 * DAY,
@@ -364,7 +364,15 @@ app.get('/api/me', async (c) => {
   const crews = await c.env.DB.prepare("SELECT c.id, c.name, CASE WHEN m.approved = 1 THEN c.code ELSE '' END AS code, m.approved = 0 AS pending FROM crews c JOIN crew_members m ON m.crew_id = c.id WHERE m.guest_id = ? AND c.festival_id = ? ORDER BY m.joined_at").bind(g.id, fid).all()
   const plan = await c.env.DB.prepare('SELECT act_id FROM plans WHERE guest_id = ? AND festival_id = ?').bind(g.id, fid).all<{ act_id: string }>()
   const secured = await c.env.DB.prepare('SELECT recovery_hash IS NOT NULL AS s FROM guests WHERE id = ?').bind(g.id).first<{ s: number }>()
-  return c.json({ ...g, secured: !!secured?.s, crews: crews.results.map((r) => ({ ...r, pending: !!r.pending })), plan: plan.results.map((r) => r.act_id) })
+  const marks = (await c.env.DB.prepare('SELECT act_id, remind, attended FROM plan_marks WHERE guest_id = ? AND festival_id = ?').bind(g.id, fid).all<{ act_id: string; remind: number; attended: number | null }>()).results
+  return c.json({
+    ...g,
+    secured: !!secured?.s,
+    crews: crews.results.map((r) => ({ ...r, pending: !!r.pending })),
+    plan: plan.results.map((r) => r.act_id),
+    reminders: marks.filter((m) => m.remind).map((m) => m.act_id),
+    attended: Object.fromEntries(marks.filter((m) => m.attended !== null).map((m) => [m.act_id, !!m.attended])),
+  })
 })
 
 app.patch('/api/me', async (c) => {
@@ -393,8 +401,23 @@ app.post('/api/me/recovery', async (c) => {
   return c.json({ code })
 })
 
+/** Reminders (act ids) and attendance answers (act id → yes/no); null when the request carries neither. */
+function parseMarks(reminders: unknown, attended: unknown, known: Set<string>) {
+  if (reminders === undefined && attended === undefined) return null
+  const isId = (a: unknown): a is string => typeof a === 'string' && a.length <= 60
+  if (reminders !== undefined && (!Array.isArray(reminders) || reminders.length > 300 || !reminders.every(isId))) throw new HttpError(400, 'reminders ist ungültig')
+  const answers = attended === undefined ? [] : attended && typeof attended === 'object' && !Array.isArray(attended) ? Object.entries(attended) : null
+  if (!answers || answers.length > 300 || !answers.every(([k, v]) => isId(k) && typeof v === 'boolean')) throw new HttpError(400, 'attended ist ungültig')
+  const marks = new Map<string, { act: string; remind: boolean; attended: boolean | null }>()
+  const mark = (act: string) => marks.get(act) ?? (marks.set(act, { act, remind: false, attended: null }), marks.get(act)!)
+  for (const a of (reminders as string[] | undefined) ?? []) if (known.has(a)) mark(a).remind = true
+  for (const [a, v] of answers as [string, boolean][]) if (known.has(a)) mark(a).attended = v
+  return [...marks.values()]
+}
+
 app.put('/api/me/plan', async (c) => {
-  const acts = (await body(c)).acts
+  const b = await body(c)
+  const acts = b.acts
   if (!Array.isArray(acts) || acts.length > 200 || !acts.every((a) => typeof a === 'string' && a.length <= 60)) throw new HttpError(400, 'acts ist ungültig')
   const id = c.get('guest').id
   const fid = c.get('festival').id
@@ -402,9 +425,17 @@ app.put('/api/me/plan', async (c) => {
   const known = new Set((await c.env.DB.prepare('SELECT id FROM acts WHERE festival_id = ?').bind(fid).all<{ id: string }>()).results.map((r) => r.id))
   const unique = [...new Set(acts as string[])]
   const accepted = unique.filter((a) => known.has(a))
+  // reminders and "Were you there?" answers ride along (optional: older apps send only acts and keep the marks)
+  const marks = parseMarks(b.reminders, b.attended, known)
   await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM plans WHERE guest_id = ? AND festival_id = ?').bind(id, fid),
     ...accepted.map((a) => c.env.DB.prepare('INSERT INTO plans (guest_id, festival_id, act_id) VALUES (?, ?, ?)').bind(id, fid, a)),
+    ...(marks
+      ? [
+          c.env.DB.prepare('DELETE FROM plan_marks WHERE guest_id = ? AND festival_id = ?').bind(id, fid),
+          ...marks.map((m) => c.env.DB.prepare('INSERT INTO plan_marks (guest_id, festival_id, act_id, remind, attended) VALUES (?, ?, ?, ?, ?)').bind(id, fid, m.act, m.remind ? 1 : 0, m.attended === null ? null : m.attended ? 1 : 0)),
+        ]
+      : []),
   ])
   return c.json({ acts: accepted, rejected: unique.filter((a) => !known.has(a)) })
 })

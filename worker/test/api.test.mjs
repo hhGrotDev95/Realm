@@ -144,6 +144,30 @@ try {
     assert.deepEqual(l.plan.sort(), ['1-arcturus', '1-maduk'])
   })
 
+  await test('reminders and attendance are backed up with the plan and come back on restore', async () => {
+    const kim = (await api('POST', '/api/guests', null, {})).data
+    const put = (b) => api('PUT', '/api/me/plan', kim.token, { acts: ['1-maduk'], ...b })
+    assert.equal((await put({ reminders: '1-maduk' })).status, 400)
+    assert.equal((await put({ attended: { '1-maduk': 'ja' } })).status, 400)
+    assert.equal((await put({ attended: ['1-maduk'] })).status, 400)
+    // unknown acts are dropped, like in the plan
+    assert.equal((await put({ reminders: ['1-maduk', 'kein-act'], attended: { '1-arcturus': false, '1-maduk': true, 'kein-act': true } })).status, 200)
+    let me = (await api('GET', '/api/me', kim.token)).data
+    assert.deepEqual(me.reminders, ['1-maduk'])
+    assert.deepEqual(me.attended, { '1-arcturus': false, '1-maduk': true })
+    // an app that sends only acts keeps the marks
+    await put({})
+    me = (await api('GET', '/api/me', kim.token)).data
+    assert.deepEqual(me.reminders, ['1-maduk'])
+    // a newer state replaces the old one completely
+    await put({ reminders: [], attended: { '1-maduk': false } })
+    const code = (await api('POST', '/api/me/recovery', kim.token)).data.code
+    const restored = (await api('POST', '/api/restore', null, { code })).data
+    me = (await api('GET', '/api/me', restored.token)).data
+    assert.deepEqual(me.reminders, [])
+    assert.deepEqual(me.attended, { '1-maduk': false })
+  })
+
   await test('location is hidden unless shared', async () => {
     await api('PUT', `/api/crews/${crew.id}/location`, lea.token, { share: false, location: 'generator' })
     let s = (await api('GET', `/api/crews/${crew.id}`, ben.token)).data

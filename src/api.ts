@@ -161,12 +161,13 @@ export const api = {
       return call<Session>('POST', '/api/guests', { nickname, color, challenge: { id: ch.id, nonce: await solve(ch.id, ch.bits) } })
     }
   },
-  me: () => call<{ id: string; nickname: string | null; color: string; secured: boolean; crews: CrewRef[]; plan: string[] }>('GET', '/api/me'),
+  // reminders/attended: missing when the server predates the backup (treated as "nothing saved")
+  me: () => call<{ id: string; nickname: string | null; color: string; secured: boolean; crews: CrewRef[]; plan: string[]; reminders?: string[]; attended?: Record<string, boolean> }>('GET', '/api/me'),
   updateMe: (nickname: string, color: string) => call('PATCH', '/api/me', { nickname, color }),
   deleteMe: () => call<void>('DELETE', '/api/me'),
   recovery: () => call<{ code: string }>('POST', '/api/me/recovery'),
   restore: (code: string) => call<Session>('POST', '/api/restore', { code }),
-  setPlan: (acts: string[]) => call('PUT', '/api/me/plan', { acts }),
+  setPlan: (acts: string[], marks?: PlanMarks) => call('PUT', '/api/me/plan', { acts, ...marks }),
   deleteSteps: () => call<void>('DELETE', '/api/me/steps'),
   createCrew: (name: string) => call<CrewRef>('POST', '/api/crews', { name }),
   joinCrew: (code: string) => call<CrewRef>('POST', '/api/crews/join', { code }),
@@ -198,6 +199,9 @@ export const api = {
 /** Network trouble (or an overloaded server) is worth retrying; validation errors are not. */
 export const retryable = (e: unknown) => e instanceof ApiError && (e.status === 0 || e.status === 429 || e.status >= 500)
 
+/** Reminders (act ids) and answers to "Were you there?", backed up next to the plan. */
+export type PlanMarks = { reminders: string[]; attended: Record<string, boolean> }
+
 export type OutboxOp =
   | { id: string; kind: 'message'; crewId: string; text: string; at: number }
   | { id: string; kind: 'meetup'; crewId: string; data: { place: string; poi?: string; actId?: string; day: number; min: number; note: string } }
@@ -207,8 +211,9 @@ export type OutboxOp =
   // privacy decisions: queued with priority and kept until the server confirms them (audit F02)
   | { id: string; kind: 'location'; crewId: string; share: boolean; location: string | null }
   | { id: string; kind: 'deleteSteps' }
-  // the whole plan; only the newest one is kept in the queue
-  | { id: string; kind: 'plan'; acts: string[] }
+  // the whole plan with reminders and "Were you there?" answers; only the newest one is kept in the queue
+  // (ops queued before the backup existed carry no marks – the server then keeps the stored ones)
+  | ({ id: string; kind: 'plan'; acts: string[] } & Partial<PlanMarks>)
 
 /** Ops that carry a privacy decision; only the newest one per target matters. */
 export const privacyKey = (op: OutboxOp) => (op.kind === 'location' ? `location:${op.crewId}` : op.kind === 'deleteSteps' ? 'deleteSteps' : null)
@@ -230,7 +235,7 @@ export function execute(op: OutboxOp): Promise<unknown> {
     case 'deleteSteps':
       return api.deleteSteps()
     case 'plan':
-      return api.setPlan(op.acts)
+      return api.setPlan(op.acts, op.reminders && op.attended ? { reminders: op.reminders, attended: op.attended } : undefined)
   }
 }
 
