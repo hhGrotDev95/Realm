@@ -372,6 +372,7 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - Jetzt Positivliste: nur `/`, `/assets/*`, `icon.svg`, `manifest.webmanifest`. `/api/…` (auch als Navigation) und alle anderen Pfade gehen ungecacht ans Netz. Die Offline-Shell wird nur durch eine erfolgreiche HTML-Antwort ersetzt (kein 503/JSON mehr als Startseite). Cache-Schreiben über `waitUntil`, Antwort wird nicht verzögert.
 - Update-Bereinigung: Da der Cache-Name nur von den Build-Dateien abhängt, bleibt er bei reiner sw.js-Änderung gleich – die Aktivierung löscht deshalb zusätzlich alle Nicht-App-Einträge im behaltenen Cache und `realm-runtime`.
 - Test `tests/sw.test.mts` (15 Prüfungen, in `test:import`): führt sw.js gegen einen nachgebildeten Cache Storage aus; am alten Stand schlägt er an („same-origin API requests bypass the worker“).
+- CI (PR #37): `browsers (firefox)` scheiterte in einem von zwei Läufen desselben Commits am Erinnerungs-Schritt („reminders shown: []“). Ursache im Test: Die Erinnerung wartet nach dem Vorspulen der Uhr auf `getRegistration()` in Echtzeit, der Test nur fest 300 ms. Jetzt wartet er bis 5 s auf das Ergebnis (danach weiter 300 ms für eine fälschlich zweite Erinnerung). Firefox lokal nicht installiert – nur CI prüft das.
 - Geprüft: typecheck, test:import (alle), build, test:e2e inkl. echtem Offline-Schritt (Server aus, App und Lazy-Screens laden) – grün. test:live/a11y/API nicht erneut gelaufen (sw.js wird nur im Produktions-Build registriert; Live-Test nutzt den Dev-Server).
 
 ## Nächster Schritt
