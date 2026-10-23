@@ -373,6 +373,7 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - Update-Bereinigung: Da der Cache-Name nur von den Build-Dateien abhängt, bleibt er bei reiner sw.js-Änderung gleich – die Aktivierung löscht deshalb zusätzlich alle Nicht-App-Einträge im behaltenen Cache und `realm-runtime`.
 - Test `tests/sw.test.mts` (15 Prüfungen, in `test:import`): führt sw.js gegen einen nachgebildeten Cache Storage aus; am alten Stand schlägt er an („same-origin API requests bypass the worker“).
 - CI (PR #37): `browsers (firefox)` scheiterte in einem von zwei Läufen desselben Commits am Erinnerungs-Schritt („reminders shown: []“). Ursache im Test: Die Erinnerung wartet nach dem Vorspulen der Uhr auf `getRegistration()` in Echtzeit, der Test nur fest 300 ms. Jetzt wartet er bis 5 s auf das Ergebnis (danach weiter 300 ms für eine fälschlich zweite Erinnerung). Firefox lokal nicht installiert – nur CI prüft das.
+- CI `live` (gleicher PR): „crew tab still visible“ – die App zeigt nach dem Neuladen zuerst die Offline-Kopie des Festivals (`realm.bundle:*`) und erst danach die frische mit abgeschaltetem Modul; der Test prüfte sofort. Jetzt wartet er bis 10 s auf das Verschwinden (erster konkreter Fund für Welle 8b). Lokal: `npm run test:live` vollständig grün.
 - Geprüft: typecheck, test:import (alle), build, test:e2e inkl. echtem Offline-Schritt (Server aus, App und Lazy-Screens laden) – grün. test:live/a11y/API nicht erneut gelaufen (sw.js wird nur im Produktions-Build registriert; Live-Test nutzt den Dev-Server).
 
 ## Nächster Schritt

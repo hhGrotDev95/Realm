@@ -648,7 +648,8 @@ try {
     await org.getByText('Module gespeichert').waitFor()
     await visitor.reload()
     await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
-    if (await visitor.locator('nav').getByText('Crew').count()) throw new Error('crew tab still visible')
+    // the app first shows its offline copy of the festival, then the fresh one with the module switched off
+    await visitor.locator('nav').getByText('Crew').waitFor({ state: 'detached', timeout: 10_000 }).catch(() => { throw new Error('crew tab still visible') })
     await visitor.locator('nav').getByText('Map').waitFor()
     const guest = await (await fetch(`${API}/api/guests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nickname: 'Test' }) })).json()
     const refused = await fetch(`${API}/api/crews`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + guest.token, 'X-Festival': 'testwiese-festival' }, body: JSON.stringify({ name: 'X' }) })
