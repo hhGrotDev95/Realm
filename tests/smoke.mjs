@@ -262,8 +262,12 @@ try {
     await p.reload()
     await p.getByText('Als Nächstes').waitFor()
     await p.clock.runFor(50 * 60_000)
-    await p.waitForTimeout(300)
-    const shown = await p.evaluate(() => JSON.parse(sessionStorage.getItem('shown') ?? '[]'))
+    // the reminder awaits navigator.serviceWorker.getRegistration() – real time, not the fake clock –
+    // which can take a while in Firefox while the worker installs; wait for it instead of a fixed pause
+    const recorded = () => p.evaluate(() => JSON.parse(sessionStorage.getItem('shown') ?? '[]'))
+    for (let end = Date.now() + 5000; !(await recorded()).length && Date.now() < end; ) await new Promise((r) => setTimeout(r, 100))
+    await new Promise((r) => setTimeout(r, 300)) // a wrongly armed second reminder would arrive alongside
+    const shown = await recorded()
     if (JSON.stringify(shown) !== JSON.stringify(['Arcturus beginnt um 22:30'])) throw new Error('reminders shown: ' + JSON.stringify(shown))
     await ctx.close()
   })
