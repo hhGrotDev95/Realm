@@ -366,3 +366,17 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - `scripts/licenses.mjs` erzeugt `docs/LICENSES.md` aus beiden installierten Abhängigkeitsbäumen und den Lockfiles; Scoped Packages, verschachtelte und fehlende optionale Pakete sind erfasst. Lokal: 88 installierte Paketwurzeln, 117 nur im Lockfile; `node scripts/licenses.mjs --check` bestanden. Mitlieferung von Lizenztexten und Rechte an Festivalinhalten bleiben gesondert zu prüfen.
 - Der bei der Speicherinventur gefundene Same-Origin-API-Cache wird in Welle 8 korrigiert und separat getestet.
 - Nachtrag aus der erneuten CI-Abnahme: Beim Wechsel von Festival- zu Crew-Moderation konnte eine alte Antwort die neue Liste samt Entscheidungsformular überschreiben. Request-Zähler und Cleanup ignorieren überholte Ergebnisse/Fehler; der Live-Test liefert die alte Festival-Antwort gezielt nach dem bereits bearbeiteten Crew-Formular aus.
+
+## Welle 8a · Service-Worker-Cache nur für die App (23.10.2026, Branch `ccr-c4b0523e-z6874b`)
+- Befund aus Welle 7c behoben: `public/sw.js` cachte jede erfolgreiche gleiche-Origin-GET-Antwort – bei einer API unter derselben Origin also Sitzungen, Crew-Chat usw. ohne Ablauf im Cache Storage.
+- Jetzt Positivliste: nur `/`, `/assets/*`, `icon.svg`, `manifest.webmanifest`. `/api/…` (auch als Navigation) und alle anderen Pfade gehen ungecacht ans Netz. Die Offline-Shell wird nur durch eine erfolgreiche HTML-Antwort ersetzt (kein 503/JSON mehr als Startseite). Cache-Schreiben über `waitUntil`, Antwort wird nicht verzögert.
+- Update-Bereinigung: Da der Cache-Name nur von den Build-Dateien abhängt, bleibt er bei reiner sw.js-Änderung gleich – die Aktivierung löscht deshalb zusätzlich alle Nicht-App-Einträge im behaltenen Cache und `realm-runtime`.
+- Test `tests/sw.test.mts` (15 Prüfungen, in `test:import`): führt sw.js gegen einen nachgebildeten Cache Storage aus; am alten Stand schlägt er an („same-origin API requests bypass the worker“).
+- CI (PR #37): `browsers (firefox)` scheiterte in einem von zwei Läufen desselben Commits am Erinnerungs-Schritt („reminders shown: []“). Ursache im Test: Die Erinnerung wartet nach dem Vorspulen der Uhr auf `getRegistration()` in Echtzeit, der Test nur fest 300 ms. Jetzt wartet er bis 5 s auf das Ergebnis (danach weiter 300 ms für eine fälschlich zweite Erinnerung). Firefox lokal nicht installiert – nur CI prüft das.
+- CI `live` (gleicher PR): „crew tab still visible“ – die App zeigt nach dem Neuladen zuerst die Offline-Kopie des Festivals (`realm.bundle:*`) und erst danach die frische mit abgeschaltetem Modul; der Test prüfte sofort. Jetzt wartet er bis 10 s auf das Verschwinden (erster konkreter Fund für Welle 8b). Lokal: `npm run test:live` vollständig grün.
+- Geprüft: typecheck, test:import (alle), build, test:e2e inkl. echtem Offline-Schritt (Server aus, App und Lazy-Screens laden) – grün. test:live/a11y/API nicht erneut gelaufen (sw.js wird nur im Produktions-Build registriert; Live-Test nutzt den Dev-Server).
+
+## Nächster Schritt
+1. Welle 8b: intermittierende lokale Zeitüberschreitungen in `npm run test:live` untersuchen (siehe Welle 7b) – mehrfach laufen lassen, langsame Schritte protokollieren, Ursache beheben statt Timeouts zu erhöhen.
+2. Offen ohne Zugang: Staging-Lasttest/Monitoring (F17, braucht Deployment), finale Rechtstexte und § 25-TDDDG-Entscheidungen (Betreiber, siehe `docs/DEVICE_STORAGE.md`).
+3. Alt-PR #26 (D08, durch #33 erledigt) kann geschlossen werden – Entscheidung des Repo-Inhabers.
