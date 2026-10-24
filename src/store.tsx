@@ -503,12 +503,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(id)
   }, [])
 
-  // plan sync (debounced)
+  // plan sync (debounced); a failed upload is retried with backoff and again when the network
+  // returns – otherwise the crew and a later restore would see a stale plan until the next edit
   useEffect(() => {
-    if (!online || !s.session) return
-    const t = window.setTimeout(() => api.setPlan(s.plan).catch(() => {}), 800)
+    if (!online || !s.session || !netOnline) return
+    const plan = s.plan
+    let delay = 15_000
+    let t = 0
+    const send = () =>
+      api.setPlan(plan).catch((e) => {
+        if (!retryable(e)) return
+        t = window.setTimeout(send, delay)
+        delay = Math.min(delay * 2, 120_000)
+      })
+    t = window.setTimeout(send, 800)
     return () => window.clearTimeout(t)
-  }, [s.plan, s.session?.id])
+  }, [s.plan, s.session?.id, netOnline])
 
   /**
    * Privacy decisions go through the outbox with priority: a newer decision replaces an older
@@ -765,12 +775,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const g = await api.restore(code)
           setToken(g.token)
-          setS((p) => ({ ...p, session: { id: g.id, token: g.token }, crewRef: null, remote: null, guest: { ...p.guest, id: g.id, nickname: g.nickname, color: g.color, secured: 'code' } }))
+          // read the restored profile before switching sessions: switching starts the plan upload,
+          // which would otherwise overwrite the saved plan with this device's (often empty) one
           const me = await api.me()
-          setS((p) => ({ ...p, crewRef: me.crews[0] ?? null, plan: me.plan.length ? me.plan : p.plan }))
+          setS((p) => ({ ...p, session: { id: g.id, token: g.token }, crewRef: me.crews[0] ?? null, remote: null, plan: me.plan.length ? me.plan : p.plan, guest: { ...p.guest, id: g.id, nickname: g.nickname, color: g.color, secured: 'code' } }))
           toast(t('Profil wiederhergestellt'))
           return true
         } catch (e) {
+          setToken(sRef.current.session?.token ?? null) // the restore did not complete: keep the current profile
           fail(e)
           return false
         }

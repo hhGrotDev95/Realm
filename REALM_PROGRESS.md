@@ -376,7 +376,17 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - CI `live` (gleicher PR): „crew tab still visible“ – die App zeigt nach dem Neuladen zuerst die Offline-Kopie des Festivals (`realm.bundle:*`) und erst danach die frische mit abgeschaltetem Modul; der Test prüfte sofort. Jetzt wartet er bis 10 s auf das Verschwinden (erster konkreter Fund für Welle 8b). Lokal: `npm run test:live` vollständig grün.
 - Geprüft: typecheck, test:import (alle), build, test:e2e inkl. echtem Offline-Schritt (Server aus, App und Lazy-Screens laden) – grün. test:live/a11y/API nicht erneut gelaufen (sw.js wird nur im Produktions-Build registriert; Live-Test nutzt den Dev-Server).
 
+## Welle 8b · Live-Test-Laufzeiten und Plan-Sync (24.10.2026, Branch `ccr-c4b0523e-64s280`)
+- Zeitüberschreitungen untersucht: `tests/live.mjs` misst jetzt jeden Schritt (`✓ … (12.3 s)`, bei Fehler `✗ … (s)`) und nennt am Ende die fünf langsamsten. 3 Läufe hintereinander lokal grün, keine Zeitüberschreitung reproduzierbar; die Laufzeiten sind stabil (größter Posten 57 s Backoff-Messung, 41 s Festival-Assistent). Ursache aus Welle 7b damit lokal nicht nachweisbar – die Zeiten in künftigen CI-Logs zeigen, welcher Schritt hängt.
+- Testskript: Wrangler und Vite liefen weiter, wenn Migration oder Browserstart scheiterten (Aufräumen nur im `finally` nach dem Browserstart). Jetzt `process.on('exit')`.
+- **Fehler 1 (Plan-Sync):** Scheiterte der Plan-Upload (Funkloch, überlastetes WLAN), wurde er erst bei der nächsten Planänderung oder beim Neustart wiederholt – Crew-Avatare, Auswertung und eine Wiederherstellung sahen bis dahin einen alten Plan. Jetzt: Wiederholung mit Backoff (15 s → 2 min) bei Netz-/5xx-Fehlern und sofort, wenn das Netz zurückkommt; offline wird kein Upload versucht.
+- **Fehler 2 (Wiederherstellung):** „Profil mit Code wiederherstellen“ setzte zuerst die Sitzung und lud dann `/api/me`. Dauerte das länger als 800 ms, lud das neue Gerät seinen (meist leeren) Plan hoch und überschrieb den gespeicherten Plan. Jetzt wird das Profil vor dem Sitzungswechsel gelesen; scheitert das, bleibt das bisherige Token aktiv.
+- Neue Live-Schritte: „a plan change whose upload fails is retried without another edit“ und im Wiederherstellungsschritt verzögertes `/api/me` (2 s) mit Prüfung des Server-Plans. Beide schlagen am alten Stand an (`plan never reached the server (1 upload attempts)` bzw. `restore overwrote the saved plan: []`).
+- Lokale Umgebung: Playwright findet den vorinstallierten Browser nur mit `CHROMIUM_PATH=/opt/pw-browsers/chromium`.
+- Geprüft: typecheck Web + Worker, test:import, build, test:e2e, test:a11y, test:live (vollständig grün). Worker-API-Tests nicht gelaufen (kein Worker-Code geändert).
+
 ## Nächster Schritt
-1. Welle 8b: intermittierende lokale Zeitüberschreitungen in `npm run test:live` untersuchen (siehe Welle 7b) – mehrfach laufen lassen, langsame Schritte protokollieren, Ursache beheben statt Timeouts zu erhöhen.
-2. Offen ohne Zugang: Staging-Lasttest/Monitoring (F17, braucht Deployment), finale Rechtstexte und § 25-TDDDG-Entscheidungen (Betreiber, siehe `docs/DEVICE_STORAGE.md`).
-3. Alt-PR #26 (D08, durch #33 erledigt) kann geschlossen werden – Entscheidung des Repo-Inhabers.
+1. CI-Logs der nächsten PRs auf die Schrittzeiten prüfen; hängt ein Schritt wiederholt, dort ansetzen (Welle 8b bleibt beobachtend offen).
+2. Weitere Persistenz-Lücken prüfen: Erinnerungen, „Warst du da?“ und Konfliktentscheidungen werden nur lokal gespeichert – klären, ob sie mit der Wiederherstellung umziehen sollen (Produktentscheidung, siehe unten).
+3. Offen ohne Zugang: Staging-Lasttest/Monitoring (F17, braucht Deployment), finale Rechtstexte und § 25-TDDDG-Entscheidungen (Betreiber, siehe `docs/DEVICE_STORAGE.md`).
+4. Alt-PR #26 (D08, durch #33 erledigt) kann geschlossen werden – Entscheidung des Repo-Inhabers.
