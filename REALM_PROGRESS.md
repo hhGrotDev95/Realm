@@ -387,6 +387,6 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 
 ## Nächster Schritt
 1. CI-Logs der nächsten PRs auf die Schrittzeiten prüfen; hängt ein Schritt wiederholt, dort ansetzen (Welle 8b bleibt beobachtend offen).
-2. Weitere Persistenz-Lücken prüfen: Erinnerungen, „Warst du da?“ und Konfliktentscheidungen werden nur lokal gespeichert – klären, ob sie mit der Wiederherstellung umziehen sollen (Produktentscheidung, siehe unten).
+2. Weitere Persistenz-Lücken prüfen: Liegen Erinnerungen, „Warst du da?“ und Konfliktentscheidungen nur lokal? Falls ja, gehen sie bei „Profil wiederherstellen“ auf einem neuen Gerät verloren – ob sie mitziehen sollen, ist eine Produktentscheidung (Datensparsamkeit vs. Komfort).
 3. Offen ohne Zugang: Staging-Lasttest/Monitoring (F17, braucht Deployment), finale Rechtstexte und § 25-TDDDG-Entscheidungen (Betreiber, siehe `docs/DEVICE_STORAGE.md`).
 4. Alt-PR #26 (D08, durch #33 erledigt) kann geschlossen werden – Entscheidung des Repo-Inhabers.
