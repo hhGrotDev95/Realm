@@ -14,6 +14,16 @@ const sh = (cmd, args, opts = {}) => {
   procs.push(p)
   return p
 }
+// servers run detached in their own process group; stop them however the test ends
+// (a failed migration or browser launch used to leave wrangler and vite running)
+const stop = () => {
+  for (const p of procs) {
+    try {
+      process.kill(-p.pid)
+    } catch {}
+  }
+}
+process.on('exit', stop)
 await new Promise((res, rej) => sh('npx', ['wrangler', 'd1', 'migrations', 'apply', 'realm', '--local', '--persist-to', '.wrangler/e2e-state'], { cwd: 'worker' }).on('exit', (c) => (c ? rej(new Error('migrate')) : res())))
 sh('npx', ['wrangler', 'dev', '--local', '--port', '8798', '--persist-to', '.wrangler/e2e-state', '--var', 'ADMIN_TOKEN:e2e-admin'], { cwd: 'worker' })
 sh('npx', ['vite', '--port', '5199', '--strictPort'], { env: { ...process.env, VITE_API_URL: API } })
@@ -46,9 +56,19 @@ const user = async () => {
   page.on('pageerror', (e) => errors.push(e.stack ?? e.message))
   return page
 }
+// every step reports its duration, so slow or intermittently stalling steps show up in CI logs
+const timings = []
 const step = async (name, fn) => {
-  await fn()
-  console.log('✓', name)
+  const t0 = Date.now()
+  try {
+    await fn()
+  } catch (e) {
+    console.log('✗', name, `(${((Date.now() - t0) / 1000).toFixed(1)} s)`)
+    throw e
+  }
+  const s = (Date.now() - t0) / 1000
+  timings.push([s, name])
+  console.log('✓', name, `(${s.toFixed(1)} s)`)
 }
 /** the current code of an authenticator app for a base32 secret (RFC 6238) */
 const totpCode = (secret, step = Math.floor(Date.now() / 30000)) => {
@@ -104,6 +124,30 @@ try {
     await nav(lea, 'Line-up')
     for (const artist of ['Maduk', 'Arcturus']) await lea.locator('.act', { hasText: artist }).getByRole('button', { name: 'Zum Plan hinzufügen' }).click()
     await lea.waitForTimeout(1200) // plan upload is debounced
+    await nav(lea, 'Crew')
+  })
+
+  const tokenOf = (p) => p.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:realm-open-air')).session.token)
+  const serverPlan = async (token) => (await (await fetch(`${API}/api/me`, { headers: { Authorization: 'Bearer ' + token, 'X-Festival': 'realm-open-air' } })).json()).plan
+
+  await step('a plan change whose upload fails is retried without another edit', async () => {
+    await nav(lea, 'Line-up')
+    await lea.getByRole('tab', { name: 'Alle', exact: true }).click()
+    let failed = 0
+    await lea.route('**/api/me/plan', (r) => (r.request().method() === 'PUT' && failed++ === 0 ? r.abort('failed') : r.fallback()))
+    const act = lea.locator('.act', { hasText: 'Ilka Frost' })
+    await act.getByRole('button', { name: 'Zum Plan hinzufügen' }).click()
+    const token = await tokenOf(lea)
+    const deadline = Date.now() + 25000
+    while (!(await serverPlan(token)).includes('1-ilka-frost')) {
+      if (Date.now() > deadline) throw new Error(`plan never reached the server (${failed} upload attempts)`)
+      await lea.waitForTimeout(500)
+    }
+    if (failed < 2) throw new Error('precondition: the first upload should have failed')
+    await lea.unroute('**/api/me/plan')
+    await act.getByRole('button', { name: 'Aus Plan entfernen' }).click()
+    await lea.waitForTimeout(1200)
+    if ((await serverPlan(token)).includes('1-ilka-frost')) throw new Error('removal not uploaded')
     await nav(lea, 'Crew')
   })
 
@@ -838,13 +882,24 @@ try {
     await ben.getByText('Profil sichern').click()
     await ben.getByRole('button', { name: /Recovery-Code erstellen/ }).click()
     const recovery = (await ben.locator('.code').textContent()).trim()
+    // Ben's saved plan must survive the restore, even when the profile loads slowly on festival WLAN
+    const benToken = await tokenOf(ben)
+    await fetch(`${API}/api/me/plan`, { method: 'PUT', headers: { Authorization: 'Bearer ' + benToken, 'X-Festival': 'realm-open-air', 'Content-Type': 'application/json' }, body: JSON.stringify({ acts: ['1-maduk', '1-somna'] }) })
     const fresh = await user()
     await fresh.goto(WEB)
+    await fresh.route('**/api/me', async (r) => {
+      await new Promise((res) => setTimeout(res, 2000))
+      await r.fallback()
+    })
     await fresh.getByRole('button', { name: 'Profil & Einstellungen' }).click()
     await fresh.getByText('Profil mit Code wiederherstellen').click()
     await fresh.getByPlaceholder('XXXX-XXXX-XXXX-XXXX').fill(recovery)
     await fresh.getByRole('button', { name: 'Wiederherstellen' }).click()
     await fresh.getByText('Profil wiederhergestellt').waitFor()
+    await fresh.unroute('**/api/me')
+    await fresh.waitForTimeout(1500) // past the plan upload debounce
+    const restored = await serverPlan(await tokenOf(fresh)) // restoring issues a new token
+    if (!restored.includes('1-maduk') || !restored.includes('1-somna')) throw new Error('restore overwrote the saved plan: ' + JSON.stringify(restored))
     await fresh.keyboard.press('Escape')
     await nav(fresh, 'Crew')
     await fresh.getByText('Zeltplatz 14', { exact: true }).waitFor({ timeout: 15000 })
@@ -923,15 +978,12 @@ try {
   }
   if (errors.length) throw new Error('Page errors:\n' + errors.join('\n'))
   console.log('All live end-to-end tests passed')
+  console.log('Slowest steps:', timings.sort((a, b) => b[0] - a[0]).slice(0, 5).map(([s, n]) => `${s.toFixed(1)} s ${n}`).join(' · '))
 } catch (e) {
   console.error(e, errors)
   if (process.env.SHOTS) for (const [i, p] of browser.contexts().flatMap((c) => c.pages()).entries()) await p.screenshot({ path: `${process.env.SHOTS}/fail-${i}.png` }).catch(() => {})
   process.exitCode = 1
 } finally {
   await browser.close()
-  for (const p of procs) {
-    try {
-      process.kill(-p.pid)
-    } catch {}
-  }
+  stop()
 }
