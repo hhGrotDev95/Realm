@@ -6,6 +6,7 @@ import { ageSince } from './aging'
 import { pollDelay, POLL_ACTIVE_MS } from './sync'
 import { reminderPlan } from './reminders'
 import { DEFAULT_FESTIVAL } from './festival'
+import { restore, save } from './persist'
 import { on, ACTS, fmt, POIS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, actTime, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
@@ -129,7 +130,7 @@ function load(): Persisted {
   try {
     // the single-festival version stored everything under one key: adopt it for the default festival
     const raw = localStorage.getItem(storageKey()) ?? (online && FESTIVAL.slug === DEFAULT_FESTIVAL ? localStorage.getItem(LEGACY_KEY) : null)
-    if (raw) state = { ...state, ...JSON.parse(raw) }
+    if (raw) state = fromStorage(raw, state)
   } catch {}
   // invite links: /?join=ABCD-EFGH
   const join = new URLSearchParams(location.search).get('join')
@@ -140,6 +141,26 @@ function load(): Persisted {
   if (state.session) setToken(state.session.token)
   return state
 }
+
+/** Stored state over the defaults; damaged or outdated fields fall back instead of crashing the app. */
+function fromStorage(raw: string, base: Persisted): Persisted {
+  const state = restore(base, JSON.parse(raw))
+  if (typeof state.guest.id !== 'string') state.guest = base.guest
+  state.plan = state.plan.filter((id) => typeof id === 'string')
+  return state
+}
+
+const storage = (): Storage | null => {
+  try {
+    return localStorage
+  } catch {
+    return null
+  }
+}
+/** offline copies of OTHER festivals – fetched again when the visitor switches back */
+const otherBundles = (ls: Storage) => Object.keys(ls).filter((k) => k.startsWith('realm.bundle:') && k !== `realm.bundle:${FESTIVAL.slug}`)
+/** the state without what the server sends again anyway: older chat (unsent messages stay) and community reports */
+const slimmed = (s: Persisted): Persisted => ({ ...s, chat: s.chat.filter((m, i) => m.pending || i >= s.chat.length - 50), remoteReports: [], reportsFetchedAt: 0 })
 
 /** the guest session stored in one festival's local state, if any */
 function safeSession(key: string): string | null {
@@ -270,16 +291,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const pending = useRef<(() => void) | null>(null)
   const toastTimer = useRef<number>(0)
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(storageKey(), JSON.stringify(s))
-    } catch {}
-  }, [s])
-
   const toast: Ctx['toast'] = useCallback((msg, action) => {
     window.clearTimeout(toastTimer.current)
     setToast({ id: Date.now(), msg, action: action && { label: action.label, run: () => (action.run(), setToast(null)) } })
     toastTimer.current = window.setTimeout(() => setToast(null), 3800)
+  }, [])
+
+  // every change is saved at once; a full device storage first gives up re-fetchable caches,
+  // and if even that fails the visitor is told instead of losing the plan silently on the next start
+  const written = useRef<string | null>(null)
+  const saveWarned = useRef(false)
+  useEffect(() => {
+    const value = JSON.stringify(s)
+    if (value === written.current) return
+    written.current = value
+    const ls = storage()
+    const res = ls ? save(ls, storageKey(), value, { evictable: () => otherBundles(ls), slim: () => JSON.stringify(slimmed(s)) }) : 'failed'
+    if (res !== 'failed') saveWarned.current = false
+    else if (!saveWarned.current) {
+      saveWarned.current = true
+      toast(t('Speicher des Geräts voll oder gesperrt – Änderungen gehen beim Schließen verloren'))
+    }
+  }, [s, toast])
+  // a second tab of the app saves its own changes: adopt them, so neither tab overwrites the other's plan
+  useEffect(() => {
+    const h = (e: StorageEvent) => {
+      if (e.key !== storageKey() || !e.newValue || e.storageArea !== storage()) return
+      try {
+        const next = fromStorage(e.newValue, fresh())
+        written.current = JSON.stringify(next)
+        if (next.session?.token !== sRef.current.session?.token) setToken(next.session?.token ?? null)
+        setS(next)
+      } catch {}
+    }
+    window.addEventListener('storage', h)
+    return () => window.removeEventListener('storage', h)
   }, [])
 
   const setTab = useCallback(

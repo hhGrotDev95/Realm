@@ -71,6 +71,7 @@ export const EN_CORE: Record<string, string> = {
   "Du": "You",
   "Meldungen brauchen einen Namen, damit Missbrauch erkennbar bleibt.": "Reports need a name so misuse stays traceable.",
   "Etwas ist schiefgelaufen": "Something went wrong",
+  "Speicher des Geräts voll oder gesperrt – Änderungen gehen beim Schließen verloren": "Device storage is full or blocked – changes will be lost when you close the app",
   "Du bist nicht mehr Mitglied dieser Crew": "You’re no longer a member of this crew",
   "Nicht gesendet: {error}": "Not sent: {error}",
   "Nicht gesendet": "Not sent",
