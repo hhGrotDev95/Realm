@@ -271,6 +271,39 @@ try {
     if (JSON.stringify(shown) !== JSON.stringify(['Arcturus beginnt um 22:30'])) throw new Error('reminders shown: ' + JSON.stringify(shown))
     await ctx.close()
   })
+  await step('two open tabs never overwrite each other’s plan; a damaged saved field does not lose the plan', async () => {
+    const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
+    const [a, b] = [await ctx.newPage(), await ctx.newPage()]
+    watch(a, 'tab-a')
+    watch(b, 'tab-b')
+    for (const p of [a, b]) {
+      await p.goto(url)
+      await p.locator('nav').getByText('Line-up').click()
+      await p.getByText('Alle', { exact: true }).click()
+    }
+    const planned = () => a.evaluate(() => JSON.parse(localStorage.getItem('realm.v2')).plan)
+    const before = (await planned()).length
+    const open = () => a.getByRole('button', { name: 'Zum Plan hinzufügen' }).count()
+    const openBefore = await open()
+    await a.getByRole('button', { name: 'Zum Plan hinzufügen' }).first().click()
+    await b.getByRole('button', { name: 'Zum Plan hinzufügen' }).nth(1).click()
+    await a.waitForTimeout(300)
+    const after = await planned()
+    if (after.length !== before + 2) throw new Error(`the other tab overwrote a plan change: ${before} → ${after.length}`)
+    // tab A shows tab B's addition without a reload
+    if ((await open()) !== openBefore - 2) throw new Error('tab A does not show the plan change made in tab B')
+    // an older or damaged copy: one field of the wrong type must not crash the app or drop the plan
+    await a.evaluate(() => {
+      const s = JSON.parse(localStorage.getItem('realm.v2'))
+      localStorage.setItem('realm.v2', JSON.stringify({ ...s, reminders: null, resolved: 'x', attended: [] }))
+    })
+    await b.close()
+    await a.reload()
+    await a.getByText('Als Nächstes').waitFor()
+    const kept = await planned()
+    if (JSON.stringify(kept) !== JSON.stringify(after)) throw new Error('plan lost after a damaged save: ' + kept.length)
+    await ctx.close()
+  })
   await step('offline: after ONE online visit the app and lazily loaded screens open with the server down', async () => {
     const ctx = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
     const p = await ctx.newPage()
