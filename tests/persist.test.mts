@@ -1,7 +1,7 @@
 // Local state must survive restarts: damaged fields fall back without losing the rest, and a full
 // storage first gives up re-fetchable caches before the visitor's own state (src/persist.ts).
 import assert from 'node:assert/strict'
-import { restore, save } from '../src/persist.ts'
+import { dropOtherBundles, otherBundleKeys, restore, save, usage } from '../src/persist.ts'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -103,6 +103,23 @@ check('blocked storage (any other error) is reported as failed, not thrown', () 
     throw new DOMException('denied', 'SecurityError')
   }
   assert.equal(save(ls, 'state', 'x'), 'failed')
+})
+
+check('usage counts Realm keys as UTF-16 and lists only other festivals as removable', () => {
+  const ls = quotaStorage(10_000, { 'realm.v2:a': 'xx', 'realm.bundle:a': 'yyyy', 'realm.bundle:b': 'z'.repeat(10), 'other.app': 'q'.repeat(500) })
+  const u = usage(ls, 'a')
+  assert.equal(u.bytes, ('realm.v2:a'.length + 2 + 'realm.bundle:a'.length + 4 + 'realm.bundle:b'.length + 10) * 2)
+  assert.deepEqual(u.others, [{ slug: 'b', bytes: ('realm.bundle:b'.length + 10) * 2 }])
+})
+
+check('freeing space removes other festivals\' copies but keeps every plan, the current copy and settings', () => {
+  const init = { 'realm.v2:a': 'plan a', 'realm.v2:b': 'plan b', 'realm.bundle:a': 'A', 'realm.bundle:b': 'B', 'realm.bundle:c': 'C', 'realm.lang': 'de' }
+  const ls = quotaStorage(10_000, init)
+  assert.deepEqual(otherBundleKeys(ls, 'a').sort(), ['realm.bundle:b', 'realm.bundle:c'])
+  assert.equal(dropOtherBundles(ls, 'a'), 2)
+  assert.deepEqual([...ls.data.keys()].sort(), ['realm.bundle:a', 'realm.lang', 'realm.v2:a', 'realm.v2:b'])
+  assert.equal(ls.getItem('realm.v2:b'), 'plan b')
+  assert.equal(dropOtherBundles(ls, 'a'), 0)
 })
 
 console.log(`${passed} persistence checks passed`)

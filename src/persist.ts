@@ -49,3 +49,34 @@ export function save(storage: Storage, key: string, value: string, opts: { evict
   }
   return 'failed'
 }
+
+const BUNDLE_PREFIX = 'realm.bundle:'
+
+const keysOf = (storage: Storage) => Array.from({ length: storage.length }, (_, i) => storage.key(i)).filter((k): k is string => k !== null)
+
+/** Offline copies of festivals other than `current`. They are fetched again when the visitor switches back. */
+export const otherBundleKeys = (storage: Storage, current: string) =>
+  keysOf(storage).filter((k) => k.startsWith(BUNDLE_PREFIX) && k !== BUNDLE_PREFIX + current)
+
+export type StorageUsage = { bytes: number; others: { slug: string; bytes: number }[] }
+
+/**
+ * What Realm keeps on this device: all of its keys, and the offline copies of other festivals that
+ * can be removed without losing anything of the visitor's own. Browsers store strings as UTF-16 and
+ * count key and value against the quota, so a character is two bytes.
+ */
+export function usage(storage: Storage, current: string): StorageUsage {
+  const size = (k: string) => (k.length + (storage.getItem(k)?.length ?? 0)) * 2
+  const bytes = keysOf(storage)
+    .filter((k) => k.startsWith('realm.'))
+    .reduce((n, k) => n + size(k), 0)
+  const others = otherBundleKeys(storage, current).map((k) => ({ slug: k.slice(BUNDLE_PREFIX.length), bytes: size(k) }))
+  return { bytes, others }
+}
+
+/** Removes the offline copies of other festivals; plans, sessions and settings of every festival stay. */
+export function dropOtherBundles(storage: Storage, current: string): number {
+  const keys = otherBundleKeys(storage, current)
+  for (const k of keys) storage.removeItem(k)
+  return keys.length
+}
