@@ -1,5 +1,5 @@
 // Thin client for the Realm API (worker/). Without VITE_API_URL the app runs in demo mode.
-import type { FestivalBundle, TimetableChange } from './data'
+import type { FestivalBundle, Poi, TimetableChange } from './data'
 
 export const API_URL: string | undefined = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || undefined
 export const online = !!API_URL
@@ -179,6 +179,9 @@ export function execute(op: OutboxOp): Promise<unknown> {
 const rand = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('')
 export const opId = (prefix: string) => `${prefix}_${rand()}`
 
+/** A marker the organizer places on the map (stages are moved via moveStage). */
+export type PoiInput = Pick<Poi, 'cat' | 'name' | 'detail' | 'x' | 'y' | 'status' | 'important'>
+
 export interface AdminFaq {
   id: string
   question: string
@@ -234,6 +237,11 @@ export const adminApi = (adminToken: string) => {
     deleteFaq: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/faq/${id}`),
     setModules: (slug: string, modules: Record<string, boolean>) => req<Record<string, boolean>>('PUT', `/api/admin/festivals/${slug}/modules`, modules),
     setTheme: (slug: string, theme: { brand?: string; font?: string; logo?: string }) => req<Record<string, string>>('PUT', `/api/admin/festivals/${slug}/theme`, theme),
+    setMap: (slug: string, map: { image: string; height: number } | { image: null }) => req<{ height: number; image: boolean }>('PUT', `/api/admin/festivals/${slug}/map`, map),
+    createPoi: (slug: string, p: PoiInput) => req<Poi>('POST', `/api/admin/festivals/${slug}/pois`, p),
+    updatePoi: (slug: string, id: string, p: PoiInput) => req<Poi>('PUT', `/api/admin/festivals/${slug}/pois/${id}`, p),
+    deletePoi: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/pois/${id}`),
+    moveStage: (slug: string, id: string, pos: { x: number; y: number }) => req<{ id: string; x: number; y: number }>('PUT', `/api/admin/festivals/${slug}/stages/${id}/position`, pos),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
     restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),
     announce: (a: { title: string; body?: string; place?: string; severity: Announcement['severity']; validMin?: number }) => req<Announcement>('POST', '/api/admin/announcements', a),

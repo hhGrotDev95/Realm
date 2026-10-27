@@ -1,6 +1,7 @@
 import type { Theme } from './theme/apply'
 import { isEnabled, type ModuleKey, type ModuleState } from './modules.ts'
 import type { Faq } from './faq/match'
+import { DEFAULT_MAP_H, MAP_W, mapHeight, type MapConfig, type PoiCat } from './map/geo.ts'
 // Realm — demo dataset for "Realm Open Air 2027".
 // Times are minutes after midnight of the festival day (values > 1440 = after midnight).
 
@@ -186,7 +187,7 @@ export function friendsFor(actId: string): string[] {
   return FRIENDS.filter((f) => hash(f.id + actId) < 0.1 + a.popularity * 0.6).map((f) => f.id)
 }
 
-export type PoiCat = 'stage' | 'water' | 'wc' | 'food' | 'medical' | 'bar' | 'entrance' | 'camping' | 'info' | 'shuttle'
+export type { PoiCat }
 
 export interface Poi {
   id: string
@@ -220,8 +221,11 @@ export const POIS: Poi[] = [
   { id: 'sh1', cat: 'shuttle', name: 'Shuttle-Terminal', x: 860, y: 860, detail: 'Bahnhof · alle 15 Min.', status: 'open', important: true },
 ]
 
-/** Your simulated position on the grounds. */
+/** Your simulated position on the grounds (the middle of a festival's own plan). */
 export const ME = { x: 440, y: 420 }
+
+/** Size of the festival map in map units (see map/geo.ts) and its own site plan, if any. */
+export const MAP = { w: MAP_W, h: DEFAULT_MAP_H, image: undefined as string | undefined }
 
 export function walkMinutes(ax: number, ay: number, bx: number, by: number) {
   return Math.max(1, Math.round(Math.hypot(ax - bx, ay - by) / 38))
@@ -378,7 +382,7 @@ export function applyTimetableChanges(changes: TimetableChange[]) {
 
 /** The public festival document served by GET /api/festivals/:slug. */
 export interface FestivalBundle {
-  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; updatedAt: number }
+  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; map?: MapConfig; updatedAt: number }
   days: FestivalDay[]
   stages: Stage[]
   acts: Omit<Act, 'change'>[]
@@ -404,6 +408,9 @@ export function loadFestivalBundle(b: FestivalBundle) {
   replace(ACTS, b.acts.map((a) => ({ ...a })))
   refill(actById, ACTS.map((a) => [a.id, a]))
   replace(POIS, b.pois)
+  const map = b.festival.map
+  Object.assign(MAP, { h: mapHeight(map), image: map?.image })
+  Object.assign(ME, map?.image ? { x: MAP_W / 2, y: Math.round(MAP.h / 2) } : { x: 440, y: 420 })
   replace(FAQS, b.faq ?? [])
   ORIGINAL.clear()
   for (const a of ACTS) ORIGINAL.set(a.id, { start: a.start, end: a.end, stage: a.stage })

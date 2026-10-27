@@ -470,6 +470,73 @@ try {
     assert.deepEqual(t, { brand: '#4fd1c5', font: 'space', logo: png })
   })
 
+  await test('map editor: site plan, markers with relative positions, stage markers follow stages', async () => {
+    const A = 'test-admin-token'
+    const N = '/api/admin/festivals/nordlicht'
+    const bundle = async () => (await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data
+    let b = await bundle()
+    // stage markers come from the stage list, one per stage, never duplicated
+    const stageMarkers = b.pois.filter((p) => p.cat === 'stage')
+    assert.deepEqual(stageMarkers.map((p) => p.id).sort(), b.stages.map((s) => 'stage-' + s.id).sort())
+    assert.deepEqual(b.festival.map, {})
+    const stage = b.stages[0]
+
+    // markers: admin only, validated
+    const poi = { cat: 'water', name: 'Wasser Ost', detail: 'Trinkwasser', x: 800, y: 470, important: true }
+    assert.equal((await api('POST', `${N}/pois`, lea.token, poi, null)).status, 401)
+    assert.equal((await api('POST', `${N}/pois`, A, { ...poi, x: 1200 }, null)).status, 400)
+    assert.equal((await api('POST', `${N}/pois`, A, { ...poi, y: 941 }, null)).status, 400)
+    assert.equal((await api('POST', `${N}/pois`, A, { ...poi, cat: 'ufo' }, null)).status, 400)
+    assert.equal((await api('POST', `${N}/pois`, A, { ...poi, cat: 'stage' }, null)).status, 400)
+    assert.equal((await api('POST', `${N}/pois`, A, { ...poi, status: 'maybe' }, null)).status, 400)
+    const created = await api('POST', `${N}/pois`, A, poi, null)
+    assert.equal(created.status, 201)
+    const id = created.data.id
+    assert.match(id, /^water-[a-z0-9]{6}$/)
+    b = await bundle()
+    assert.deepEqual(b.pois.find((p) => p.id === id), { id, cat: 'water', name: 'Wasser Ost', x: 800, y: 470, detail: 'Trinkwasser', important: true })
+    const moved = await api('PUT', `${N}/pois/${id}`, A, { ...poi, x: 810.4, y: 400, status: 'closed' }, null)
+    assert.equal(moved.status, 200)
+    assert.equal(moved.data.x, 810)
+    assert.equal((await api('PUT', `${N}/pois/nope`, A, poi, null)).status, 404)
+    assert.equal((await api('PUT', `${N}/pois/stage-${stage.id}`, A, poi, null)).status, 404)
+    // a marker id of another festival is not reachable from this one
+    assert.equal((await api('PUT', `/api/admin/festivals/realm-open-air/pois/${id}`, A, poi, null)).status, 404)
+
+    // stages are moved, not edited, on the map
+    assert.equal((await api('PUT', `${N}/stages/${stage.id}/position`, A, { x: -1, y: 10 }, null)).status, 400)
+    assert.equal((await api('PUT', `${N}/stages/nope/position`, A, { x: 10, y: 10 }, null)).status, 404)
+    assert.equal((await api('PUT', `${N}/stages/${stage.id}/position`, A, { x: 100, y: 200 }, null)).status, 200)
+    b = await bundle()
+    assert.deepEqual([b.stages[0].x, b.stages[0].y], [100, 200])
+    assert.deepEqual(b.pois.filter((p) => p.id === 'stage-' + stage.id).map((p) => [p.x, p.y]), [[100, 200]])
+
+    // site plan: validated; a plan with another aspect ratio keeps markers in the same relative place
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    assert.equal((await api('PUT', `${N}/map`, A, { image: 'https://example.com/plan.png', height: 500 }, null)).status, 400)
+    assert.equal((await api('PUT', `${N}/map`, A, { image: png }, null)).status, 400) // height missing
+    assert.equal((await api('PUT', `${N}/map`, A, { image: 'data:image/png;base64,' + 'A'.repeat(1_000_001), height: 500 }, null)).status, 400)
+    assert.equal((await api('PUT', `${N}/map`, lea.token, { image: png, height: 470 }, null)).status, 401)
+    const plan = await api('PUT', `${N}/map`, A, { image: png, height: 470 }, null)
+    assert.deepEqual(plan.data, { height: 470, image: true })
+    b = await bundle()
+    assert.deepEqual(b.festival.map, { image: png, height: 470 })
+    assert.equal(b.pois.find((p) => p.id === id).y, 200)
+    assert.equal(b.stages[0].y, 100)
+    // positions are now limited to the plan's height
+    assert.equal((await api('PUT', `${N}/pois/${id}`, A, { ...poi, y: 600 }, null)).status, 400)
+    // removing the plan restores the default ground and scales back
+    assert.deepEqual((await api('PUT', `${N}/map`, A, { image: null }, null)).data, { height: 940, image: false })
+    b = await bundle()
+    assert.deepEqual(b.festival.map, {})
+    assert.equal(b.pois.find((p) => p.id === id).y, 400)
+
+    assert.equal((await api('DELETE', `${N}/pois/stage-${stage.id}`, A, undefined, null)).status, 400)
+    assert.equal((await api('DELETE', `${N}/pois/${id}`, A, undefined, null)).status, 204)
+    assert.equal((await api('DELETE', `${N}/pois/${id}`, A, undefined, null)).status, 404)
+    assert.equal((await bundle()).pois.some((p) => p.id === id), false)
+  })
+
   await test('modules: switched-off features are refused by the API, dependencies enforced', async () => {
     const A = 'test-admin-token'
     const N = 'nordlicht'

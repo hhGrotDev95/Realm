@@ -1,6 +1,6 @@
 # Realm – Fortschritt
 
-Stand: 19.10.2026
+Stand: 27.10.2026
 
 - Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
 - Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`, gemergt als PR #5
@@ -277,3 +277,30 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - `LazyBoundary`: ein fehlgeschlagener Chunk-Load zeigt „Erneut versuchen“ statt die App abstürzen zu lassen.
 - Smoke-Test prüft Offline jetzt ehrlich (Server wird beendet, da `setOffline` Service-Worker-Fetches nicht abdeckt).
 - Geprüft: typecheck, test:import, build, test:e2e, test:a11y, test:live – alles grün.
+
+## P6 · Karteneditor — erledigt (Branch `ccr-c4b0523e-9s9p1x`, 27.10.2026)
+
+- Migration `0009_site_map.sql`: `festivals.map` (JSON `{ image, height }`).
+- `src/map/geo.ts` (geteilt von App, Konsole, Worker): Kategorien, Status, Kartenbreite 1000, Höhe aus dem Seitenverhältnis des Plans (300–3000), Größenlimit, `clampPos`.
+- Worker: `PUT …/:slug/map` (Plan hochladen/entfernen; Marker und Bühnen werden auf die neue Höhe skaliert = relative Position bleibt), `POST …/:slug/pois`, `PUT/DELETE …/:slug/pois/:id`, `PUT …/:slug/stages/:id/position`; Validierung (Position innerhalb der Karte, Kategorie, Status, Bühnen nicht als Ort). Bühnen-Marker im Festivaldokument kommen jetzt **immer aus der Bühnenliste** – vorher hatten in der Konsole angelegte Festivals gar keine Bühnen auf der Karte (Fehler behoben).
+- App: Karte nutzt die Höhe des Festivals und zeigt den eigenen Plan statt der Beispielgrafik („Satellit“ dann ausgeblendet); eigene Position = Kartenmitte. Robust gegen Meldungen zu gelöschten Orten und Freunde an entfernten Bühnen (vorher Absturz durch `!`). Beispielgrafik als `src/screens/Ground.tsx` ausgelagert.
+- Konsole: Tab „Karte“ (`src/admin/MapEditor.tsx`): Plan hochladen/ersetzen/entfernen (Raster wird verkleinert und als WebP/JPEG komprimiert, bis es passt), Klick legt Ort an, Ziehen verschiebt (sofort gespeichert, bei Fehler zurückgesetzt), Seitenleiste mit Liste und Formular inkl. X/Y-Feldern (Tastatur-Alternative zum Ziehen).
+
+Nebenbei gefundener echter Fehler (auch auf `main`): Der Crew-Chat stürzte in aktuellen Chromium-Versionen beim Öffnen ab („destroy is not a function“), weil `useEffect(() => el.scrollIntoView())` das neue Promise von `scrollIntoView` als Cleanup zurückgab. Behoben in `src/sheets.tsx`; der Smoke-Test war dadurch rot.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler |
+| `npm run test:import` | 8 Parser, 9 Kontrast, 7 Module, 19 FAQ-Bot |
+| `cd worker && npm test` | 28 API-Tests (neu: Karteneditor – Rechte, Validierung, Mandantentrennung, Bühnen-Marker, Skalierung bei neuem Plan) + Migrationstest (9 Migrationen) |
+| `npm run test:e2e` | 10 Abläufe bestanden (vor dem Chat-Fix: Abbruch im Crew-Chat) |
+| `npm run test:a11y` | 14 Ansichten ohne Befund |
+| `npm run test:live` | 17 Szenarien; Festival-Ablauf neu: Bühnen eines in der Konsole angelegten Festivals sind auf der Karte, Plan 2:1 → Karte 1000×500, Ort per Klick anlegen, Bühne ziehen (Position per API geprüft), Besucher sieht Plan und Ort |
+
+Nicht geprüft: Der Karteneditor selbst hat keinen axe-Lauf (a11y-Test läuft ohne Server, die Konsole zeigt dort nur die Anmeldung). Lokal brauchte Playwright einen Symlink auf die vorinstallierte Headless-Shell (CI installiert selbst).
+
+## Nächste Schritte
+
+1. P7: Sprachen DE/EN (App-Texte zentralisieren, Sprache aus Browser/Profil, Festivalinhalte bleiben in der Sprache des Veranstalters).
+2. a11y-Lauf für Konsolen-Tabs mit Server (Karte, FAQ, Branding) – z. B. axe im Live-Test.
+3. Optional Karte: Ort direkt aus Meldung/Ankündigung verknüpfen (Feld `poi` existiert bereits in Announcements, Konsole bietet es noch nicht an).

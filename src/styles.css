@@ -486,3 +486,11 @@ select.field { appearance: none; }
 .faq-answer { margin-top: 12px; padding: 14px; border-radius: var(--r-md); background: var(--bg-elev); box-shadow: inset 0 0 0 1px var(--line); }
 .faq-item { border-bottom: 1px solid var(--line); }
 .faq-item .list-item { border-bottom: 0; }
+
+/* Console: map editor */
+.map-editor { position: relative; width: 100%; overflow: hidden; border-radius: 14px; background: #14171c; cursor: crosshair; touch-action: none; box-shadow: inset 0 0 0 1px var(--line-strong); }
+.map-editor-pin { position: absolute; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 4px; min-width: 26px; height: 26px; padding: 0 6px; justify-content: center; border-radius: 9px; background: #f4f3f8; color: #111; font-size: 12px; font-weight: 700; white-space: nowrap; box-shadow: 0 0 0 2px #0d0f12, 0 3px 10px rgba(0, 0, 0, 0.4); cursor: grab; touch-action: none; z-index: 1; }
+.map-editor-pin.stage { background: #111116; color: #fff; border-radius: 99px; z-index: 2; }
+.map-editor-pin.on { outline: 3px solid var(--brand); outline-offset: 2px; z-index: 3; }
+.map-editor-pin.new { background: var(--brand); color: var(--brand-ink); pointer-events: none; z-index: 3; }
+.map-editor-pin:active { cursor: grabbing; }

@@ -355,6 +355,58 @@ try {
     if (!display.includes('Space Grotesk')) throw new Error('font not applied: ' + display)
     await visitor.locator('.appbar img.logo-img').waitFor()
 
+    // map editor: stages of a console-made festival are on the map; own site plan and a new place reach visitors
+    await org.getByRole('tab', { name: 'Karte' }).click()
+    await org.getByRole('button', { name: /^Wiese \(Bühne\)/ }).waitFor()
+    await org.getByRole('button', { name: /^Zelt \(Bühne\)/ }).waitFor()
+    const planPng = Buffer.from(
+      (await org.evaluate(() => {
+        const c = document.createElement('canvas')
+        c.width = 800
+        c.height = 400
+        const g = c.getContext('2d')
+        g.fillStyle = '#2d4a26'
+        g.fillRect(0, 0, 800, 400)
+        g.fillStyle = '#5c8aa8'
+        g.fillRect(500, 100, 200, 150)
+        return c.toDataURL('image/png')
+      })).split(',')[1],
+      'base64',
+    )
+    await org.getByLabel('Geländeplan wählen').setInputFiles({ name: 'plan.png', mimeType: 'image/png', buffer: planPng })
+    await org.getByText('Geländeplan gespeichert').waitFor()
+    await org.getByText('Breite 1000, Höhe 500').waitFor() // 2:1 plan → map is 1000 × 500
+    const editor = org.locator('.map-editor')
+    const ebox = await editor.boundingBox()
+    await org.mouse.click(ebox.x + ebox.width * 0.3, ebox.y + ebox.height * 0.6)
+    await org.getByRole('heading', { name: 'Neuer Ort' }).waitFor()
+    await org.getByLabel('Name', { exact: true }).fill('Schließfächer')
+    await org.getByLabel('Kategorie').selectOption('info')
+    await org.getByRole('button', { name: 'Ort anlegen' }).click()
+    await org.getByText('„Schließfächer“ steht jetzt auf der Karte').waitFor()
+    // dragging a stage marker saves its new position
+    const zelt = await org.getByRole('button', { name: /^Zelt \(Bühne\)/ }).boundingBox()
+    const zeltBefore = (await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()).stages.find((st) => st.name === 'Zelt')
+    await org.mouse.move(zelt.x + zelt.width / 2, zelt.y + zelt.height / 2)
+    await org.mouse.down()
+    await org.mouse.move(zelt.x + zelt.width / 2 + 60, zelt.y + zelt.height / 2 + 40, { steps: 8 })
+    await org.mouse.up()
+    for (let i = 0; ; i++) {
+      const st = (await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()).stages.find((x) => x.name === 'Zelt')
+      if (st.x > zeltBefore.x + 50 && st.y > zeltBefore.y + 30) break
+      if (i > 20) throw new Error(`stage not moved: ${JSON.stringify(zeltBefore)} → ${JSON.stringify(st)}`)
+      await new Promise((r) => setTimeout(r, 250))
+    }
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/map-editor.png`, fullPage: true })
+    await visitor.reload()
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await nav(visitor, 'Map')
+    await visitor.getByRole('button', { name: 'Schließfächer' }).waitFor()
+    await visitor.getByRole('button', { name: 'Wiese', exact: true }).waitFor()
+    const planSrc = await visitor.locator('.map-wrap img').first().getAttribute('src')
+    if (!planSrc?.startsWith('data:image/')) throw new Error('site plan not shown to visitors')
+    await nav(visitor, 'Home')
+
     // modules: switching off "Crew & Freunde" removes the crew tab for visitors and the API refuses it
     await org.getByRole('tab', { name: 'Module' }).click()
     await org.getByRole('switch', { name: 'Crew & Freunde' }).click()

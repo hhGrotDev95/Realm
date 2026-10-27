@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { isEnabled, MODULE_KEYS, moduleConflicts, MODULES, type ModuleKey, type ModuleState } from '../../src/modules'
 import { checkBrand, HEX } from '../../src/theme/contrast'
+import { clampPos, mapHeight, MAP_IMAGE, MAP_IMAGE_MAX, MAP_W, MAX_MAP_H, MIN_MAP_H, POI_CATS, POI_STATUS, type MapConfig } from '../../src/map/geo'
 import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v } from './util'
 
 export interface Env {
@@ -140,7 +141,7 @@ app.get('/api/health', (c) => c.json({ ok: true }))
 
 /* ---------- Festivals (public) ---------- */
 
-type FestivalRow = { id: string; slug: string; name: string; location: string | null; status: string; theme: string; modules: string; updated_at: number }
+type FestivalRow = { id: string; slug: string; name: string; location: string | null; status: string; theme: string; modules: string; map: string; updated_at: number }
 
 app.get('/api/festivals', async (c) => {
   const rows = await c.env.DB.prepare("SELECT slug, name, location FROM festivals WHERE status = 'published' ORDER BY name").all()
@@ -160,11 +161,15 @@ app.get('/api/festivals/:slug', async (c) => {
     db.prepare("SELECT id, question, answer, category, keywords, source, updated_at AS updatedAt FROM faqs WHERE festival_id = ? AND status = 'published' ORDER BY sort, category, question").bind(f.id),
   ])
   return c.json({
-    festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), updatedAt: f.updated_at },
+    festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), map: JSON.parse(f.map || '{}'), updatedAt: f.updated_at },
     days: days.results,
     stages: stages.results,
     acts: acts.results,
-    pois: (pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+    // stage markers always follow the stage list (also for festivals created in the console)
+    pois: [
+      ...(stages.results as { id: string; name: string; x: number; y: number; vibe: string }[]).map((s) => ({ id: 'stage-' + s.id, cat: 'stage', name: s.name, x: s.x, y: s.y, detail: s.vibe, important: true })),
+      ...(pois.results as Record<string, unknown>[]).filter((p) => !String(p.id).startsWith('stage-')).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+    ],
     // published answers travel with the festival document, so FAQ and bot work offline
     faq: isEnabled(JSON.parse(f.modules) as ModuleState, 'faq') ? faqs.results : [],
   })
@@ -779,6 +784,96 @@ app.put('/api/admin/festivals/:slug/theme', async (c) => {
   }
   await c.env.DB.prepare('UPDATE festivals SET theme = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(theme), Date.now(), f.id).run()
   return c.json(theme)
+})
+
+/* Map editor (admin): the festival's own site plan and the markers on it. */
+const POI_ID = /^[a-z0-9-]{1,40}$/
+
+async function festivalMap(c: Context<App>, festivalId: string) {
+  const row = await c.env.DB.prepare('SELECT map FROM festivals WHERE id = ?').bind(festivalId).first<{ map: string }>()
+  return JSON.parse(row?.map || '{}') as MapConfig
+}
+
+function poiInput(b: Record<string, unknown>, height: number) {
+  const x = typeof b.x === 'number' && Number.isFinite(b.x) && b.x >= 0 && b.x <= MAP_W ? b.x : NaN
+  const y = typeof b.y === 'number' && Number.isFinite(b.y) && b.y >= 0 && b.y <= height ? b.y : NaN
+  if (Number.isNaN(x) || Number.isNaN(y)) throw new HttpError(400, 'Position liegt außerhalb der Karte')
+  const cat = v.oneOf(b.cat, 'Kategorie', POI_CATS)
+  if (cat === 'stage') throw new HttpError(400, 'Bühnen werden unter „Bühnen“ angelegt und hier nur verschoben')
+  return {
+    cat,
+    name: v.str(b.name, 'Name', { max: 60 })!,
+    detail: v.str(b.detail, 'Beschreibung', { max: 120, optional: true }) ?? '',
+    status: b.status === undefined || b.status === null ? null : v.oneOf(b.status, 'Status', POI_STATUS),
+    important: b.important === undefined ? false : v.bool(b.important, 'important'),
+    ...clampPos(x, y, height),
+  }
+}
+
+/** Uploads (or removes) the site plan. Markers keep their relative position on a new aspect ratio. */
+app.put('/api/admin/festivals/:slug/map', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  let next: MapConfig = {}
+  if (b.image !== undefined && b.image !== null) {
+    if (typeof b.image !== 'string' || !MAP_IMAGE.test(b.image)) throw new HttpError(400, 'Geländeplan muss ein PNG, WebP, JPEG oder SVG sein')
+    if (b.image.length > MAP_IMAGE_MAX) throw new HttpError(400, 'Geländeplan ist zu groß (max. ca. 750 kB)')
+    next = { image: b.image, height: v.int(b.height, 'Höhe', MIN_MAP_H, MAX_MAP_H) }
+  }
+  const factor = mapHeight(next) / mapHeight(await festivalMap(c, f.id))
+  const db = c.env.DB
+  await db.batch([
+    db.prepare('UPDATE festivals SET map = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(next), Date.now(), f.id),
+    ...(factor === 1 ? [] : [db.prepare('UPDATE pois SET y = ROUND(y * ?) WHERE festival_id = ?').bind(factor, f.id), db.prepare('UPDATE stages SET y = ROUND(y * ?) WHERE festival_id = ?').bind(factor, f.id)]),
+  ])
+  return c.json({ height: mapHeight(next), image: !!next.image })
+})
+
+app.post('/api/admin/festivals/:slug/pois', async (c) => {
+  const f = await festivalBySlug(c)
+  const p = poiInput(await body(c), mapHeight(await festivalMap(c, f.id)))
+  const id = `${p.cat}-${randomCode(1, 6).toLowerCase()}`
+  await c.env.DB.batch([
+    c.env.DB.prepare('INSERT INTO pois (festival_id, id, cat, name, x, y, detail, status, important) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, id, p.cat, p.name, p.x, p.y, p.detail, p.status, p.important ? 1 : 0),
+    touch(c.env.DB, f.id),
+  ])
+  return c.json({ id, ...p, status: p.status ?? undefined }, 201)
+})
+
+app.put('/api/admin/festivals/:slug/pois/:id', async (c) => {
+  const f = await festivalBySlug(c)
+  const id = c.req.param('id')
+  if (!POI_ID.test(id) || id.startsWith('stage-')) throw new HttpError(404, 'Ort nicht gefunden')
+  const p = poiInput(await body(c), mapHeight(await festivalMap(c, f.id)))
+  const res = await c.env.DB.prepare('UPDATE pois SET cat = ?, name = ?, x = ?, y = ?, detail = ?, status = ?, important = ? WHERE festival_id = ? AND id = ?')
+    .bind(p.cat, p.name, p.x, p.y, p.detail, p.status, p.important ? 1 : 0, f.id, id)
+    .run()
+  if (!res.meta.changes) throw new HttpError(404, 'Ort nicht gefunden')
+  await touch(c.env.DB, f.id).run()
+  return c.json({ id, ...p, status: p.status ?? undefined })
+})
+
+app.delete('/api/admin/festivals/:slug/pois/:id', async (c) => {
+  const f = await festivalBySlug(c)
+  const id = c.req.param('id')
+  if (id.startsWith('stage-')) throw new HttpError(400, 'Bühnen werden unter „Bühnen“ entfernt')
+  const res = await c.env.DB.prepare('DELETE FROM pois WHERE festival_id = ? AND id = ?').bind(f.id, id).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Ort nicht gefunden')
+  await touch(c.env.DB, f.id).run()
+  return c.body(null, 204)
+})
+
+/** Moves a stage on the map (name, colour and order stay in the stage list). */
+app.put('/api/admin/festivals/:slug/stages/:id/position', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  const height = mapHeight(await festivalMap(c, f.id))
+  if (typeof b.x !== 'number' || typeof b.y !== 'number' || !(b.x >= 0 && b.x <= MAP_W && b.y >= 0 && b.y <= height)) throw new HttpError(400, 'Position liegt außerhalb der Karte')
+  const pos = clampPos(b.x, b.y, height)
+  const res = await c.env.DB.prepare('UPDATE stages SET x = ?, y = ? WHERE festival_id = ? AND id = ?').bind(pos.x, pos.y, f.id, c.req.param('id')).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Bühne nicht gefunden')
+  await touch(c.env.DB, f.id).run()
+  return c.json({ id: c.req.param('id'), ...pos })
 })
 
 type ImportRow = { row: number; id?: string; day: number; stage: string; artist: string; start: number; end: number; genre?: string; bio?: string }
