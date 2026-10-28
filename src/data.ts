@@ -1,6 +1,7 @@
 import type { Theme } from './theme/apply'
 import { isEnabled, type ModuleKey, type ModuleState } from './modules.ts'
 import type { Faq } from './faq/match'
+import { DEFAULT_MAP_HEIGHT, MAP_WIDTH, parseMap, type MapFrame } from './map.ts'
 // Realm — demo dataset for "Realm Open Air 2027".
 // Times are minutes after midnight of the festival day (values > 1440 = after midnight).
 
@@ -220,7 +221,10 @@ export const POIS: Poi[] = [
   { id: 'sh1', cat: 'shuttle', name: 'Shuttle-Terminal', x: 860, y: 860, detail: 'Bahnhof · alle 15 Min.', status: 'open', important: true },
 ]
 
-/** Your simulated position on the grounds. */
+/** The festival's ground plan; the built-in demo uses the drawn demo grounds. */
+export const MAP: MapFrame = { width: MAP_WIDTH, height: DEFAULT_MAP_HEIGHT, ground: 'demo' }
+
+/** Your simulated position on the grounds (kept at the same relative spot on every plan). */
 export const ME = { x: 440, y: 420 }
 
 export function walkMinutes(ax: number, ay: number, bx: number, by: number) {
@@ -378,7 +382,7 @@ export function applyTimetableChanges(changes: TimetableChange[]) {
 
 /** The public festival document served by GET /api/festivals/:slug. */
 export interface FestivalBundle {
-  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; updatedAt: number }
+  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; map?: MapFrame; updatedAt: number }
   days: FestivalDay[]
   stages: Stage[]
   acts: Omit<Act, 'change'>[]
@@ -404,6 +408,9 @@ export function loadFestivalBundle(b: FestivalBundle) {
   replace(ACTS, b.acts.map((a) => ({ ...a })))
   refill(actById, ACTS.map((a) => [a.id, a]))
   replace(POIS, b.pois)
+  // older cached documents have no map: they were made for the demo frame
+  Object.assign(MAP, { image: undefined }, parseMap(b.festival.map ?? { ground: 'demo' }))
+  Object.assign(ME, { x: Math.round(MAP.width * 0.44), y: Math.round((MAP.height * 420) / DEFAULT_MAP_HEIGHT) })
   replace(FAQS, b.faq ?? [])
   ORIGINAL.clear()
   for (const a of ACTS) ORIGINAL.set(a.id, { start: a.start, end: a.end, stage: a.stage })

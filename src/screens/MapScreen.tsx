@@ -1,7 +1,7 @@
 import { AnimatePresence, m as motion } from 'framer-motion'
 import { Check, Layers, LocateFixed, Search, X, MapPin, TriangleAlert, Users, Satellite, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { on, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { on, MAP, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
 import { useApp } from '../store'
 import { CAT_ICON } from './mapIcons'
 import { AppBar } from '../App'
@@ -14,12 +14,11 @@ const CATS: { id: PoiCat; label: string }[] = [
   { id: 'medical', label: 'Medical' },
   { id: 'bar', label: 'Bars' },
 ]
-const W = 1000
-const H = 940
 
 type View = { x: number; y: number; k: number }
 
 export function MapScreen() {
+  const { width: W, height: H } = MAP
   const { crew } = useApp()
   const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, updates, votes, sheet, set, toast, requireIdentity } = useApp()
   const wrap = useRef<HTMLDivElement>(null)
@@ -307,7 +306,10 @@ export function MapScreen() {
                     ['pins', 'Meine Pins', MapPin],
                     ['satellite', 'Satellit', Satellite],
                   ] as const
-                ).map(([k, label, I]) => (
+                )
+                  // the satellite look only exists for the drawn demo grounds
+                  .filter(([k]) => k !== 'satellite' || MAP.ground === 'demo')
+                  .map(([k, label, I]) => (
                   <button key={k} onClick={() => setLayers((l) => ({ ...l, [k]: !l[k] }))} aria-pressed={layers[k]}>
                     <I size={18} className="faint" /> {label}
                     {layers[k] && <Check size={18} className="chk" />}
@@ -383,6 +385,9 @@ function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: 
 }
 
 function Ground({ satellite }: { satellite: boolean }) {
+  const { width: W, height: H } = MAP
+  if (MAP.ground === 'image') return <img src={MAP.image} alt="" width={W} height={H} draggable={false} style={{ position: 'absolute', inset: 0, width: W, height: H, userSelect: 'none' }} />
+  if (MAP.ground === 'plain') return <PlainGround />
   const grass = satellite ? '#1b2a1a' : '#14171c'
   const field = satellite ? '#243620' : '#191d23'
   const path = satellite ? '#4a4535' : '#262b33'
@@ -427,6 +432,32 @@ function Ground({ satellite }: { satellite: boolean }) {
       <text x="140" y="700" fill={satellite ? '#4c6e44' : '#26332b'} fontSize="16" fontFamily="Inter" fontWeight="600" letterSpacing="3">
         WALD
       </text>
+    </svg>
+  )
+}
+
+/** Neutral grounds for festivals without an uploaded plan: a field with a glow at each stage. */
+function PlainGround() {
+  const { width: W, height: H } = MAP
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ position: 'absolute', inset: 0 }} aria-hidden>
+      <defs>
+        <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+          <rect width="50" height="50" fill="#14171c" />
+          <path d="M50 0H0V50" fill="none" stroke="#1b1f26" strokeWidth="1" />
+        </pattern>
+        {STAGES.map((s) => (
+          <radialGradient key={s.id} id={'g-' + s.id}>
+            <stop offset="0" stopColor={s.color} stopOpacity=".28" />
+            <stop offset="1" stopColor={s.color} stopOpacity="0" />
+          </radialGradient>
+        ))}
+      </defs>
+      <rect width={W} height={H} fill="url(#grid)" />
+      <rect x="20" y="20" width={W - 40} height={H - 40} rx="40" fill="none" stroke="#232830" strokeWidth="3" strokeDasharray="10 8" />
+      {STAGES.map((s) => (
+        <circle key={s.id} cx={s.x} cy={s.y} r="120" fill={`url(#g-${s.id})`} />
+      ))}
     </svg>
   )
 }

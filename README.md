@@ -57,6 +57,10 @@ In der Konsole (`/#admin`) legt **„Neues Festival“** einen Entwurf an. Der A
 
 Pro Festival in der Konsole unter **Branding**: Markenfarbe (Voreinstellungen, Farbwähler oder Hex), Schrift für Überschriften (fünf kuratierte Google Fonts) und Logo (PNG/JPEG/WebP werden auf 256 px verkleinert, SVG bis 140 kB). Eine Live-Vorschau zeigt App-Leiste, Karte, Buttons und Labels. Die Kontrastprüfung (WCAG 2.1: 4,5:1 für Text, 3:1 für Bedienelemente) läuft in Konsole **und** Worker mit derselben Logik (`src/theme/contrast.ts`); unlesbare Farben lassen sich nicht speichern. Die Textfarbe auf Buttons wird automatisch gewählt.
 
+### Karte und Geländeplan
+
+Pro Festival in der Konsole unter **Karte**: Geländeplan hochladen (PNG/JPEG/WebP werden auf max. 2000 px verkleinert und als JPEG bis ca. 900 kB gespeichert, SVG bis ca. 900 kB), Bühnen und Orte per Ziehen oder Pfeiltasten (Umschalt = große Schritte) platzieren, Orte (Wasser, WC, Essen, Sanitäter, Bar, Eingang, Camping, Info, Shuttle) anlegen, beschreiben, mit Status versehen und entfernen. Koordinaten liegen in einem Rahmen von 1000 Einheiten Breite, die Höhe folgt dem Seitenverhältnis des Plans; ein neuer Plan mit anderem Seitenverhältnis verschiebt alle Marker relativ mit. Bühnen-Marker werden aus den Bühnen abgeleitet (`src/map.ts`, Migration `0009`). Ohne Plan zeigt die App ein neutrales Raster, nur das Demo-Festival hat das gezeichnete Demo-Gelände.
+
 ### Module
 
 Timetable, Plan, Karte und offizielle Meldungen sind immer dabei. Optional und pro Festival schaltbar (Konsole → **Module**): Crew & Freunde, Crew-Chat, Standort teilen, Step-Challenge (diese drei brauchen Crew), Community-Meldungen, Festival-Rückblick. Die Liste steht zentral in `src/modules.ts`. Ausgeschaltete Module verschwinden aus der App ohne Lücken **und** werden vom Worker mit 403 abgelehnt; der Crew-Snapshot liefert dann auch keine Chat-, Standort- oder Schrittdaten.

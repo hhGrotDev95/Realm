@@ -523,6 +523,57 @@ try {
     assert.equal((await api('GET', `${base}`, A, undefined, null)).data.length, 0)
   })
 
+  await test('map editor: stage markers derived, markers validated and saved, ground plan rescales', async () => {
+    const A = 'test-admin-token'
+    assert.equal((await api('POST', '/api/admin/festivals', A, { name: 'Kartenfest', startDate: '2027-06-04', days: 1 }, null)).status, 201)
+    await api('PUT', '/api/admin/festivals/kartenfest/stages', A, { stages: [{ name: 'Wiese' }, { name: 'Zelt' }] }, null)
+    let doc = (await api('GET', '/api/festivals/kartenfest', A, undefined, null)).data
+    // a new festival shows its stages on the map without any stored markers
+    assert.deepEqual(doc.festival.map, { width: 1000, height: 940, ground: 'plain' })
+    assert.deepEqual(doc.pois.map((p) => p.id), ['stage-wiese', 'stage-zelt'])
+    // the demo festival keeps its drawn grounds and has each stage marker once
+    const demo = (await api('GET', '/api/festivals/realm-open-air', null, undefined, null)).data
+    assert.equal(demo.festival.map.ground, 'demo')
+    assert.equal(demo.pois.filter((p) => p.id === 'stage-generator').length, 1)
+
+    const base = '/api/admin/festivals/kartenfest/map'
+    const wc = { id: 'wc-nord', name: 'WC Nord', cat: 'wc', x: 100, y: 900, detail: 'barrierefrei', status: 'open', important: true }
+    const bad = async (b) => assert.equal((await api('PUT', `${base}/markers`, A, b, null)).status, 400)
+    await bad({ stages: [{ id: 'wiese', x: 1200, y: 10 }], pois: [] }) // outside the plan
+    await bad({ stages: [{ id: 'gibtsnicht', x: 1, y: 1 }], pois: [] }) // unknown stage
+    await bad({ stages: [], pois: [{ ...wc, cat: 'stage' }] }) // stages are not free markers
+    await bad({ stages: [], pois: [wc, wc] }) // duplicate id
+    await bad({ stages: [], pois: [{ ...wc, y: 941 }] })
+    assert.equal((await api('PUT', `${base}/markers`, null, { stages: [], pois: [] }, null)).status, 401)
+    const saved = await api('PUT', `${base}/markers`, A, { stages: [{ id: 'wiese', x: 500, y: 470 }], pois: [wc] }, null)
+    assert.equal(saved.status, 200)
+    doc = (await api('GET', '/api/festivals/kartenfest', A, undefined, null)).data
+    assert.deepEqual(doc.pois.find((p) => p.id === 'stage-wiese'), { id: 'stage-wiese', cat: 'stage', name: 'Wiese', x: 500, y: 470, detail: '', important: true })
+    assert.deepEqual(doc.pois.find((p) => p.id === 'wc-nord'), wc)
+
+    // a landscape ground plan (2000 × 1000 px) halves the frame height; markers move along
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+    assert.equal((await api('PUT', `${base}/image`, A, { image: 'https://example.com/plan.png', width: 2, height: 1 }, null)).status, 400)
+    assert.equal((await api('PUT', `${base}/image`, A, { image: 'data:image/png;base64,' + 'A'.repeat(1_300_000), width: 2, height: 1 }, null)).status, 400)
+    const img = await api('PUT', `${base}/image`, A, { image: png, width: 2000, height: 1000 }, null)
+    assert.equal(img.status, 200)
+    assert.equal(img.data.height, 500)
+    doc = (await api('GET', '/api/festivals/kartenfest', A, undefined, null)).data
+    assert.equal(doc.festival.map.ground, 'image')
+    assert.equal(doc.festival.map.image, png)
+    assert.equal(doc.pois.find((p) => p.id === 'stage-wiese').y, 250)
+    assert.equal(doc.pois.find((p) => p.id === 'wc-nord').y, 479)
+    // removing the plan keeps the frame and the positions
+    assert.equal((await api('PUT', `${base}/image`, A, { image: null }, null)).status, 200)
+    doc = (await api('GET', '/api/festivals/kartenfest', A, undefined, null)).data
+    assert.deepEqual(doc.festival.map, { width: 1000, height: 500, ground: 'plain' })
+    assert.equal(doc.pois.find((p) => p.id === 'wc-nord').y, 479)
+    // stages added later land inside the (now shorter) plan
+    await api('PUT', '/api/admin/festivals/kartenfest/stages', A, { stages: [{ name: 'Wiese' }, { name: 'Zelt' }, ...['A', 'B', 'C', 'D', 'E', 'F'].map((n) => ({ name: 'Bühne ' + n }))] }, null)
+    doc = (await api('GET', '/api/festivals/kartenfest', A, undefined, null)).data
+    assert.ok(doc.stages.every((s) => s.y <= 500 && s.x <= 1000), JSON.stringify(doc.stages))
+  })
+
   await test('CORS preflight is answered', async () => {
     const r = await fetch(BASE + '/api/me', { method: 'OPTIONS', headers: { Origin: 'https://realm.app', 'Access-Control-Request-Method': 'GET' } })
     assert.equal(r.headers.get('access-control-allow-origin'), 'https://realm.app')

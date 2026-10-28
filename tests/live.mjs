@@ -1,6 +1,7 @@
 // Two-user end-to-end test against the real worker (wrangler dev, local D1) and the Vite dev server.
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { chromium } from 'playwright'
 
 const API = 'http://127.0.0.1:8798'
@@ -45,6 +46,16 @@ const user = async () => {
 const step = async (name, fn) => {
   await fn()
   console.log('✓', name)
+}
+/** axe-core audit of the current page; throws on serious or critical findings. */
+const axe = async (p, label) => {
+  await p.addScriptTag({ path: createRequire(import.meta.url).resolve('axe-core/axe.min.js') })
+  const bad = await p.evaluate(async () => {
+    // @ts-ignore
+    const r = await window.axe.run(document, { resultTypes: ['violations'], runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'] } })
+    return r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join(' | ')}`)
+  })
+  if (bad.length) throw new Error(`${label}: ${bad.join('; ')}`)
 }
 const nav = (p, t) => p.locator('nav').getByText(t).click()
 const name = async (p, n) => {
@@ -399,6 +410,72 @@ try {
     await visitor.getByRole('button', { name: 'Fragen' }).click()
     await visitor.getByText('Quelle: Service-Infos').waitFor()
     await visitor.context().setOffline(false)
+  })
+
+  await step('map editor: place markers, upload a ground plan, visitors see both', async () => {
+    const org = await user()
+    await org.setViewportSize({ width: 1200, height: 900 })
+    await org.goto(`${WEB}/#admin`)
+    await org.getByLabel('Admin-Token').fill('e2e-admin')
+    await org.getByRole('button', { name: 'Anmelden' }).click()
+    await org.getByLabel('Festival').selectOption('testwiese-festival')
+    await org.getByRole('tab', { name: 'Karte' }).click()
+    // stages created by wizard and import are already on the plan
+    const wiese = org.getByRole('button', { name: /^Wiese, / })
+    await wiese.waitFor()
+    await org.getByRole('button', { name: /^Zelt, / }).waitFor()
+    // drag a stage, nudge it with the keyboard
+    const plan = await org.getByTestId('plan').boundingBox()
+    const box = await wiese.boundingBox()
+    await org.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await org.mouse.down()
+    await org.mouse.move(plan.x + plan.width * 0.3, plan.y + plan.height * 0.5, { steps: 6 })
+    await org.mouse.up()
+    await wiese.press('ArrowRight')
+    // add a toilet by tapping the plan
+    await org.getByRole('group', { name: 'Ort hinzufügen' }).getByRole('button', { name: 'WC' }).click()
+    const planNow = await org.getByTestId('plan').boundingBox() // clicking the chip may have scrolled
+    await org.mouse.click(planNow.x + planNow.width * 0.8, planNow.y + planNow.height * 0.25)
+    await org.getByLabel('Name', { exact: true }).fill('WC Wiese')
+    await org.getByLabel('Beschreibung').fill('barrierefrei')
+    await org.getByLabel('Status').selectOption('open')
+    await axe(org, 'Karteneditor')
+    await org.getByRole('button', { name: 'Karte speichern' }).click()
+    await org.getByText('Karte gespeichert').waitFor()
+    let doc = await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()
+    const st = doc.pois.find((p) => p.id === 'stage-wiese')
+    const wc = doc.pois.find((p) => p.name === 'WC Wiese')
+    if (Math.abs(st.x - 305) > 15 || Math.abs(st.y - 470) > 15) throw new Error('stage not moved: ' + JSON.stringify(st))
+    if (!wc || wc.cat !== 'wc' || Math.abs(wc.x - 800) > 15 || Math.abs(wc.y - 235) > 15 || wc.status !== 'open') throw new Error('wc not saved: ' + JSON.stringify(wc))
+    // a 2:1 ground plan halves the frame; markers keep their relative place
+    const planPng = await org.evaluate(() => {
+      const c = document.createElement('canvas')
+      c.width = 1600
+      c.height = 800
+      const g = c.getContext('2d')
+      g.fillStyle = '#2d5a27'
+      g.fillRect(0, 0, 1600, 800)
+      g.fillStyle = '#3a6ea5'
+      g.fillRect(1100, 400, 400, 300)
+      return c.toDataURL('image/png').split(',')[1]
+    })
+    await org.getByLabel('Geländeplan wählen').setInputFiles({ name: 'plan.png', mimeType: 'image/png', buffer: Buffer.from(planPng, 'base64') })
+    await org.getByText('Geländeplan gespeichert').waitFor()
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/map-editor.png`, fullPage: true })
+    doc = await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()
+    if (doc.festival.map.height !== 500 || !doc.festival.map.image?.startsWith('data:image/jpeg')) throw new Error('plan not stored: ' + JSON.stringify({ ...doc.festival.map, image: doc.festival.map.image?.slice(0, 30) }))
+    if (Math.abs(doc.pois.find((p) => p.name === 'WC Wiese').y - 125) > 10) throw new Error('marker not rescaled')
+
+    const visitor = await user()
+    await visitor.goto(`${WEB}/?f=testwiese-festival`)
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await nav(visitor, 'Map')
+    await visitor.locator('.map-wrap img[src^="data:image/jpeg"]').waitFor()
+    await visitor.getByRole('button', { name: 'Wiese', exact: true }).waitFor()
+    await visitor.getByRole('button', { name: 'WC', exact: true }).click()
+    await visitor.getByRole('button', { name: 'WC Wiese' }).click()
+    await visitor.locator('.sheet').getByText('barrierefrei').waitFor()
+    if (process.env.SHOTS) await visitor.screenshot({ path: `${process.env.SHOTS}/map-visitor.png` })
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

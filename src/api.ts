@@ -1,4 +1,5 @@
 // Thin client for the Realm API (worker/). Without VITE_API_URL the app runs in demo mode.
+import type { MapFrame, MarkerCat } from './map'
 import type { FestivalBundle, TimetableChange } from './data'
 
 export const API_URL: string | undefined = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || undefined
@@ -233,6 +234,8 @@ export const adminApi = (adminToken: string) => {
     saveFaq: (slug: string, f: Omit<AdminFaq, 'updatedAt' | 'source'> & { source?: string }) => req<AdminFaq>('PUT', `/api/admin/festivals/${slug}/faq/${f.id}`, f),
     deleteFaq: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/faq/${id}`),
     setModules: (slug: string, modules: Record<string, boolean>) => req<Record<string, boolean>>('PUT', `/api/admin/festivals/${slug}/modules`, modules),
+    setMapImage: (slug: string, plan: { image: string; width: number; height: number } | { image: null }) => req<MapFrame>('PUT', `/api/admin/festivals/${slug}/map/image`, plan),
+    setMapMarkers: (slug: string, m: { stages: { id: string; x: number; y: number }[]; pois: { id: string; cat: MarkerCat; name: string; x: number; y: number; detail: string; status?: string; important: boolean }[] }) => req<unknown>('PUT', `/api/admin/festivals/${slug}/map/markers`, m),
     setTheme: (slug: string, theme: { brand?: string; font?: string; logo?: string }) => req<Record<string, string>>('PUT', `/api/admin/festivals/${slug}/theme`, theme),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
     restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),

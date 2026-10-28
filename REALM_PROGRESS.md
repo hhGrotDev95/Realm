@@ -1,6 +1,6 @@
 # Realm – Fortschritt
 
-Stand: 19.10.2026
+Stand: 28.10.2026
 
 - Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
 - Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`, gemergt als PR #5
@@ -277,3 +277,35 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - `LazyBoundary`: ein fehlgeschlagener Chunk-Load zeigt „Erneut versuchen“ statt die App abstürzen zu lassen.
 - Smoke-Test prüft Offline jetzt ehrlich (Server wird beendet, da `setOffline` Service-Worker-Fetches nicht abdeckt).
 - Geprüft: typecheck, test:import, build, test:e2e, test:a11y, test:live – alles grün.
+
+## P6 · Karteneditor — erledigt (Branch `ccr-c4b0523e-3z5mzs`, 28.10.2026)
+
+- `src/map.ts` (geteilt von App, Konsole, Worker): Rahmen 1000 Einheiten breit, Höhe aus Seitenverhältnis des Plans (300–3000), Arten `demo` / `plain` / `image`, Marker-Kategorien, Standard-Bühnenposition.
+- Migration `0009_map.sql`: Spalte `festivals.map`; Demo-Festival behält das gezeichnete Gelände; gespeicherte Bühnen-Marker entfernt – sie werden jetzt im Festivaldokument aus den Bühnen abgeleitet.
+- **Behobener Fehler**: Im Assistenten oder per Import angelegte Festivals hatten keine Bühnen auf der Karte (Bühnen-Marker kamen nur aus den Seed-Daten); „Route zur Bühne“ lief ins Leere.
+- Worker: `PUT /api/admin/festivals/:slug/map/image` (Data-URL PNG/JPEG/WebP/SVG ≤ 1,2 Mio. Zeichen, keine externen URLs; neues Seitenverhältnis skaliert alle y-Koordinaten mit; `null` entfernt den Plan) und `PUT …/map/markers` (Bühnen verschieben, Orte als Ganzes ersetzen; Bereichs-, Kategorie-, ID- und Dublettenprüfung). Neue Bühnen landen innerhalb des Plans.
+- Konsole: Tab „Karte“ – Plan hochladen/ersetzen/entfernen (Raster auf ≤ 2000 px, JPEG bis zur Grenze), Marker ziehen oder per Pfeiltasten verschieben, Orte per Kategorie-Chip und Tipp setzen, Name/Beschreibung/Status/„immer zeigen“ bearbeiten, entfernen; Warnung beim Verlassen mit ungespeicherten Änderungen; ungespeicherte Verschiebungen werden vor einem Plan-Upload gesichert.
+- App: Karte nutzt Rahmen und Plan des Festivals; ohne Plan neutrales Raster statt Demo-Gelände; Satellit-Ebene nur beim Demo-Gelände; eigene simulierte Position relativ zum Rahmen.
+
+## Fehlerbehebung: Absturz beim Senden im Crew-Chat
+
+- `useEffect(() => end.current?.scrollIntoView(...))` gab den Rückgabewert als Cleanup zurück. Aktuelle Chromium-Versionen liefern dort ein Promise → React ruft es beim Unmount auf → **die ganze App wird schwarz** (`destroy_ is not a function`). Gefunden, weil der Smoke-Test „crew chat sends a message“ auch auf `main` fehlschlug. Behoben in `src/sheets.tsx` (Klammern). Keine weiteren Effekte mit implizitem Rückgabewert im Code.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler (Haupt-Chunk 299 kB) |
+| `npm run test:import` | 8 Parser, 9 Kontrast, 7 Module, 19 FAQ-Bot bestanden |
+| `cd worker && npm test` | 28 API-Tests (neu: Karteneditor) + Migrationstest (9 Migrationen, prüft 0009) |
+| `npm run test:e2e` | 11 Abläufe bestanden (vor dem Fix: Chat-Ablauf rot, auch auf `main`) |
+| `npm run test:a11y` | 14 Ansichten ohne schwerwiegende Befunde |
+| `npm run test:live` | 19 Szenarien (neu: Karteneditor – Ziehen, Pfeiltaste, Ort setzen, axe-Prüfung des Editors, Plan-Upload mit Umskalierung, Besucher sieht Plan und Ort) |
+
+Hinweis für lokale Läufe in der Cloud-Umgebung: `CHROMIUM_PATH=/opt/pw-browsers/chromium-1243/chrome-linux64/chrome` setzen (die installierte Playwright-Version erwartet einen anderen Browser-Build).
+
+Bekannte Grenzen: Laufwege bleiben Luftlinie (`walkMinutes`); Wege lassen sich im Editor nicht zeichnen. Der Plan liegt im Festivaldokument (offline gecacht) – bei sehr großen Plänen wächst der localStorage-Bedarf um bis zu ~1,2 MB.
+
+## Nächste Schritte
+
+1. P7: Sprachen DE/EN (Texte zentralisieren, Umschalter im Profil, Festivaldaten bleiben einsprachig).
+2. Optional zu P6: Plan auf Mobilgeräten im Editor zoombar; Marker per Liste suchen.
+3. P8 Push bleibt blockiert (VAPID-Schlüssel + Deployment).

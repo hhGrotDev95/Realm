@@ -486,3 +486,12 @@ select.field { appearance: none; }
 .faq-answer { margin-top: 12px; padding: 14px; border-radius: var(--r-md); background: var(--bg-elev); box-shadow: inset 0 0 0 1px var(--line); }
 .faq-item { border-bottom: 1px solid var(--line); }
 .faq-item .list-item { border-bottom: 0; }
+
+/* Map editor (console) */
+.plan-edit { position: relative; width: 100%; border-radius: 14px; overflow: hidden; background: #14171c center / 100% 100% no-repeat; box-shadow: inset 0 0 0 1px var(--line); touch-action: none; user-select: none; }
+.plan-edit.plain { background-image: linear-gradient(#1b1f26 1px, transparent 1px), linear-gradient(90deg, #1b1f26 1px, transparent 1px); background-size: 5% 5%; background-repeat: repeat; }
+.plan-edit.adding { cursor: crosshair; }
+.plan-marker { position: absolute; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 4px; min-width: 28px; height: 28px; padding: 0 7px; justify-content: center; border-radius: 9px; background: #f4f3f8; color: #111; font-size: 12px; font-weight: 700; white-space: nowrap; box-shadow: 0 0 0 2px #0d0f12; cursor: grab; touch-action: none; }
+.plan-marker.stage { background: #111116; color: #fff; border-radius: 99px; }
+.plan-marker:active { cursor: grabbing; }
+.plan-marker.on { outline: 3px solid var(--brand); outline-offset: 2px; z-index: 2; }
