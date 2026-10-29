@@ -410,7 +410,7 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - Grenze: Ist die App zwischen dem Laden des neuen Programms und dem Abgleich geschlossen worden, fehlt beim nächsten Start der alte Stand – dann heißt es „Ein Act aus deinem Plan ist nicht mehr im Programm“ ohne Namen, und eine Verlegung wird nicht erkannt.
 - Nebenbei: Doc-Kommentar von `FestivalPicker` (durch #40 verrutscht) wieder an der richtigen Stelle.
 - Dateien: `src/planReconcile.ts` (neu, rein), `src/data.ts` (`EARLIER_LINEUPS`), `src/festival.ts` (`refetchFestival`), `src/store.tsx`, `src/screens/Home.tsx` (`PlanNotices`), `src/i18n/en-screens.ts`, `tests/planReconcile.test.mts` (10 Prüfungen, in `test:import`), `tests/live.mjs` (neuer Schritt), `docs/DEVICE_STORAGE.md`, `CLAUDE.md`.
-- Geprüft: PRUEFUNGEN
+- Geprüft (lokal, Chromium): typecheck, i18n-Wächter (566 Texte), test:import (alle, inkl. 10 neuer Plan-Abgleich-Prüfungen), build, test:e2e (alle Smoke-Schritte), test:a11y (keine Befunde), test:live vollständig grün inkl. neuem Schritt „organizer re-imports the line-up …“ (4,4 s). Worker-API-Tests nicht gelaufen (kein Worker-Code geändert). Eine Gegenprobe des neuen Live-Schritts am alten Stand wurde nicht ausgeführt. Firefox/WebKit nur über CI.
 
 ## Nächster Schritt
 1. CI-Logs der nächsten PRs auf die Schrittzeiten prüfen; hängt ein Schritt wiederholt, dort ansetzen (Welle 8b bleibt beobachtend offen).
