@@ -418,6 +418,9 @@ export interface FestivalBundle {
 }
 
 const replace = <T,>(arr: T[], items: T[]) => arr.splice(0, arr.length, ...items)
+/** Earlier copies of this festival's line-up in this page's life, oldest first (the built-in demo data excluded). */
+export const EARLIER_LINEUPS: Map<string, { artist: string; day: number; start: number }>[] = []
+let bundleLoaded = false
 const refill = <T,>(map: Record<string, T>, entries: [string, T][]) => {
   for (const k of Object.keys(map)) delete map[k]
   Object.assign(map, Object.fromEntries(entries))
@@ -428,6 +431,9 @@ const refill = <T,>(map: Record<string, T>, entries: [string, T][]) => {
  * lookup maps are updated in place so every module keeps working with the same references.
  */
 export function loadFestivalBundle(b: FestivalBundle) {
+  // remember the line-up this copy replaces, so a planned act that left it can still be named
+  if (bundleLoaded && FESTIVAL.slug === b.festival.slug) EARLIER_LINEUPS.push(new Map(ACTS.map((a) => [a.id, { artist: a.artist, day: a.day, start: ORIGINAL.get(a.id)?.start ?? a.start }])))
+  bundleLoaded = true
   Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {}, modules: b.festival.modules ?? {}, siteMap: b.festival.siteMap ?? null, timezone: b.festival.timezone ?? DEFAULT_TZ, legal: b.legal ?? { imprint: null, privacy: null, minAge: 16, platform: { imprint: null, privacy: null } } })
   replace(DAYS, b.days)
   replace(STAGES, b.stages)
