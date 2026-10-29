@@ -3,6 +3,7 @@ import { AnimatePresence, m as motion } from 'framer-motion'
 import { Trash2, Crown, UserMinus, Bell, BellRing, Check, ChevronRight, Copy, KeyRound, MessageCircle, Navigation, Plus, Send, ShieldCheck, Swords, TriangleAlert, Users, WifiOff, RotateCcw, CalendarPlus, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { switchFestival } from './festival'
+import { dropOtherBundles, usage, type StorageUsage } from './persist'
 const FaqSheet = lazy(() => import('./FaqSheet').then((m) => ({ default: m.FaqSheet })))
 const FestivalChat = lazy(() => import('./FestivalChat').then((m) => ({ default: m.FestivalChat })))
 import { api } from './api'
@@ -1035,6 +1036,7 @@ function Profile() {
           <WifiOff size={18} className="faint" />
           <span className="grow small">{t('Offline verfügbar: Timetable, Karte, {n} geplante Acts', { n: plan.length })}</span>
         </div>
+        {online && <DeviceStorage />}
         <div className="list-item small faint">
           {online ? (session ? t('ID {id}… · pseudonym · verbunden', { id: session.id.slice(0, 10) }) : t('Noch kein Profil auf dem Server – entsteht beim ersten sozialen Feature')) : t('ID {id}… · pseudonym · Demo-Modus', { id: guest.id.slice(0, 10) })}
         </div>
@@ -1072,6 +1074,63 @@ function Profile() {
 }
 
 /** Every festival is its own tenant: switching reloads the app with that festival's data. */
+const kb = (bytes: number) => num(Math.max(1, Math.round(bytes / 1024)))
+
+/** How much Realm keeps on this device, and a way to give back the offline copies of other festivals. */
+function DeviceStorage() {
+  const { toast } = useApp()
+  const read = (): StorageUsage | null => {
+    try {
+      return usage(localStorage, FESTIVAL.slug)
+    } catch {
+      return null // storage blocked: the profile already says nothing can be kept
+    }
+  }
+  const [info, setInfo] = useState(read)
+  const [confirm, setConfirm] = useState(false)
+  if (!info) return null
+  const othersBytes = info.others.reduce((n, o) => n + o.bytes, 0)
+  const drop = () => {
+    let n = 0
+    try {
+      n = dropOtherBundles(localStorage, FESTIVAL.slug)
+    } catch {}
+    setConfirm(false)
+    setInfo(read())
+    toast(t('{n} Offline-Kopien entfernt · deine Pläne bleiben', { n }))
+  }
+  return (
+    <div className="list-item" data-testid="device-storage" style={{ flexWrap: 'wrap', rowGap: 8 }}>
+      <span className="grow small">
+        {t('Auf diesem Gerät gespeichert: {kb} kB', { kb: kb(info.bytes) })}
+        {info.others.length > 0 && (
+          <span className="faint" style={{ display: 'block' }}>
+            {t('davon Offline-Kopien anderer Festivals: {n} · {kb} kB', { n: info.others.length, kb: kb(othersBytes) })}
+          </span>
+        )}
+      </span>
+      {info.others.length > 0 &&
+        (confirm ? (
+          <>
+            <span className="small" style={{ flexBasis: '100%' }}>
+              {t('Pläne und Profile bleiben erhalten. Die anderen Festivals brauchen danach beim nächsten Öffnen Netz.')}
+            </span>
+            <button type="button" className="btn danger sm" onClick={drop}>
+              {t('Entfernen')}
+            </button>
+            <button type="button" className="btn ghost sm" onClick={() => setConfirm(false)}>
+              {t('Abbrechen')}
+            </button>
+          </>
+        ) : (
+          <button type="button" className="btn secondary sm" onClick={() => setConfirm(true)}>
+            {t('Platz freigeben')}
+          </button>
+        ))}
+    </div>
+  )
+}
+
 function FestivalPicker() {
   const [list, setList] = useState<{ slug: string; name: string; location: string | null }[] | null>(null)
   useEffect(() => {

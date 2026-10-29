@@ -120,6 +120,25 @@ try {
     await lea.keyboard.press('Escape')
   })
 
+  await step('the profile shows device storage and frees other festivals\' offline copies without touching plans', async () => {
+    await lea.evaluate(() => {
+      localStorage.setItem('realm.bundle:old-fest', 'x'.repeat(40_000))
+      localStorage.setItem('realm.v2:old-fest', JSON.stringify({ plan: ['kept'] }))
+    })
+    await lea.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+    const box = lea.locator('.sheet [data-testid="device-storage"]')
+    await box.getByText(/davon Offline-Kopien anderer Festivals: 1 · 7\d kB/).waitFor()
+    await box.getByRole('button', { name: 'Platz freigeben' }).click()
+    await box.getByRole('button', { name: 'Entfernen' }).click()
+    await lea.getByText('1 Offline-Kopien entfernt · deine Pläne bleiben').waitFor()
+    if (await box.getByRole('button', { name: 'Platz freigeben' }).count()) throw new Error('button still offered after removal')
+    const left = await lea.evaluate(() => ({ other: localStorage.getItem('realm.bundle:old-fest'), own: !!localStorage.getItem('realm.bundle:realm-open-air'), plan: localStorage.getItem('realm.v2:old-fest'), state: !!localStorage.getItem('realm.v2:realm-open-air') }))
+    if (left.other !== null) throw new Error('other festival copy still stored')
+    if (!left.own || !left.state || !left.plan?.includes('kept')) throw new Error('freeing space removed more than copies: ' + JSON.stringify(left))
+    await lea.evaluate(() => localStorage.removeItem('realm.v2:old-fest'))
+    await lea.keyboard.press('Escape')
+  })
+
   await step('Lea plans her acts (every live festival starts with an empty plan)', async () => {
     await nav(lea, 'Line-up')
     for (const artist of ['Maduk', 'Arcturus']) await lea.locator('.act', { hasText: artist }).getByRole('button', { name: 'Zum Plan hinzufügen' }).click()

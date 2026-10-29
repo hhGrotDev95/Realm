@@ -6,7 +6,7 @@ import { ageSince } from './aging'
 import { pollDelay, POLL_ACTIVE_MS } from './sync'
 import { reminderPlan } from './reminders'
 import { DEFAULT_FESTIVAL } from './festival'
-import { restore, save } from './persist'
+import { otherBundleKeys, restore, save } from './persist'
 import { on, ACTS, fmt, POIS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, actTime, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
@@ -157,8 +157,6 @@ const storage = (): Storage | null => {
     return null
   }
 }
-/** offline copies of OTHER festivals – fetched again when the visitor switches back */
-const otherBundles = (ls: Storage) => Object.keys(ls).filter((k) => k.startsWith('realm.bundle:') && k !== `realm.bundle:${FESTIVAL.slug}`)
 /** the state without what the server sends again anyway: older chat (unsent messages stay) and community reports */
 const slimmed = (s: Persisted): Persisted => ({ ...s, chat: s.chat.filter((m, i) => m.pending || i >= s.chat.length - 50), remoteReports: [], reportsFetchedAt: 0 })
 
@@ -306,7 +304,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (value === written.current) return
     written.current = value
     const ls = storage()
-    const res = ls ? save(ls, storageKey(), value, { evictable: () => otherBundles(ls), slim: () => JSON.stringify(slimmed(s)) }) : 'failed'
+    const res = ls ? save(ls, storageKey(), value, { evictable: () => otherBundleKeys(ls, FESTIVAL.slug), slim: () => JSON.stringify(slimmed(s)) }) : 'failed'
     if (res !== 'failed') saveWarned.current = false
     else if (!saveWarned.current) {
       saveWarned.current = true
