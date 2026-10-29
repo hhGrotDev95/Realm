@@ -278,6 +278,49 @@ function PlanChanges({ i }: { i: number }) {
   )
 }
 
+const slot = (day: number | null, start: number | null) => (day !== null && DAYS[day] ? `${DAYS[day].short} ${start !== null ? fmt(start) : ''}`.trim() : null)
+
+/** Planned acts the organizer removed or moved to a new slot by re-importing the line-up; stays until dismissed. */
+function PlanNotices({ i }: { i: number }) {
+  const { planNotices, set, openSheet } = useApp()
+  if (!planNotices.length) return null
+  const n = planNotices[0]
+  const to = n.kind === 'moved' ? actById[n.to] : undefined
+  const was = n.kind === 'gone' ? slot(n.day, n.start) : null
+  const title =
+    n.kind === 'moved'
+      ? t('{artist}: jetzt {slot}', { artist: n.artist, slot: to ? `${DAYS[to.day]?.short ?? ''} ${fmt(to.start)}`.trim() : '–' })
+      : n.artist
+        ? t('{artist} ist nicht mehr im Programm', { artist: n.artist })
+        : t('Ein Act aus deinem Plan ist nicht mehr im Programm')
+  const detail = [
+    n.kind === 'moved' ? t('Vom Veranstalter verlegt · dein Plan ist mitgezogen') : was,
+    n.kind === 'gone' && t('Vom Veranstalter entfernt · aus deinem Plan genommen'),
+    planNotices.length > 1 && t('+{n} weitere', { n: planNotices.length - 1 }),
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  return (
+    <motion.div {...stagger(i)} className={`alert ${n.kind === 'gone' ? 'critical' : 'warning'}`} data-testid="plan-notices">
+      <CalendarClock className="a-ic" size={20} />
+      {to ? (
+        <button type="button" className="grow" style={{ textAlign: 'left' }} onClick={() => openSheet({ kind: 'act', id: to.id })}>
+          <strong>{title}</strong>
+          <span className="small muted">{detail}</span>
+        </button>
+      ) : (
+        <span className="grow">
+          <strong>{title}</strong>
+          <span className="small muted">{detail}</span>
+        </span>
+      )}
+      <button type="button" className="btn ghost sm" onClick={() => set('planNotices', planNotices.slice(1))}>
+        {t('Verstanden')}
+      </button>
+    </motion.div>
+  )
+}
+
 /** Entry to the public festival chat when the organizer switched it on. */
 function FestivalChatTile({ i }: { i: number }) {
   const { openSheet } = useApp()
@@ -304,6 +347,7 @@ function During() {
   const { urgent } = useRelevantUpdates()
   return (
     <>
+      <PlanNotices i={0} />
       <PlanChanges i={0} />
       <NowNextHero />
       {on('crew') && <MeetupModule i={2} />}
@@ -350,6 +394,7 @@ function Before() {
   return (
     <>
       <Countdown />
+      <PlanNotices i={1} />
       <PlanChanges i={1} />
       <motion.section {...stagger(1)}>
         <button className="tile" onClick={() => setTab('lineup')}>

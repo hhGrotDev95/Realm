@@ -5,9 +5,10 @@ import { lang, t } from './i18n'
 import { ageSince } from './aging'
 import { pollDelay, POLL_ACTIVE_MS } from './sync'
 import { reminderPlan } from './reminders'
-import { DEFAULT_FESTIVAL } from './festival'
+import { DEFAULT_FESTIVAL, refetchFestival } from './festival'
 import { otherBundleKeys, restore, save } from './persist'
-import { on, ACTS, fmt, POIS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, actTime, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
+import { reconcilePlan, rekey, type PlanNotice } from './planReconcile'
+import { on, ACTS, EARLIER_LINEUPS, fmt, POIS, actById, DAYS, FESTIVAL, applyTimetableChanges, CHAT, DEMO_CHANGES, type TimetableChange, FRIENDS, friendsFor as demoFriendsFor, ME, PHASE_CLOCK, realClock, actTime, DEMO_MS_TO_START, STAGES, UPDATES, type ChatMsg, type FestivalUpdate, type Friend, type Phase, type StageId } from './data'
 
 export interface Meetup {
   id: string
@@ -49,6 +50,8 @@ interface Persisted {
   stepsOptIn: boolean
   myPins: { id: string; name: string; x: number; y: number }[]
   dismissed: string[]
+  /** planned acts the organizer removed or moved to a new slot – shown on Home until dismissed */
+  planNotices: PlanNotice[]
   // backend (only used when VITE_API_URL is set)
   session: Pick<Session, 'id' | 'token'> | null
   /** `pending`: the join request still waits for the owner (audit F05) */
@@ -103,6 +106,7 @@ function initial(): Persisted {
     stepsOptIn: false,
     myPins: [{ id: 'pin1', name: 'Unser Banner', x: 680, y: 230 }],
     dismissed: [],
+    planNotices: [],
     session: null,
     crewRef: null,
     remote: null,
@@ -147,6 +151,7 @@ function fromStorage(raw: string, base: Persisted): Persisted {
   const state = restore(base, JSON.parse(raw))
   if (typeof state.guest.id !== 'string') state.guest = base.guest
   state.plan = state.plan.filter((id) => typeof id === 'string')
+  state.planNotices = state.planNotices.filter((n) => n && typeof n.id === 'string' && (n.kind === 'gone' || (n.kind === 'moved' && typeof n.to === 'string')))
   return state
 }
 
@@ -563,6 +568,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     t = window.setTimeout(send, 800)
     return () => window.clearTimeout(t)
   }, [s.plan, s.session?.id, netOnline])
+
+  // planned acts the line-up no longer has (the organizer removed them or re-imported the
+  // programme): checked against a copy fetched right now – an older cache, e.g. in a second tab,
+  // must never drop an act planned elsewhere. Moved acts follow, gone ones are named on Home.
+  const reconciling = useRef<{ key: string; at: number } | null>(null)
+  useEffect(() => {
+    if (!online || !netOnline || !ACTS.length) return
+    const unknown = s.plan.filter((id) => !actById[id])
+    if (!unknown.length) return
+    const key = unknown.join(',')
+    const last = reconciling.current
+    if (last && last.key === key && Date.now() - last.at < 5 * 60_000) return
+    reconciling.current = { key, at: Date.now() }
+    void refetchFestival().then((ok) => {
+      if (!ok) return
+      const known = Object.fromEntries(ACTS.map((a) => [a.id, a]))
+      setS((p) => {
+        const { plan, notices } = reconcilePlan(p.plan, known, EARLIER_LINEUPS)
+        if (!notices.length) return p
+        return {
+          ...p,
+          plan,
+          attended: rekey(p.attended, notices),
+          reminders: rekey(p.reminders, notices),
+          planNotices: [...p.planNotices.filter((n) => !notices.some((m) => m.id === n.id)), ...notices],
+        }
+      })
+    })
+  }, [s.plan, netOnline, tick])
 
   /**
    * Privacy decisions go through the outbox with priority: a newer decision replaces an older

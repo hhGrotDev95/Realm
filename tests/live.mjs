@@ -895,6 +895,46 @@ try {
     await enCtx.close()
   })
 
+  await step('organizer re-imports the line-up: a moved act follows the plan, a removed one is named on Home', async () => {
+    const AH = { 'Content-Type': 'application/json', Authorization: 'Bearer e2e-admin' }
+    const reimport = async (rows) => {
+      const res = await fetch(`${API}/api/admin/festivals/testwiese-festival/import`, { method: 'POST', headers: AH, body: JSON.stringify({ mode: 'replace', rows }) })
+      if (!res.ok) throw new Error('import failed ' + res.status + ' ' + (await res.text()))
+    }
+    const v = await user()
+    await v.goto(`${WEB}/?f=testwiese-festival`)
+    await v.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await nav(v, 'Line-up')
+    await v.getByRole('tab', { name: 'Alle', exact: true }).click()
+    for (const artist of ['Morgentau', 'Nachtfalter']) await v.locator('.act', { hasText: artist }).getByRole('button', { name: 'Zum Plan hinzufügen' }).click()
+    const local = () => v.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:testwiese-festival')))
+    // Morgentau moves to Saturday (new id), Nachtfalter is dropped
+    await reimport([{ row: 2, artist: 'Morgentau', stage: 'Wiese', day: 1, start: 1200, end: 1260 }])
+    await v.reload()
+    await v.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    const notice = v.getByTestId('plan-notices')
+    await notice.getByText('Morgentau: jetzt Sa 20:00').waitFor({ timeout: 15000 })
+    await notice.getByText(/\+1 weitere/).waitFor()
+    const plan = (await local()).plan
+    if (JSON.stringify(plan) !== '["1-morgentau"]') throw new Error('plan did not follow the re-import: ' + JSON.stringify(plan))
+    await notice.getByRole('button', { name: 'Verstanden' }).click()
+    await notice.getByText('Nachtfalter ist nicht mehr im Programm').waitFor()
+    await notice.getByText(/Fr 00:30/).waitFor()
+    await notice.getByRole('button', { name: 'Verstanden' }).click()
+    await notice.waitFor({ state: 'detached' })
+    // dismissed for good, the plan stays as it is
+    await v.reload()
+    await v.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await v.waitForTimeout(1500)
+    if (await notice.count()) throw new Error('dismissed plan notice came back after reload')
+    if (JSON.stringify((await local()).plan) !== '["1-morgentau"]') throw new Error('plan changed after reload')
+    await v.context().close()
+    await reimport([
+      { row: 2, artist: 'Morgentau', stage: 'Wiese', day: 0, start: 1200, end: 1260 },
+      { row: 3, artist: 'Nachtfalter', stage: 'Zelt', day: 0, start: 1470, end: 1560 },
+    ])
+  })
+
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {
     await ben.keyboard.press('Escape')
     await ben.getByRole('button', { name: 'Profil & Einstellungen' }).click()

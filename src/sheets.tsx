@@ -1073,7 +1073,6 @@ function Profile() {
   )
 }
 
-/** Every festival is its own tenant: switching reloads the app with that festival's data. */
 const kb = (bytes: number) => num(Math.max(1, Math.round(bytes / 1024)))
 
 /** How much Realm keeps on this device, and a way to give back the offline copies of other festivals. */
@@ -1131,6 +1130,7 @@ function DeviceStorage() {
   )
 }
 
+/** Every festival is its own tenant: switching reloads the app with that festival's data. */
 function FestivalPicker() {
   const [list, setList] = useState<{ slug: string; name: string; location: string | null }[] | null>(null)
   useEffect(() => {

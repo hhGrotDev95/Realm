@@ -43,6 +43,29 @@ const isBundle = (b: unknown): b is FestivalBundle => {
   return !!x && typeof x.festival?.slug === 'string' && Array.isArray(x.days) && x.days.length > 0 && Array.isArray(x.stages) && Array.isArray(x.acts) && Array.isArray(x.pois)
 }
 
+/** The published festival from the server, also kept as the offline copy. */
+async function fetchBundle(slug: string) {
+  const b = await api.festival(slug)
+  if (!isBundle(b)) throw new Error(t('Festivaldaten unvollständig'))
+  safe(() => localStorage.setItem(bundleKey(slug), JSON.stringify(b)), undefined)
+  return b
+}
+
+/**
+ * Fetches the published festival again and applies it. Resolves false offline, in an organizer
+ * preview or when the request fails – the data shown so far stays then.
+ */
+export async function refetchFestival(): Promise<boolean> {
+  if (!online || new URLSearchParams(location.search).get('preview')) return false
+  try {
+    loadFestivalBundle(await fetchBundle(FESTIVAL.slug))
+  } catch {
+    return false
+  }
+  window.dispatchEvent(new Event('realm:festival-updated'))
+  return true
+}
+
 export type BootResult = { ok: true; fresh: Promise<boolean> } | { ok: false; error: string }
 
 /**
@@ -67,12 +90,7 @@ export async function bootFestival(): Promise<BootResult> {
   }
   const stored = safe(() => JSON.parse(localStorage.getItem(bundleKey(slug)) ?? 'null') as unknown, null)
   const cached = isBundle(stored) && stored.festival.slug === slug ? stored : null
-  const fetchFresh = async () => {
-    const b = await api.festival(slug)
-    if (!isBundle(b)) throw new Error(t('Festivaldaten unvollständig'))
-    safe(() => localStorage.setItem(bundleKey(slug), JSON.stringify(b)), undefined)
-    return b
-  }
+  const fetchFresh = () => fetchBundle(slug)
   if (cached) {
     loadFestivalBundle(cached)
     const fresh = fetchFresh().then(
