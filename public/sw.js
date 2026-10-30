@@ -59,6 +59,9 @@ self.addEventListener('fetch', (e) => {
   if (url.origin !== self.location.origin) return // other origins: straight to the network (fonts ship with the app)
   if (isApi(url)) return // API on this origin: network only, never cached
   if (req.mode === 'navigate') {
+    // All app screens use root + query/hash. Other HTML documents (e.g. the build-status
+    // page) must never replace '/' or receive its offline fallback.
+    if (url.pathname !== '/') return
     e.respondWith(
       fetch(req)
         .then((res) => {

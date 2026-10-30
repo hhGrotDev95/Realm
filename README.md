@@ -2,6 +2,8 @@
 
 Mobile-first Web-App für ein Festival („Realm Open Air 2027“, Demo-Daten). Leitprinzip: **V1 zeigt alle Möglichkeiten – V2 zeigt nur, was gerade relevant ist.**
 
+Entwicklungsvorschau mit Testdaten: [App](https://realm-staging.heidlhannes95.workers.dev) · [ausgelieferter Stand](https://realm-staging.heidlhannes95.workers.dev/development). Einrichtung und Aktualisierung: [docs/STAGING.md](docs/STAGING.md).
+
 ```bash
 npm install
 npm run dev      # Demo-Modus ohne Backend: http://localhost:5173

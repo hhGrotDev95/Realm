@@ -115,6 +115,12 @@ const check = (ok: boolean, msg: string) => (assert.ok(ok, msg), checks++)
   await jsonPage.request('/festival', 'navigate')
   check((await shell()) === '<!doctype html>app', 'neither a 503 nor a JSON answer becomes the offline shell')
 
+  // the development status is a separate HTML document, never the visitor app's offline shell
+  const progress = worker((url) => url.includes('/development') ? html('development status') : site(url), w.store)
+  check((await progress.request('/development', 'navigate')) === null, 'the canonical development page bypasses the app worker')
+  check((await progress.request('/development.html', 'navigate')) === null, 'the development page bypasses the app worker')
+  check((await shell()) === '<!doctype html>app', 'visiting another HTML page cannot replace the offline app shell')
+
   // offline: the shell still opens
   const offline = worker(() => Promise.reject(new TypeError('offline')), w.store)
   const res = await offline.request('/?f=realm', 'navigate')
