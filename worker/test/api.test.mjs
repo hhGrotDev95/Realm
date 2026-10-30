@@ -522,6 +522,48 @@ try {
     assert.equal((await publish(slug)).data.status, 'published')
   })
 
+  await test('replace import dry run: how many synced plans lose or follow removed acts (groups below 3 withheld)', async () => {
+    const A = 'test-admin-token'
+    const slug = 'sommerwiese-open-air'
+    // the setup test left 0-morgentau, 0-nachtfalter, 0-ueberlapp, 1-neue-buehne, and "Fan" plans 0-nachtfalter
+    for (const nick of ['P1', 'P2', 'P3']) assert.equal((await api('PUT', '/api/me/plan', (await newGuest(nick)).token, { acts: ['0-morgentau', '0-nachtfalter'] }, slug)).status, 200)
+    assert.equal((await api('PUT', '/api/me/plan', (await newGuest('Solo')).token, { acts: ['0-ueberlapp'] }, slug)).status, 200)
+    const keep = { row: 9, artist: 'Neue Bühne', stage: 'Strand', day: 1, start: 1100, end: 1160 }
+    const dry = (rows, mode = 'replace') => api('POST', `/api/admin/festivals/${slug}/import`, A, { mode, dryRun: true, rows }, null).then((r) => r.data)
+
+    // Morgentau moves to Saturday (new id, the app carries the plan along), Nachtfalter and Überlapp are dropped
+    const moved = await dry([{ row: 2, artist: 'Morgentau', stage: 'Wiese', day: 1, start: 1200, end: 1260 }, keep])
+    assert.equal(moved.summary.removed, 3)
+    assert.deepEqual(moved.plans, {
+      minGroup: 3,
+      visitorsLosing: 5, // P1–P3, Fan, Solo
+      visitorsFollowing: 3,
+      acts: [
+        { id: '0-nachtfalter', artist: 'Nachtfalter', day: 0, start: 1470, plans: 4, movedTo: null },
+        { id: '0-morgentau', artist: 'Morgentau', day: 0, start: 1200, plans: 3, movedTo: '1-morgentau' },
+      ],
+    })
+    // only Solo's act goes: some, but fewer than 3 – the exact number is withheld
+    const few = await dry([
+      { row: 2, artist: 'Morgentau', stage: 'Wiese', day: 0, start: 1200, end: 1260 },
+      { row: 3, artist: 'Nachtfalter', stage: 'Zelt', day: 0, start: 1440, end: 1530, genre: 'Techno' },
+      keep,
+    ])
+    assert.deepEqual(few.plans, { minGroup: 3, visitorsLosing: null, visitorsFollowing: 0, acts: [] })
+    // an artist with a second, new set is not a move – that plan is lost
+    const twoSets = await dry([
+      { row: 2, artist: 'Morgentau', stage: 'Wiese', day: 1, start: 1200, end: 1260 },
+      { row: 3, artist: 'Morgentau', stage: 'Strand', day: 1, start: 1300, end: 1360 },
+      { row: 4, artist: 'Nachtfalter', stage: 'Zelt', day: 0, start: 1440, end: 1530, genre: 'Techno' },
+      { row: 5, artist: 'Überlapp', stage: 'Wiese', day: 0, start: 1230, end: 1290 },
+      keep,
+    ])
+    assert.deepEqual([twoSets.plans.visitorsLosing, twoSets.plans.visitorsFollowing, twoSets.plans.acts[0].movedTo], [3, 0, null])
+    // merge removes nothing, so there is nothing to report; the dry runs wrote nothing
+    assert.equal((await dry([keep], 'merge')).plans, null)
+    assert.equal((await api('GET', `/api/festivals/${slug}`, null, undefined, null)).data.acts.length, 4)
+  })
+
   await test('branding: validated colour (WCAG), font and logo; published in the festival document', async () => {
     const A = 'test-admin-token'
     const put = (body) => api('PUT', '/api/admin/festivals/nordlicht/theme', A, body, null)
