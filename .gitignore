@@ -3,3 +3,5 @@ dist
 worker/.wrangler
 .env*.local
 *.tsbuildinfo
+.dev.vars*
+worker/.dev.vars*

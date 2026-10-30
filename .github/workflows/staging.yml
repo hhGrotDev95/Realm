@@ -1,0 +1,86 @@
+name: Staging
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: realm-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Automatic deployment is opt-in until the scoped CI token is configured.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (vars.REALM_STAGING_DEPLOY_ENABLED == 'true' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    environment:
+      name: staging
+      url: https://realm-staging.heidlhannes95.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            worker/package-lock.json
+      - name: Require Cloudflare CI token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: test -n "$CLOUDFLARE_API_TOKEN" || { echo 'Set the CLOUDFLARE_API_TOKEN secret in the staging environment.'; exit 1; }
+      - run: npm ci
+      - run: npm ci
+        working-directory: worker
+      - run: npm run test:import
+      - run: npm run typecheck
+        working-directory: worker
+      - run: npm run build:staging
+      - name: Skip superseded automatic builds
+        id: current
+        env:
+          TRIGGER: ${{ github.event_name }}
+        run: |
+          if [ "$TRIGGER" = workflow_run ]; then
+            current_main=$(git ls-remote --exit-code origin refs/heads/main | cut -f1)
+            if [ "$(git rev-parse HEAD)" != "$current_main" ]; then
+              echo 'A newer main commit exists; keeping the current preview.'
+              echo 'deploy=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo 'deploy=true' >> "$GITHUB_OUTPUT"
+      - name: Apply staging migrations
+        if: steps.current.outputs.deploy == 'true'
+        run: npm run migrate:staging
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Deploy staging
+        if: steps.current.outputs.deploy == 'true'
+        run: npm run deploy:staging
+        working-directory: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Verify deployment and source commit
+        if: steps.current.outputs.deploy == 'true'
+        run: npm run check:staging -- https://realm-staging.heidlhannes95.workers.dev "$(git rev-parse HEAD)"
+      - name: Preview links
+        if: steps.current.outputs.deploy == 'true'
+        run: |
+          echo 'App: https://realm-staging.heidlhannes95.workers.dev' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Build status: https://realm-staging.heidlhannes95.workers.dev/development' >> "$GITHUB_STEP_SUMMARY"

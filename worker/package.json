@@ -7,6 +7,10 @@
     "migrate:local": "wrangler d1 migrations apply realm --local",
     "migrate:remote": "wrangler d1 migrations apply realm --remote",
     "deploy": "wrangler deploy",
+    "dev:staging": "wrangler dev --env staging --local --port 8790",
+    "migrate:staging:local": "wrangler d1 migrations apply realm-staging --env staging --local",
+    "migrate:staging": "wrangler d1 migrations apply realm-staging --env staging --remote",
+    "deploy:staging": "wrangler deploy --env staging --upload-source-maps=false",
     "typecheck": "tsc -p .",
     "test": "node test/api.test.mjs && node test/migration.test.mjs",
     "announce": "node scripts/announce.mjs"
