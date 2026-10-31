@@ -37,6 +37,19 @@ const watch = (pg, tag) => {
 const external = []
 const failed = []
 watch(page, 'main')
+/** waits (real time, not a page clock) until an element has kept the same box for three reads in a row */
+const settled = async (locator, timeout = 5000) => {
+  let last = ''
+  let same = 0
+  for (const end = Date.now() + timeout; Date.now() < end; ) {
+    const box = JSON.stringify(await locator.boundingBox())
+    same = box === last && box !== 'null' ? same + 1 : 0
+    if (same >= 2) return
+    last = box
+    await new Promise((r) => setTimeout(r, 80))
+  }
+  throw new Error('element never came to rest: ' + last)
+}
 const step = async (name, fn) => {
   currentStep = name
   await fn()
@@ -242,6 +255,10 @@ try {
       const button = p.locator('.sheet').getByRole('button', { name: 'Erinnerung' })
       // Assert the initial state as well, so an unintended reset cannot look like a successful toggle.
       await p.locator('.sheet').getByRole('button', { name: 'Erinnerung', pressed: !pressed }).waitFor()
+      // The sheet springs in (y) and its content slides in (x). Under the fake clock Playwright's
+      // own stability check let Firefox press the bell mid-animation and release over the gap next to it
+      // (CI: pointerdown on the bell, pointerup on .sheet-actions). Wait in real time until it rests.
+      await settled(button)
       await button.click()
       try {
         await p.locator('.sheet').getByRole('button', { name: 'Erinnerung', pressed }).waitFor()
@@ -280,6 +297,8 @@ try {
       await p.goto(url)
       await p.locator('nav').getByText('Line-up').click()
       await p.getByText('Alle', { exact: true }).click()
+      // count only once the full list is there (CI and local runs counted 0 open acts before it rendered)
+      await p.getByRole('button', { name: 'Zum Plan hinzufügen' }).nth(1).waitFor()
     }
     const planned = () => a.evaluate(() => JSON.parse(localStorage.getItem('realm.v2')).plan)
     const before = (await planned()).length
@@ -290,8 +309,10 @@ try {
     await a.waitForTimeout(300)
     const after = await planned()
     if (after.length !== before + 2) throw new Error(`the other tab overwrote a plan change: ${before} → ${after.length}`)
-    // tab A shows tab B's addition without a reload
-    if ((await open()) !== openBefore - 2) throw new Error('tab A does not show the plan change made in tab B')
+    // tab A shows tab B's addition without a reload – it renders in the background, so allow it a moment
+    let shownOpen = await open()
+    for (const end = Date.now() + 5000; shownOpen !== openBefore - 2 && Date.now() < end; shownOpen = await open()) await a.waitForTimeout(100)
+    if (shownOpen !== openBefore - 2) throw new Error(`tab A does not show the plan change made in tab B: ${openBefore} → ${shownOpen} open`)
     // an older or damaged copy: one field of the wrong type must not crash the app or drop the plan
     await a.evaluate(() => {
       const s = JSON.parse(localStorage.getItem('realm.v2'))
