@@ -261,12 +261,21 @@ export interface Analytics {
   faq: { hits: { id: string; question: string; n: number }[]; misses: { question: string; n: number; last: number }[] }
 }
 
+export interface PlanImpact {
+  minGroup: number
+  visitorsLosing: number | null
+  visitorsFollowing: number | null
+  acts: { id: string; artist: string; day: number; start: number; plans: number; movedTo: string | null }[]
+}
+
 export interface ImportResult {
   dryRun: boolean
   mode: 'merge' | 'replace'
   written: boolean
   snapshotId?: string | null
   summary: { rows: number; created: number; updated: number; unchanged: number; removed: number; stagesCreated: number }
+  /** replace with removed acts only: synced plans affected; a count of null means 1 to minGroup − 1 */
+  plans?: PlanImpact | null
   errors: { row: number; message: string }[]
   warnings: { row: number; message: string }[]
 }

@@ -1717,7 +1717,8 @@ app.post('/api/admin/festivals/:slug/import', async (c) => {
   }
   errors.sort((x, y) => x.row - y.row)
   warnings.sort((x, y) => x.row - y.row)
-  if (dryRun || errors.length) return c.json({ dryRun: true, mode, summary, errors, warnings, written: false }, errors.length && !dryRun ? 422 : 200)
+  const plans = mode === 'replace' && summary.removed ? await planImpact(db, f.id, before, acts) : null
+  if (dryRun || errors.length) return c.json({ dryRun: true, mode, summary, plans, errors, warnings, written: false }, errors.length && !dryRun ? 422 : 200)
 
   let snapshotId: string | null = null
   const writes: D1PreparedStatement[] = []
@@ -1746,8 +1747,47 @@ app.post('/api/admin/festivals/:slug/import', async (c) => {
     )
   writes.push(touch(db, f.id))
   await db.batch(writes)
-  return c.json({ dryRun: false, mode, summary, errors, warnings, written: true, snapshotId })
+  return c.json({ dryRun: false, mode, summary, plans, errors, warnings, written: true, snapshotId })
 })
+
+/**
+ * What a replace import does to visitors' synced plans, so the organizer sees it before confirming.
+ * A removed act counts as moved when exactly one act of the same artist is new in the import – the
+ * same rule the app uses to carry the plan along (src/planReconcile.ts); every other removed act
+ * drops out of the plans that hold it. Only counts, never people; a count below MIN_GROUP is null.
+ */
+async function planImpact(db: D1Database, festivalId: string, before: Map<string, { artist: string; day: number; start_min: number }>, acts: { id: string; artist: string }[]) {
+  const kept = new Set(acts.map((a) => a.id))
+  const removed = [...before.keys()].filter((id) => !kept.has(id))
+  const norm = (s: string) => s.trim().toLowerCase()
+  const movedTo = new Map<string, string>()
+  for (const id of removed) {
+    const candidates = acts.filter((a) => !before.has(a.id) && norm(a.artist) === norm(before.get(id)!.artist))
+    if (candidates.length === 1) movedTo.set(id, candidates[0].id)
+  }
+  const dropped = removed.filter((id) => !movedTo.has(id))
+  const [perAct, lost, follow] = await db.batch([
+    db.prepare('SELECT act_id AS id, COUNT(*) AS n FROM plans WHERE festival_id = ? AND act_id IN (SELECT value FROM json_each(?)) GROUP BY act_id').bind(festivalId, JSON.stringify(removed)),
+    db.prepare('SELECT COUNT(DISTINCT guest_id) AS n FROM plans WHERE festival_id = ? AND act_id IN (SELECT value FROM json_each(?))').bind(festivalId, JSON.stringify(dropped)),
+    db.prepare('SELECT COUNT(DISTINCT guest_id) AS n FROM plans WHERE festival_id = ? AND act_id IN (SELECT value FROM json_each(?))').bind(festivalId, JSON.stringify([...movedTo.keys()])),
+  ])
+  const n = (r: D1Result) => (r.results[0] as { n: number } | undefined)?.n ?? 0
+  // 0 = nobody, null = some but fewer than MIN_GROUP
+  const group = (x: number) => (x === 0 ? 0 : x >= MIN_GROUP ? x : null)
+  return {
+    minGroup: MIN_GROUP,
+    visitorsLosing: group(n(lost)),
+    visitorsFollowing: group(n(follow)),
+    acts: (perAct.results as { id: string; n: number }[])
+      .filter((r) => r.n >= MIN_GROUP)
+      .map((r) => {
+        const a = before.get(r.id)!
+        return { id: r.id, artist: a.artist, day: a.day, start: a.start_min, plans: r.n, movedTo: movedTo.get(r.id) ?? null }
+      })
+      .sort((x, y) => y.plans - x.plans || x.artist.localeCompare(y.artist))
+      .slice(0, 10),
+  }
+}
 
 app.get('/api/admin/festivals/:slug/snapshots', async (c) => {
   const f = await festivalBySlug(c)

@@ -39,6 +39,7 @@ Nach dem Laden prüft die Konsole die Datei und der Server macht einen **Probela
 
 - **Zusammenführen** (Standard): neue Acts kommen dazu, vorhandene werden aktualisiert, nichts wird gelöscht.
 - **Ersetzen**: Acts, die nicht in der Datei stehen, werden entfernt. Vorher speichert der Server automatisch einen **Snapshot**; unter „Snapshots vor ‚Ersetzen‘“ lässt sich jeder Stand wiederherstellen.
+  Vor dem Bestätigen zeigt die Prüfung, wie viele Besucher:innen entfallende Acts in ihrem (mit dem Server abgeglichenen) Plan haben und wie viele einer Verlegung automatisch folgen (gleicher Act, genau ein neuer Termin). Gruppen unter 3 werden nur als „weniger als 3“ angegeben, einzelne Acts erst ab 3 Plänen aufgelistet.
 
 ## Stabile IDs – Favoriten bleiben erhalten
 

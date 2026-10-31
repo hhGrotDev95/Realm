@@ -1,6 +1,6 @@
-import { Archive, Check, Eye, FileUp, Plus, RotateCcw, Rocket, Trash2, Upload } from 'lucide-react'
+import { Archive, Check, Eye, FileUp, Plus, RotateCcw, Rocket, Trash2, Upload, Users } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { adminApi, type Readiness, ApiError, type ImportResult } from '../api'
+import { adminApi, type Readiness, ApiError, type ImportResult, type PlanImpact } from '../api'
 import { ACTS, DAYS, FESTIVAL, STAGES, fmt } from '../data'
 import { parseCsv, parseFile, parseTable, type ParseResult } from '../import/parse'
 
@@ -206,6 +206,42 @@ export function StagesEditor({ token, flash, slug, reload, onDone }: { token: st
 
 const MODE_LABEL = { merge: 'Zusammenführen', replace: 'Ersetzen' }
 
+/** A count from the server; null stands for a small group whose exact size is withheld. */
+const people = (n: number | null, min: number) => (n === null ? `Weniger als ${min}` : String(n))
+
+/** One line for the confirmation dialog: whose plans a replace import changes. */
+function impactLine(p: PlanImpact) {
+  const parts = [p.visitorsLosing !== 0 && `${people(p.visitorsLosing, p.minGroup)} Besucher:innen verlieren geplante Acts`, p.visitorsFollowing !== 0 && `${people(p.visitorsFollowing, p.minGroup)} folgen einer Verlegung`].filter(Boolean)
+  return parts.length ? `${parts.join(', ')}.` : 'Kein entfallender Act ist in einem Plan.'
+}
+
+/** Before a replace import: which visitors' plans lose acts and which follow a move (audit-safe counts only). */
+function PlanImpactNote({ p }: { p: PlanImpact }) {
+  const none = p.visitorsLosing === 0 && p.visitorsFollowing === 0
+  return (
+    <div className={`alert ${p.visitorsLosing === 0 ? 'info' : 'warning'}`} style={{ margin: '10px 0' }} role="status" data-testid="plan-impact">
+      <Users size={18} className="a-ic" />
+      <span className="grow small">
+        <strong>{none ? 'Kein entfallender Act steht in einem Plan' : 'Pläne von Besucher:innen sind betroffen'}</strong>
+        {p.visitorsLosing !== 0 && <span style={{ display: 'block' }}>{people(p.visitorsLosing, p.minGroup)} Besucher:innen verlieren mindestens einen geplanten Act. Die App nennt ihnen den entfallenen Act auf der Startseite.</span>}
+        {p.visitorsFollowing !== 0 && <span style={{ display: 'block' }}>{people(p.visitorsFollowing, p.minGroup)} Besucher:innen haben einen verlegten Act geplant – ihr Plan zieht automatisch mit.</span>}
+        {p.acts.length > 0 && (
+          <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+            {p.acts.map((a) => (
+              <li key={a.id}>
+                {a.artist} · {DAYS[a.day]?.short} {fmt(a.start)} – {a.plans} Pläne · {a.movedTo ? 'verlegt' : 'entfällt'}
+              </li>
+            ))}
+          </ul>
+        )}
+        <span className="tiny faint" style={{ display: 'block', marginTop: 4 }}>
+          Gezählt werden mit dem Server abgeglichene Pläne. Gruppen unter {p.minGroup} werden nicht beziffert.
+        </span>
+      </span>
+    </div>
+  )
+}
+
 export function ImportPanel({ token, flash, slug, reload }: { token: string; flash: Flash; slug: string; reload: () => Promise<void> }) {
   const admin = useMemo(() => adminApi(token), [token])
   const [parsed, setParsed] = useState<(ParseResult & { source: string }) | null>(null)
@@ -313,6 +349,7 @@ export function ImportPanel({ token, flash, slug, reload }: { token: string; fla
               ))}
             </div>
           )}
+          {mode === 'replace' && check?.plans && <PlanImpactNote p={check.plans} />}
           {issues.length > 0 && (
             <ul className="import-issues">
               {issues.map((i, k) => (
@@ -354,7 +391,7 @@ export function ImportPanel({ token, flash, slug, reload }: { token: string; fla
             style={{ marginTop: 12 }}
             disabled={busy || blocking || !parsed.rows.length || !check}
             onClick={async () => {
-              if (mode === 'replace' && check && check.summary.removed > 0 && !confirm(`${check.summary.removed} Acts werden entfernt. Ein Snapshot wird vorher gespeichert. Fortfahren?`)) return
+              if (mode === 'replace' && check && check.summary.removed > 0 && !confirm(`${check.summary.removed} Acts werden entfernt.${check.plans ? ` ${impactLine(check.plans)}` : ''} Ein Snapshot wird vorher gespeichert. Fortfahren?`)) return
               setBusy(true)
               try {
                 const res = await admin.importTimetable(slug, { mode, dryRun: false, rows: parsed.rows })
