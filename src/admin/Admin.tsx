@@ -259,7 +259,7 @@ function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string
           {on('reports') && <CommunityReports token={token} flash={flash} slug={slug} />}
         </div>
       )}
-      {tab === 'timetable' && <Timetable token={token} flash={flash} />}
+      {tab === 'timetable' && <Timetable token={token} flash={flash} slug={slug} />}
       {tab === 'import' && (
         <div className="card">
           <ImportPanel token={token} flash={flash} slug={slug} reload={reload} />
@@ -415,15 +415,28 @@ function Announcements({ token, flash }: { token: string; flash: (k: 'ok' | 'err
   )
 }
 
-function Timetable({ token, flash }: { token: string; flash: (k: 'ok' | 'err', t: string) => void }) {
+function Timetable({ token, flash, slug }: { token: string; flash: (k: 'ok' | 'err', t: string) => void; slug: string }) {
   const admin = useMemo(() => adminApi(token), [token])
   const [day, setDay] = useState(0)
   const [changes, setChanges] = useState<TimetableChange[] | null>(null)
   const [edit, setEdit] = useState<Act | null>(null)
+  // how many synced plans hold each act, so a cancellation or move says whom it reaches;
+  // the same aggregates as the analytics tab (groups below minGroup withheld). Optional: on failure the list stays as is.
+  const [interest, setInterest] = useState<PlanInterest | null>(null)
   const load = useCallback(() => admin.timetableChanges().then(setChanges, (e) => flash('err', errText(e))), [admin, flash])
   useEffect(() => {
     load()
   }, [load])
+  useEffect(() => {
+    let current = true
+    admin.analytics(slug).then(
+      (d) => current && setInterest({ minGroup: d.minGroup, plans: new Map(d.acts.map((a) => [a.id, a.plans])) }),
+      () => current && setInterest(null),
+    )
+    return () => {
+      current = false
+    }
+  }, [admin, slug])
   const byId = new Map((changes ?? []).map((c) => [c.actId, c]))
   return (
     <div className="admin-grid">
@@ -454,6 +467,7 @@ function Timetable({ token, flash }: { token: string; flash: (k: 'ok' | 'err', t
                     {stageById[a.stage].name}
                   </span>
                 </span>
+                {interest?.plans.has(a.id) && <span className="small faint" style={{ whiteSpace: 'nowrap' }}>{interest.plans.get(a.id)!.toLocaleString('de-DE')} Pläne</span>}
                 {c && <span className={`tag ${c.cancelled ? 'crit' : 'warn'}`}>{c.cancelled ? 'Abgesagt' : [c.start !== null && `→ ${fmt(c.start)}`, c.stage && `→ ${stageById[c.stage].name}`].filter(Boolean).join(' ')}</span>}
               </button>
             )
@@ -466,6 +480,7 @@ function Timetable({ token, flash }: { token: string; flash: (k: 'ok' | 'err', t
             key={edit.id + (byId.get(edit.id)?.note ?? '') + JSON.stringify(byId.get(edit.id) ?? null)}
             act={edit}
             change={byId.get(edit.id)}
+            interest={interest}
             onSave={async (c) => {
               try {
                 await admin.setChange(edit.id, c)
@@ -493,7 +508,22 @@ function Timetable({ token, flash }: { token: string; flash: (k: 'ok' | 'err', t
   )
 }
 
-function ChangeForm({ act, change, onSave, onRevert }: { act: Act; change?: TimetableChange; onSave: (c: { start?: number; end?: number; stage?: StageId; cancelled?: boolean; note?: string }) => Promise<void>; onRevert: () => Promise<void> }) {
+type PlanInterest = { minGroup: number; plans: Map<string, number> }
+
+/** who a change reaches: planned acts get a notice on Home, everyone sees the line-up mark */
+function PlanReach({ act, interest }: { act: Act; interest: PlanInterest | null }) {
+  if (!interest) return null
+  const n = interest.plans.get(act.id)
+  return (
+    <p className="small muted" data-testid="plan-reach" style={{ margin: '0 0 12px' }}>
+      {n
+        ? `In ${n.toLocaleString('de-DE')} abgeglichenen Plänen – diese Besucher:innen sehen die Änderung als Hinweis auf Home.`
+        : `In weniger als ${interest.minGroup} abgeglichenen Plänen (oder keinem). Kleinere Zahlen zeigt die Konsole nicht.`}
+    </p>
+  )
+}
+
+function ChangeForm({ act, change, interest, onSave, onRevert }: { act: Act; change?: TimetableChange; interest: PlanInterest | null; onSave: (c: { start?: number; end?: number; stage?: StageId; cancelled?: boolean; note?: string }) => Promise<void>; onRevert: () => Promise<void> }) {
   const [start, setStart] = useState(fmt(change?.start ?? act.start))
   const [end, setEnd] = useState(fmt(change?.end ?? act.end))
   const [stage, setStage] = useState<StageId>(change?.stage ?? act.stage)
@@ -524,6 +554,7 @@ function ChangeForm({ act, change, onSave, onRevert }: { act: Act; change?: Time
       <p className="small faint" style={{ marginTop: -6 }}>
         Veröffentlicht: {DAYS[act.day].label} {fmt(act.start)}–{fmt(act.end)} · {stageById[act.stage].name}
       </p>
+      <PlanReach act={act} interest={interest} />
       <div className="admin-row">
         <label className="admin-field">
           <span>Beginn</span>
