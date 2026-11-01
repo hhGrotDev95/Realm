@@ -452,6 +452,14 @@ textarea.field { height: 88px; padding: 12px 14px; resize: none; }
 .admin-sel { background: var(--surface-2); border-radius: 12px; }
 .admin .list-item { min-height: 44px; padding-left: 8px; padding-right: 8px; }
 select.field { appearance: none; }
+.mapedit-canvas { position: relative; width: 100%; border-radius: 14px; overflow: hidden; background: var(--surface-2) center / 100% 100% no-repeat; border: 1px solid var(--line); touch-action: none; user-select: none; }
+.mapedit-canvas.empty { background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 10% 10%; background-repeat: repeat; }
+.mapedit-marker { position: absolute; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 5px; min-width: 28px; min-height: 28px; justify-content: center; border-radius: 9px; background: #f4f3f8; color: #111; font-size: 12px; font-weight: 700; white-space: nowrap; cursor: grab; touch-action: none; box-shadow: 0 0 0 2px #0d0f12; }
+.mapedit-marker.stage { padding: 4px 9px 4px 5px; border-radius: 99px; background: #111116; color: #fff; }
+.mapedit-marker .dot { width: 14px; height: 14px; border-radius: 99px; }
+.mapedit-marker.on { outline: 3px solid var(--brand); outline-offset: 2px; z-index: 2; }
+.mapedit-marker:active { cursor: grabbing; }
+.mapedit-list { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow: auto; }
 .admin-toast { left: 50%; right: auto; transform: translateX(-50%); bottom: 24px; position: fixed; }
 .admin-toast.err { background: var(--crit); color: #fff; }
 

@@ -1,6 +1,7 @@
 // Two-user end-to-end test against the real worker (wrangler dev, local D1) and the Vite dev server.
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { chromium } from 'playwright'
 
 const API = 'http://127.0.0.1:8798'
@@ -399,6 +400,63 @@ try {
     await visitor.getByRole('button', { name: 'Fragen' }).click()
     await visitor.getByText('Quelle: Service-Infos').waitFor()
     await visitor.context().setOffline(false)
+
+    // map editor: own ground plan, a new place and a dragged stage reach visitors
+    await org.getByRole('tab', { name: 'Karte' }).click()
+    const planPng = await org.evaluate(() => {
+      const c = document.createElement('canvas')
+      c.width = 400
+      c.height = 200 // 2:1 → canvas height 500
+      const x = c.getContext('2d')
+      x.fillStyle = '#3a6b35'
+      x.fillRect(0, 0, 400, 200)
+      return c.toDataURL('image/png').split(',')[1]
+    })
+    await org.locator('input[type=file][accept*="image/webp"]').setInputFiles({ name: 'plan.png', mimeType: 'image/png', buffer: Buffer.from(planPng, 'base64') })
+    await org.getByRole('button', { name: 'Plan ersetzen' }).waitFor()
+    const ratio = await org.locator('.mapedit-canvas').evaluate((el) => el.clientWidth / el.clientHeight)
+    if (Math.abs(ratio - 2) > 0.05) throw new Error('plan aspect ratio not applied: ' + ratio)
+    await org.getByRole('button', { name: 'Ort hinzufügen' }).click()
+    await org.getByLabel('Kategorie').selectOption('wc')
+    await org.getByLabel('Name', { exact: true }).fill('WC Wiese')
+    await org.getByLabel('Name', { exact: true }).fill('')
+    if (await org.getByRole('button', { name: 'Karte speichern' }).isEnabled()) throw new Error('place without name could be saved')
+    await org.getByLabel('Name', { exact: true }).fill('WC Wiese')
+    const wc = org.getByRole('button', { name: /^WC Wiese/ })
+    await wc.focus()
+    await org.keyboard.press('Shift+ArrowRight')
+    await org.getByText('Position 525 / 250').waitFor()
+    // drag the stage to the top-left quarter of the plan
+    const stage = org.getByRole('button', { name: /^Bühne Wiese/ })
+    const box = await stage.boundingBox()
+    const canvasBox = await org.locator('.mapedit-canvas').boundingBox()
+    await org.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await org.mouse.down()
+    await org.mouse.move(canvasBox.x + canvasBox.width / 4, canvasBox.y + canvasBox.height / 4, { steps: 8 })
+    await org.mouse.up()
+    await org.getByText('Name und Farbe der Bühne änderst du unter „Bühnen“.').waitFor()
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/map-editor.png`, fullPage: true })
+    // accessibility of the editor (the a11y suite runs without a server and cannot reach it)
+    await org.addScriptTag({ path: createRequire(import.meta.url).resolve('axe-core/axe.min.js') })
+    const axe = await org.evaluate(async () => {
+      const res = await window.axe.run(document, { resultTypes: ['violations'], runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } })
+      return res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)
+    })
+    if (axe.length) throw new Error('map editor a11y: ' + axe.join('; '))
+    await org.getByRole('button', { name: 'Karte speichern' }).click()
+    await org.getByText('Karte gespeichert').waitFor()
+    const saved = await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()
+    const st = saved.stages.find((x) => x.name === 'Wiese')
+    if (saved.festival.map.height !== 500 || !saved.festival.map.image) throw new Error('plan not saved: ' + JSON.stringify({ ...saved.festival.map, image: !!saved.festival.map.image }))
+    if (Math.abs(st.x - 250) > 4 || Math.abs(st.y - 125) > 4) throw new Error('stage not moved: ' + st.x + '/' + st.y)
+    if (!saved.pois.some((x) => x.name === 'WC Wiese' && x.cat === 'wc' && x.x === 525 && x.y === 250)) throw new Error('place not saved')
+    await visitor.reload()
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await nav(visitor, 'Map')
+    await visitor.locator('.map-wrap img').waitFor({ state: 'attached' })
+    await visitor.getByRole('button', { name: 'WC Wiese' }).click()
+    await visitor.locator('.sheet').getByText('WC Wiese').first().waitFor()
+    await visitor.keyboard.press('Escape')
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

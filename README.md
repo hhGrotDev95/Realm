@@ -57,6 +57,10 @@ In der Konsole (`/#admin`) legt **„Neues Festival“** einen Entwurf an. Der A
 
 Pro Festival in der Konsole unter **Branding**: Markenfarbe (Voreinstellungen, Farbwähler oder Hex), Schrift für Überschriften (fünf kuratierte Google Fonts) und Logo (PNG/JPEG/WebP werden auf 256 px verkleinert, SVG bis 140 kB). Eine Live-Vorschau zeigt App-Leiste, Karte, Buttons und Labels. Die Kontrastprüfung (WCAG 2.1: 4,5:1 für Text, 3:1 für Bedienelemente) läuft in Konsole **und** Worker mit derselben Logik (`src/theme/contrast.ts`); unlesbare Farben lassen sich nicht speichern. Die Textfarbe auf Buttons wird automatisch gewählt.
 
+### Karte (Karteneditor)
+
+Konsole → **Karte**: eigenen Geländeplan hochladen (PNG/JPEG/WebP; wird auf max. 2000 px verkleinert und als WebP/JPEG unter ca. 650 kB gespeichert – PDFs vorher als Bild exportieren), Bühnen per Ziehen oder Pfeiltasten platzieren, Orte (Eingang, Info, Sanitäter, Wasser, WC, Essen, Bar, Camping, Shuttle) mit Name, Beschreibung, Status und „ohne Filter zeigen“ anlegen, verschieben und löschen. Die Leinwand ist immer 1000 Einheiten breit, die Höhe folgt dem Seitenverhältnis des Plans; bei einem Plan mit anderem Format werden alle Marker relativ mitskaliert. Gespeichert wird alles mit `PUT /api/admin/festivals/:slug/map` (Validierung im Worker, gemeinsame Regeln in `src/mapModel.ts`). Plan und Orte reisen im Festivaldokument mit und sind damit offline verfügbar. Bühnen-Marker der App werden immer aus der Bühnenliste erzeugt, Umbenennungen sind also sofort sichtbar. Ohne eigenen Plan zeigt die App die stilisierte Beispiel-Landschaft.
+
 ### Module
 
 Timetable, Plan, Karte und offizielle Meldungen sind immer dabei. Optional und pro Festival schaltbar (Konsole → **Module**): Crew & Freunde, Crew-Chat, Standort teilen, Step-Challenge (diese drei brauchen Crew), Community-Meldungen, Festival-Rückblick. Die Liste steht zentral in `src/modules.ts`. Ausgeschaltete Module verschwinden aus der App ohne Lücken **und** werden vom Worker mit 403 abgelehnt; der Crew-Snapshot liefert dann auch keine Chat-, Standort- oder Schrittdaten.

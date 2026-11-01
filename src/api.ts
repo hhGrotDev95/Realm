@@ -233,6 +233,8 @@ export const adminApi = (adminToken: string) => {
     saveFaq: (slug: string, f: Omit<AdminFaq, 'updatedAt' | 'source'> & { source?: string }) => req<AdminFaq>('PUT', `/api/admin/festivals/${slug}/faq/${f.id}`, f),
     deleteFaq: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/faq/${id}`),
     setModules: (slug: string, modules: Record<string, boolean>) => req<Record<string, boolean>>('PUT', `/api/admin/festivals/${slug}/modules`, modules),
+    setMap: (slug: string, map: { image?: string | null; height: number; stages: { id: string; x: number; y: number }[]; pois: { id: string; cat: string; name: string; x: number; y: number; detail?: string; status?: string; important: boolean }[] }) =>
+      req<{ height: number; image: boolean }>('PUT', `/api/admin/festivals/${slug}/map`, map),
     setTheme: (slug: string, theme: { brand?: string; font?: string; logo?: string }) => req<Record<string, string>>('PUT', `/api/admin/festivals/${slug}/theme`, theme),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
     restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),

@@ -1,6 +1,7 @@
 import type { Theme } from './theme/apply'
 import { isEnabled, type ModuleKey, type ModuleState } from './modules.ts'
 import type { Faq } from './faq/match'
+import { DEFAULT_MAP_H, MAP_W, parseMap, type MapInfo } from './mapModel.ts'
 // Realm — demo dataset for "Realm Open Air 2027".
 // Times are minutes after midnight of the festival day (values > 1440 = after midnight).
 
@@ -222,6 +223,10 @@ export const POIS: Poi[] = [
 
 /** Your simulated position on the grounds. */
 export const ME = { x: 440, y: 420 }
+const DEMO_ME = { ...ME }
+
+/** The festival's ground plan: canvas MAP_W wide and `height` tall; without image the demo terrain is drawn. */
+export const MAP: MapInfo = { height: DEFAULT_MAP_H }
 
 export function walkMinutes(ax: number, ay: number, bx: number, by: number) {
   return Math.max(1, Math.round(Math.hypot(ax - bx, ay - by) / 38))
@@ -378,7 +383,7 @@ export function applyTimetableChanges(changes: TimetableChange[]) {
 
 /** The public festival document served by GET /api/festivals/:slug. */
 export interface FestivalBundle {
-  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; updatedAt: number }
+  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; map?: MapInfo; updatedAt: number }
   days: FestivalDay[]
   stages: Stage[]
   acts: Omit<Act, 'change'>[]
@@ -404,6 +409,12 @@ export function loadFestivalBundle(b: FestivalBundle) {
   replace(ACTS, b.acts.map((a) => ({ ...a })))
   refill(actById, ACTS.map((a) => [a.id, a]))
   replace(POIS, b.pois)
+  const map = parseMap(b.festival.map)
+  for (const k of Object.keys(MAP) as (keyof MapInfo)[]) delete MAP[k]
+  Object.assign(MAP, map)
+  // on an organizer's own plan the demo position means nothing: start at the entrance (or the middle)
+  const start = POIS.find((p) => p.cat === 'entrance') ?? POIS.find((p) => p.cat === 'info')
+  Object.assign(ME, map.image ? (start ? { x: start.x, y: start.y } : { x: MAP_W / 2, y: map.height / 2 }) : DEMO_ME)
   replace(FAQS, b.faq ?? [])
   ORIGINAL.clear()
   for (const a of ACTS) ORIGINAL.set(a.id, { start: a.start, end: a.end, stage: a.stage })

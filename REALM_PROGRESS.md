@@ -1,6 +1,6 @@
 # Realm – Fortschritt
 
-Stand: 19.10.2026
+Stand: 01.11.2026
 
 - Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
 - Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`, gemergt als PR #5
@@ -265,10 +265,10 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 | `npm run test:e2e` · `npm run test:a11y` | 10 Abläufe (neu: Bot) · 14 Ansichten ohne Befund (neu: FAQ mit Bot-Antwort) |
 | `npm run test:live` | 17 Szenarien; Festival-Ablauf: FAQ-Entwurf unsichtbar, nach Freigabe beantwortet der Bot die Frage – auch offline |
 
-## Nächste Schritte
+## Nächste Schritte (überholt, siehe unten)
 
-1. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen) – der Build warnt.
-2. P6: Karteneditor (eigener Geländeplan, Marker mit relativen Koordinaten).
+1. ~~Bundle unter 500 kB~~ – erledigt (Runde App-Paket).
+2. ~~P6: Karteneditor~~ – erledigt (siehe P6).
 3. P7: Sprachen DE/EN.
 
 ## Runde: App-Paket & echtes Offline (claude/realm-bundle)
@@ -277,3 +277,37 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - `LazyBoundary`: ein fehlgeschlagener Chunk-Load zeigt „Erneut versuchen“ statt die App abstürzen zu lassen.
 - Smoke-Test prüft Offline jetzt ehrlich (Server wird beendet, da `setOffline` Service-Worker-Fetches nicht abdeckt).
 - Geprüft: typecheck, test:import, build, test:e2e, test:a11y, test:live – alles grün.
+
+## P6 · Karteneditor — erledigt (Branch `ccr-c4b0523e-ob2a6c`, 01.11.2026)
+
+Anlass: Über den Assistenten angelegte Festivals hatten **keine Orte auf der Karte** und Bühnen nur auf Rasterpositionen über der Demo-Landschaft – die Karte war für echte Festivals unbrauchbar.
+
+- Migration `0009_map.sql`: Spalte `festivals.map` (JSON `{ height, image? }`).
+- `src/mapModel.ts`: gemeinsame Regeln für App, Konsole und Worker (Leinwand 1000 breit, Höhe 250–4000, Bild ≤ 900 000 Zeichen, max. 300 Orte, Kategorien, Status).
+- Worker `PUT /api/admin/festivals/:slug/map`: Plan setzen/behalten/entfernen, Höhe, Bühnenpositionen (nur eigene Bühnen), Orte komplett ersetzen; alles validiert, Schreiben als ein Batch. Ändert sich nur die Höhe, werden bestehende Marker mitskaliert. Festivaldokument liefert `festival.map`; **Bühnen-Marker werden immer aus der Bühnenliste erzeugt** (vorher veraltete Namen nach Umbenennen, fehlende Marker bei neuen Festivals).
+- App: Karte zeigt den eigenen Plan mit passender Höhe, „Satellit“ nur bei der Demo-Landschaft; Startposition bei eigenem Plan = Eingang/Info/Mitte.
+- Konsole: Tab **Karte** (`src/admin/MapEditor.tsx`) – Plan hochladen (verkleinert, WebP/JPEG, Seitenverhältnis-Prüfung), Marker ziehen oder per Pfeiltasten (Umschalt = 25) verschieben, Orte anlegen/bearbeiten/löschen, Speichern nur ohne namenlose Orte, Warnung beim Verlassen mit ungespeicherten Änderungen.
+- Robustheit: Ort-Sheet und Meldungs-Pins stürzen nicht mehr ab, wenn ein Ort inzwischen entfernt wurde; Freunde-Pins nur bei bekannter Bühne.
+
+**Nebenbei gefundener echter Fehler:** Im Crew-Chat stürzte die App beim Senden einer Nachricht ab (`destroy is not a function`) – aktuelle Chromium-Versionen geben bei `scrollIntoView` ein Promise zurück, und der `useEffect` reichte es als Cleanup an React weiter. Behoben in `src/sheets.tsx`. Der Smoke-Test schlug deshalb auch auf `main` fehl (mit dem hier installierten Chromium; CI nutzt ein älteres).
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler (Haupt-Chunk unverändert ~299 kB) |
+| `npm run test:import` | alle Unit-Tests bestanden |
+| `cd worker && npm test` | 28 API-Tests (neu: Karteneditor – Rechte, Validierung, Mandantentrennung, Mitskalieren, Entfernen) + Migrationstest (9 Migrationen) |
+| `npm run test:e2e` | 11 Abläufe bestanden (vorher Absturz im Chat, s. o.) |
+| `npm run test:a11y` | 14 Ansichten ohne Befund |
+| `npm run test:live` | 17 Szenarien; Festival-Ablauf erweitert: Plan 2:1 hochladen, Ort anlegen (namenlos nicht speicherbar), per Tastatur und Maus verschieben, axe-Prüfung des Editors ohne schwerwiegende Befunde, Besucher sieht Plan und neuen Ort |
+
+Lokal: Playwright-Browser über `CHROMIUM_PATH=/opt/pw-browsers/chromium` (die gepinnte Playwright-Version findet ihren eigenen Browser in dieser Umgebung nicht).
+
+Nicht geprüft: optische Gestaltung des Editors per Screenshot (nur funktional und per axe).
+
+Bekannte Grenzen / Ideen für später: Plan als PDF direkt hochladen; Orte per CSV importieren; Laufwege (Route) folgen bei eigenem Plan noch einer gebogenen Luftlinie.
+
+## Nächster Schritt
+
+1. PR für diesen Branch öffnen lassen bzw. mergen (Freigabe durch Hannes).
+2. P7: Sprachen DE/EN – Texte zentral sammeln (App zuerst, Konsole danach), Sprachwahl im Profil, Festivalinhalte bleiben einsprachig.
+3. P8 Push bleibt blockiert (VAPID-Schlüssel + Deployment).

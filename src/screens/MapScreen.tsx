@@ -1,7 +1,8 @@
 import { AnimatePresence, m as motion } from 'framer-motion'
 import { Check, Layers, LocateFixed, Search, X, MapPin, TriangleAlert, Users, Satellite, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { on, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { on, MAP, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { MAP_W } from '../mapModel'
 import { useApp } from '../store'
 import { CAT_ICON } from './mapIcons'
 import { AppBar } from '../App'
@@ -14,12 +15,12 @@ const CATS: { id: PoiCat; label: string }[] = [
   { id: 'medical', label: 'Medical' },
   { id: 'bar', label: 'Bars' },
 ]
-const W = 1000
-const H = 940
+const W = MAP_W
 
 type View = { x: number; y: number; k: number }
 
 export function MapScreen() {
+  const H = MAP.height
   const { crew } = useApp()
   const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, updates, votes, sheet, set, toast, requireIdentity } = useApp()
   const wrap = useRef<HTMLDivElement>(null)
@@ -169,9 +170,9 @@ export function MapScreen() {
             transition: animate ? 'transform .45s cubic-bezier(.22,1,.36,1)' : undefined,
           }}
         >
-          <Ground satellite={layers.satellite} />
+          {MAP.image ? <Plan image={MAP.image} height={H} /> : <Ground satellite={layers.satellite} />}
           {routePoi && (
-            <svg width={W} height={H} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+            <svg width={W} height={H} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} aria-hidden>
               <motion.path
                 d={routePath(ME, routePoi)}
                 fill="none"
@@ -190,7 +191,9 @@ export function MapScreen() {
           ))}
           {layers.reports && on('reports') &&
             reports.map((u) => {
-              const p = POIS.find((x) => x.id === u.poi)!
+              const p = POIS.find((x) => x.id === u.poi)
+              // a place the organizer has since removed from the map: nothing to pin it to
+              if (!p) return null
               return (
                 <button key={u.id} className="map-pin" onClick={() => openSheet({ kind: 'poi', id: p.id })} style={pinStyle(p.x + 22, p.y - 22, inv)} aria-label={u.title}>
                   <span style={{ width: 22, height: 22, borderRadius: 8, background: 'var(--warn)', color: '#2a1b00', display: 'grid', placeItems: 'center', boxShadow: '0 0 0 2px #0d0f12' }}>
@@ -214,7 +217,7 @@ export function MapScreen() {
             ))}
           {layers.friends && on('location') &&
             shareLocation &&
-            crew.members.filter((f) => f.at && f.at !== 'camp').map((f, i) => {
+            crew.members.filter((f) => f.at && f.at !== 'camp' && stageById[f.at]).map((f, i) => {
               const s = stageById[f.at as keyof typeof stageById]
               const a = (i * 2.4) % (Math.PI * 2)
               return (
@@ -307,7 +310,10 @@ export function MapScreen() {
                     ['pins', 'Meine Pins', MapPin],
                     ['satellite', 'Satellit', Satellite],
                   ] as const
-                ).map(([k, label, I]) => (
+                )
+                  // satellite only exists for the built-in terrain, not for an uploaded plan
+                  .filter(([k]) => k !== 'satellite' || !MAP.image)
+                  .map(([k, label, I]) => (
                   <button key={k} onClick={() => setLayers((l) => ({ ...l, [k]: !l[k] }))} aria-pressed={layers[k]}>
                     <I size={18} className="faint" /> {label}
                     {layers[k] && <Check size={18} className="chk" />}
@@ -382,12 +388,19 @@ function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: 
   )
 }
 
+/** The organizer's own ground plan, stretched over the canvas (its height follows the image's aspect ratio). */
+function Plan({ image, height }: { image: string; height: number }) {
+  return <img src={image} alt="" width={W} height={height} draggable={false} style={{ position: 'absolute', inset: 0, width: W, height, userSelect: 'none', pointerEvents: 'none' }} />
+}
+
+const GROUND_H = 940 // the demo terrain is drawn for this height
+
 function Ground({ satellite }: { satellite: boolean }) {
   const grass = satellite ? '#1b2a1a' : '#14171c'
   const field = satellite ? '#243620' : '#191d23'
   const path = satellite ? '#4a4535' : '#262b33'
   return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ position: 'absolute', inset: 0 }} aria-hidden>
+    <svg width={W} height={GROUND_H} viewBox={`0 0 ${W} ${GROUND_H}`} style={{ position: 'absolute', inset: 0 }} aria-hidden>
       <defs>
         <pattern id="trees" width="26" height="26" patternUnits="userSpaceOnUse">
           <circle cx="8" cy="8" r="6" fill={satellite ? '#1f3d1f' : '#1a2420'} />
@@ -405,7 +418,7 @@ function Ground({ satellite }: { satellite: boolean }) {
           </radialGradient>
         ))}
       </defs>
-      <rect width={W} height={H} fill="url(#noise)" />
+      <rect width={W} height={GROUND_H} fill="url(#noise)" />
       <path d="M60 120 Q 80 40 300 50 L 900 60 Q 960 70 950 200 L 960 820 Q 950 910 820 900 L 140 905 Q 40 900 50 780 Z" fill={field} stroke={satellite ? '#3a4a2a' : '#232830'} strokeWidth="3" strokeDasharray="10 8" />
       <path d="M80 480 Q 60 720 160 800 Q 300 860 360 720 Q 380 600 300 520 Q 180 440 80 480 Z" fill="url(#trees)" opacity=".9" />
       <path d="M640 600 Q 600 520 700 480 Q 820 450 880 540 Q 920 640 820 690 Q 700 720 640 600 Z" fill={satellite ? '#1d3b4f' : '#13202b'} />

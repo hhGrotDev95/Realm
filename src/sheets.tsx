@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { switchFestival } from './festival'
 const FaqSheet = lazy(() => import('./FaqSheet').then((m) => ({ default: m.FaqSheet })))
 import { api } from './api'
-import { on, FESTIVAL, ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type UpdateSource } from './data'
+import { on, FESTIVAL, ACTS, actById, DAYS, fmt, ME, PHASES, POIS, stageById, walkMinutes, type FestivalUpdate, type Poi, type UpdateSource } from './data'
 import { CAT_ICON } from './screens/mapIcons'
 import { ActRow } from './screens/Lineup'
 import { useApp, type SheetState } from './store'
@@ -232,9 +232,22 @@ function ActSheet({ id }: { id: string }) {
 
 /* ---------------- POI ---------------- */
 function PoiSheet({ id }: { id: string }) {
+  const p = POIS.find((x) => x.id === id)
+  if (!p)
+    return (
+      <div className="sheet-head">
+        <p className="muted" style={{ margin: 0 }}>
+          Diesen Ort gibt es auf der Karte nicht mehr.
+        </p>
+      </div>
+    )
+  return <PoiDetails p={p} />
+}
+
+function PoiDetails({ p }: { p: Poi }) {
+  const id = p.id
   const app = useApp()
   const { openSheet, requireIdentity, now, updates, votes, vote, plan } = app
-  const p = POIS.find((x) => x.id === id)!
   const I = CAT_ICON[p.cat]
   const walk = walkMinutes(ME.x, ME.y, p.x, p.y)
   const reports = updates.filter((u) => u.poi === id && votes[u.id] !== 'fixed')
@@ -1036,7 +1049,10 @@ function Chat() {
   const [text, setText] = useState('')
   const [active, setActive] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null)
-  useEffect(() => end.current?.scrollIntoView({ behavior: 'smooth' }), [chat.length])
+  // braces matter: current Chromium returns a Promise from scrollIntoView, which React would call as cleanup
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chat.length])
   return (
     <>
       <div className="sheet-head" style={{ marginBottom: 10 }}>

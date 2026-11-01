@@ -470,6 +470,61 @@ try {
     assert.deepEqual(t, { brand: '#4fd1c5', font: 'space', logo: png })
   })
 
+  await test('map editor: ground plan, stage positions and places, validated and tenant-bound', async () => {
+    const A = 'test-admin-token'
+    const put = (body, slug = 'nordlicht') => api('PUT', `/api/admin/festivals/${slug}/map`, A, body, null)
+    const bundle = async (slug = 'nordlicht') => (await api('GET', `/api/festivals/${slug}`, null, undefined, null)).data
+    const before = await bundle()
+    assert.deepEqual(before.festival.map, { height: 940 })
+    // stage markers come from the stage list
+    assert.deepEqual(before.pois.filter((p) => p.cat === 'stage').map((p) => p.id).sort(), ['stage-pier', 'stage-werft'])
+    assert.equal((await api('PUT', '/api/admin/festivals/nordlicht/map', lea.token, { height: 600 }, null)).status, 401)
+    assert.equal((await put({ height: 10 })).status, 400)
+    assert.equal((await put({ image: 'https://example.com/plan.png' })).status, 400)
+    assert.equal((await put({ image: 'data:image/svg+xml;base64,PHN2Zz4=' })).status, 400)
+    assert.equal((await put({ image: 'data:image/png;base64,' + 'A'.repeat(900_001) })).status, 400)
+    assert.equal((await put({ stages: [{ id: 'generator', x: 1, y: 1 }] })).status, 400) // stage of another festival
+    assert.equal((await put({ stages: [{ id: 'pier', x: 1200, y: 1 }] })).status, 400)
+    assert.equal((await put({ pois: [{ id: 'stage-x', cat: 'wc', name: 'X', x: 1, y: 1 }] })).status, 400)
+    assert.equal((await put({ pois: [{ id: 'a', cat: 'stage', name: 'X', x: 1, y: 1 }] })).status, 400)
+    assert.equal((await put({ pois: [{ id: 'a', cat: 'wc', name: 'X', x: 1, y: 1 }, { id: 'a', cat: 'wc', name: 'Y', x: 2, y: 2 }] })).status, 400)
+    assert.equal((await put({ pois: [{ id: 'a', cat: 'wc', name: 'X', x: 1, y: 1, status: 'kaputt' }] })).status, 400)
+    // nothing was written by the rejected requests
+    assert.deepEqual((await bundle()).festival.map, { height: 940 })
+
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const ok = await put({
+      image: png,
+      height: 700,
+      stages: [{ id: 'pier', x: 120.4, y: 650 }],
+      pois: [
+        { id: 'wc-hafen', cat: 'wc', name: 'WC Hafen', x: 300, y: 200, detail: 'barrierefrei', status: 'open', important: true },
+        { id: 'info', cat: 'info', name: 'Info', x: 500, y: 100 },
+      ],
+    })
+    assert.equal(ok.status, 200)
+    const b = await bundle()
+    assert.deepEqual(b.festival.map, { height: 700, image: png })
+    assert.deepEqual(b.stages.find((s) => s.id === 'pier'), { ...b.stages.find((s) => s.id === 'pier'), x: 120, y: 650 })
+    assert.deepEqual(b.pois.find((p) => p.id === 'stage-pier'), { id: 'stage-pier', cat: 'stage', name: 'Pier', x: 120, y: 650, detail: b.stages.find((s) => s.id === 'pier').vibe, important: true })
+    assert.deepEqual(b.pois.find((p) => p.id === 'wc-hafen'), { id: 'wc-hafen', cat: 'wc', name: 'WC Hafen', x: 300, y: 200, detail: 'barrierefrei', status: 'open', important: true })
+    assert.equal(b.pois.find((p) => p.id === 'info').important, false)
+    assert.ok(b.festival.updatedAt > before.festival.updatedAt)
+    // a taller plan without positions scales the existing markers along
+    assert.equal((await put({ height: 1400 })).status, 200)
+    const tall = await bundle()
+    assert.equal(tall.stages.find((s) => s.id === 'pier').y, 1300)
+    assert.equal(tall.pois.find((p) => p.id === 'wc-hafen').y, 400)
+    assert.equal(tall.festival.map.image, png)
+    // removing the plan keeps the places; the other festival is untouched
+    assert.equal((await put({ image: null, height: 940, pois: [] })).status, 200)
+    const cleared = await bundle()
+    assert.deepEqual(cleared.festival.map, { height: 940 })
+    assert.equal(cleared.pois.filter((p) => p.cat !== 'stage').length, 0)
+    assert.ok((await bundle('realm-open-air')).pois.some((p) => p.id === 'w1'))
+    assert.equal((await put({ height: 900 }, 'gibts-nicht')).status, 404)
+  })
+
   await test('modules: switched-off features are refused by the API, dependencies enforced', async () => {
     const A = 'test-admin-token'
     const N = 'nordlicht'
