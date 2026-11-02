@@ -1,7 +1,8 @@
 import { AnimatePresence, m as motion } from 'framer-motion'
 import { Check, Layers, LocateFixed, Search, X, MapPin, TriangleAlert, Users, Satellite, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { on, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { on, MAP, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { mapImageUrl } from '../mapImage'
 import { useApp } from '../store'
 import { CAT_ICON } from './mapIcons'
 import { AppBar } from '../App'
@@ -14,12 +15,13 @@ const CATS: { id: PoiCat; label: string }[] = [
   { id: 'medical', label: 'Medical' },
   { id: 'bar', label: 'Bars' },
 ]
-const W = 1000
-const H = 940
 
 type View = { x: number; y: number; k: number }
 
 export function MapScreen() {
+  // map space of the current festival (own site plan or the built-in demo grounds)
+  const W = MAP.width
+  const H = MAP.height
   const { crew } = useApp()
   const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, updates, votes, sheet, set, toast, requireIdentity } = useApp()
   const wrap = useRef<HTMLDivElement>(null)
@@ -169,7 +171,7 @@ export function MapScreen() {
             transition: animate ? 'transform .45s cubic-bezier(.22,1,.36,1)' : undefined,
           }}
         >
-          <Ground satellite={layers.satellite} />
+          {MAP.version !== null ? <SitePlan key={MAP.version} width={W} height={H} /> : <Ground satellite={layers.satellite} />}
           {routePoi && (
             <svg width={W} height={H} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
               <motion.path
@@ -307,7 +309,9 @@ export function MapScreen() {
                     ['pins', 'Meine Pins', MapPin],
                     ['satellite', 'Satellit', Satellite],
                   ] as const
-                ).map(([k, label, I]) => (
+                )
+                  // the satellite look only exists for the built-in demo grounds
+                  .filter(([k]) => k !== 'satellite' || MAP.version === null).map(([k, label, I]) => (
                   <button key={k} onClick={() => setLayers((l) => ({ ...l, [k]: !l[k] }))} aria-pressed={layers[k]}>
                     <I size={18} className="faint" /> {label}
                     {layers[k] && <Check size={18} className="chk" />}
@@ -382,7 +386,45 @@ function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: 
   )
 }
 
+/** The organizer's uploaded plan; offline from the cache, with a quiet fallback while loading. */
+function SitePlan({ width, height }: { width: number; height: number }) {
+  const [src, setSrc] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  useEffect(() => {
+    let alive = true
+    setFailed(false)
+    mapImageUrl()?.then(
+      (u) => alive && setSrc(u),
+      () => alive && setFailed(true),
+    )
+    return () => {
+      alive = false
+    }
+  }, [attempt])
+  // retry automatically when the connection comes back
+  useEffect(() => {
+    if (!failed) return
+    const h = () => setAttempt((a) => a + 1)
+    window.addEventListener('online', h)
+    return () => window.removeEventListener('online', h)
+  }, [failed])
+  return (
+    <div style={{ position: 'absolute', inset: 0, width, height, background: '#191d23', borderRadius: 12, overflow: 'hidden' }}>
+      {src ? (
+        <img src={src} alt="" width={width} height={height} draggable={false} style={{ display: 'block', width, height, userSelect: 'none' }} />
+      ) : (
+        <div className="muted small" style={{ position: 'absolute', left: 0, right: 0, top: height / 2 - 40, textAlign: 'center', fontSize: 28 }} role={failed ? 'alert' : undefined}>
+          {failed ? 'Geländeplan nicht verfügbar – Marker werden trotzdem angezeigt' : 'Geländeplan wird geladen …'}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Ground({ satellite }: { satellite: boolean }) {
+  const W = MAP.width
+  const H = MAP.height
   const grass = satellite ? '#1b2a1a' : '#14171c'
   const field = satellite ? '#243620' : '#191d23'
   const path = satellite ? '#4a4535' : '#262b33'

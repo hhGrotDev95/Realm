@@ -1,6 +1,6 @@
 # Realm – Fortschritt
 
-Stand: 19.10.2026
+Stand: 02.11.2026
 
 - Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
 - Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`, gemergt als PR #5
@@ -265,11 +265,6 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 | `npm run test:e2e` · `npm run test:a11y` | 10 Abläufe (neu: Bot) · 14 Ansichten ohne Befund (neu: FAQ mit Bot-Antwort) |
 | `npm run test:live` | 17 Szenarien; Festival-Ablauf: FAQ-Entwurf unsichtbar, nach Freigabe beantwortet der Bot die Frage – auch offline |
 
-## Nächste Schritte
-
-1. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen) – der Build warnt.
-2. P6: Karteneditor (eigener Geländeplan, Marker mit relativen Koordinaten).
-3. P7: Sprachen DE/EN.
 
 ## Runde: App-Paket & echtes Offline (claude/realm-bundle)
 - Startpaket von 521 kB (gzip 165) auf 300 kB Haupt-Chunk (gzip 92) gesenkt: framer-motion über `LazyMotion` + nachgeladene `domMax`-Features, Karte/Crew/Wrapped/FAQ als Lazy-Chunks. Keine >500-kB-Warnung mehr.
@@ -277,3 +272,31 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - `LazyBoundary`: ein fehlgeschlagener Chunk-Load zeigt „Erneut versuchen“ statt die App abstürzen zu lassen.
 - Smoke-Test prüft Offline jetzt ehrlich (Server wird beendet, da `setOffline` Service-Worker-Fetches nicht abdeckt).
 - Geprüft: typecheck, test:import, build, test:e2e, test:a11y, test:live – alles grün.
+
+## P6 · Karteneditor — erledigt (Branch `ccr-c4b0523e-b2l3ty`, 02.11.2026)
+
+- Migration `0009_maps.sql`: `festival_maps` (Bild als Base64, MIME, Höhe des Kartenraums, Version). Bühnen-Duplikate in `pois` werden in die Bühnen übernommen und gelöscht – Bühnenmarker leitet der Worker jetzt aus `stages` ab (eine Quelle der Wahrheit).
+- Kartenraum: immer 1000 breit, Höhe aus dem Seitenverhältnis (250–4000; ohne Plan 940 = Demo-Gelände). Neuer flacherer Plan bzw. Entfernen zieht Marker auf den Plan.
+- Worker: `PUT/DELETE /api/admin/festivals/:slug/map` (nur JPEG/PNG/WebP-Data-URL, ≤ 1,4 Mio. Zeichen, max. 4 : 1), `PUT …/stages/:id/position`, `PUT/DELETE …/pois/:id` (Kategorien ohne `stage`, Koordinaten im Kartenraum). Öffentlich: `GET /api/festivals/:slug/map/:version` liefert das Bild binär, bei aktueller Version `immutable`, sonst `no-store`; Entwürfe nur für Admins. Das Festivaldokument enthält `map: { width, height, version } | null`.
+- App: `src/mapImage.ts` lädt den Plan einmal je Version in den Cache `site-plans` (nicht `realm-…`, die löscht der Service Worker bei Updates) und räumt alte Versionen weg; Vorabruf direkt nach dem Laden des Festivals → Karte offline, auch wenn sie online nie geöffnet wurde. `MapScreen` zeigt Plan statt Demo-Gelände, Größe aus `MAP`, Satellit-Ebene nur beim Demo-Gelände, eigene Position startet in der Planmitte; Ladefehler → Hinweis, neuer Versuch bei `online`.
+- Konsole: Tab „Karte“ (`src/admin/MapEditor.tsx`): Plan hochladen/ersetzen/entfernen (Verkleinern auf 2400 px, WebP/JPEG unter ~1 MB, Transparenz weiß hinterlegt), Bühnen ziehen (sofort gespeichert), „Neuer Ort“ + Tippen auf die Karte, Formular (Name, Kategorie, Status, Beschreibung, X/Y, „wichtig“), Pfeiltasten verschieben den gewählten Marker.
+
+Nebenbei gefundener echter Fehler (bestand schon auf `main`): Der Crew-Chat brachte die **ganze App zum Absturz** (schwarzer Bildschirm), sobald man ihn verließ – `useEffect(() => el.scrollIntoView(...))` gibt in aktuellem Chromium ein Promise zurück, das React als Aufräumfunktion aufrief. Behoben in `src/sheets.tsx`; Smoke- und a11y-Test liefen deshalb lokal rot.
+
+Dateien: `worker/migrations/0009_maps.sql`, `worker/src/index.ts`, `worker/test/api.test.mjs`, `src/data.ts` (`MAP`, Stage-POIs abgeleitet), `src/api.ts`, `src/mapImage.ts`, `src/festival.ts`, `src/screens/MapScreen.tsx`, `src/admin/MapEditor.tsx`, `src/admin/Admin.tsx`, `src/styles.css`, `src/sheets.tsx`, `tests/live.mjs`, `README.md`.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler |
+| `npm run test:import` | 8 + 9 + 7 + 19 Prüfungen bestanden |
+| `cd worker && npm test` | 28 API-Tests (neu: Karteneditor – Validierung, Upload, Bild binär/cachebar, Bühnen/Orte, Mandantentrennung, Entfernen) + Migrationstest (9 Migrationen) |
+| `npm run test:e2e` · `npm run test:a11y` | 10 Abläufe · 14 Ansichten ohne Befund (mit `CHROMIUM_PATH=/opt/pw-browsers/chromium`; vor dem Chat-Fix beide rot) |
+| `npm run test:live` | 17 Szenarien bestanden; der Festival-Ablauf lädt jetzt einen Plan (2 : 1) hoch, legt per Tippen „Schließfächer“ an, zieht die Bühne „Wiese“ – Positionen stimmen im Festivaldokument, Besucher sieht Plan und Marker, Plan liegt im Offline-Cache |
+
+Hinweis Testumgebung: Das Projekt-Playwright findet hier seinen eigenen Browser nicht; `CHROMIUM_PATH=/opt/pw-browsers/chromium` setzen.
+
+## Nächste Schritte
+
+1. P6-Nachtrag (klein): Konsole-Ansicht „Karte“ in `tests/a11y.mjs` aufnehmen (braucht Server – evtl. im Live-Lauf mit axe prüfen); Kategorie-Filter der App um Eingang/Camping/Info/Shuttle ergänzen (bisher nur über Suche/„wichtig“ sichtbar).
+2. P7: Sprachen DE/EN (Texte sind derzeit fest auf Deutsch in den Komponenten; zuerst `src/i18n.ts` mit Wörterbuch + Sprachwahl im Profil, Festival-Standardsprache in der Konsole).
+3. P8: Push – blockiert (VAPID-Schlüssel + Deployment, Cloudflare-Konto nötig).

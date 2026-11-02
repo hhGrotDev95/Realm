@@ -222,6 +222,14 @@ export const POIS: Poi[] = [
 
 /** Your simulated position on the grounds. */
 export const ME = { x: 440, y: 420 }
+const DEMO_ME = { ...ME }
+
+/**
+ * The map space: always 1000 units wide, height from the site plan's aspect ratio. Without an
+ * uploaded plan (version null) the app draws the built-in demo grounds at 1000 × 940.
+ */
+export const MAP: { width: number; height: number; version: number | null } = { width: 1000, height: 940, version: null }
+export type MapInfo = { width: number; height: number; version: number }
 
 export function walkMinutes(ax: number, ay: number, bx: number, by: number) {
   return Math.max(1, Math.round(Math.hypot(ax - bx, ay - by) / 38))
@@ -384,6 +392,7 @@ export interface FestivalBundle {
   acts: Omit<Act, 'change'>[]
   pois: Poi[]
   faq?: Faq[]
+  map?: MapInfo | null
 }
 
 const replace = <T,>(arr: T[], items: T[]) => arr.splice(0, arr.length, ...items)
@@ -403,7 +412,12 @@ export function loadFestivalBundle(b: FestivalBundle) {
   refill(stageById, STAGES.map((st) => [st.id, st]))
   replace(ACTS, b.acts.map((a) => ({ ...a })))
   refill(actById, ACTS.map((a) => [a.id, a]))
-  replace(POIS, b.pois)
+  // older servers sent stage markers as pois; newer ones derive them from the stages
+  const stagePois = STAGES.map((st) => ({ id: 'stage-' + st.id, cat: 'stage' as const, name: st.name, x: st.x, y: st.y, detail: st.vibe, important: true }))
+  replace(POIS, [...stagePois, ...b.pois.filter((p) => p.cat !== 'stage')])
+  Object.assign(MAP, b.map ? { width: b.map.width, height: b.map.height, version: b.map.version } : { width: 1000, height: 940, version: null })
+  // on an own plan the simulated position starts in its centre
+  Object.assign(ME, b.map ? { x: Math.round(b.map.width / 2), y: Math.round(b.map.height / 2) } : DEMO_ME)
   replace(FAQS, b.faq ?? [])
   ORIGINAL.clear()
   for (const a of ACTS) ORIGINAL.set(a.id, { start: a.start, end: a.end, stage: a.stage })

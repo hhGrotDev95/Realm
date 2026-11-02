@@ -1,5 +1,5 @@
 // Thin client for the Realm API (worker/). Without VITE_API_URL the app runs in demo mode.
-import type { FestivalBundle, TimetableChange } from './data'
+import type { FestivalBundle, Poi, TimetableChange } from './data'
 
 export const API_URL: string | undefined = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || undefined
 export const online = !!API_URL
@@ -240,5 +240,10 @@ export const adminApi = (adminToken: string) => {
     removeAnnouncement: (id: string) => req<void>('DELETE', `/api/admin/announcements/${id}`),
     setChange: (actId: string, c: { start?: number; end?: number; stage?: string; cancelled?: boolean; note?: string }) => req<TimetableChange>('PUT', `/api/admin/timetable/${actId}`, c),
     revertChange: (actId: string) => req<void>('DELETE', `/api/admin/timetable/${actId}`),
+    setMap: (slug: string, m: { image: string; width: number; height: number }) => req<{ width: number; height: number; version: number }>('PUT', `/api/admin/festivals/${slug}/map`, m),
+    removeMap: (slug: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/map`),
+    placeStage: (slug: string, id: string, x: number, y: number) => req<{ id: string; x: number; y: number }>('PUT', `/api/admin/festivals/${slug}/stages/${encodeURIComponent(id)}/position`, { x, y }),
+    savePoi: (slug: string, p: { id: string; cat: string; name: string; x: number; y: number; detail?: string; status?: string | null; important?: boolean }) => req<Poi>('PUT', `/api/admin/festivals/${slug}/pois/${encodeURIComponent(p.id)}`, p),
+    deletePoi: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/pois/${encodeURIComponent(id)}`),
   }
 }

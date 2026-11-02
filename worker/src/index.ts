@@ -152,22 +152,44 @@ app.get('/api/festivals/:slug', async (c) => {
   const f = await c.env.DB.prepare('SELECT * FROM festivals WHERE slug = ?').bind(c.req.param('slug')).first<FestivalRow>()
   if (!f || (f.status === 'draft' && !(await isAdminRequest(c)))) throw new HttpError(404, 'Festival nicht gefunden')
   const db = c.env.DB
-  const [days, stages, acts, pois, faqs] = await db.batch([
+  const [days, stages, acts, pois, faqs, maps] = await db.batch([
     db.prepare('SELECT idx, date, label, short FROM festival_days WHERE festival_id = ? ORDER BY idx').bind(f.id),
     db.prepare('SELECT id, name, color, x, y, vibe FROM stages WHERE festival_id = ? ORDER BY sort, name').bind(f.id),
     db.prepare('SELECT id, day, stage_id AS stage, artist, start_min AS start, end_min AS "end", genre, bio, popularity FROM acts WHERE festival_id = ? ORDER BY day, start_min').bind(f.id),
     db.prepare('SELECT id, cat, name, x, y, detail, status, important FROM pois WHERE festival_id = ?').bind(f.id),
     db.prepare("SELECT id, question, answer, category, keywords, source, updated_at AS updatedAt FROM faqs WHERE festival_id = ? AND status = 'published' ORDER BY sort, category, question").bind(f.id),
+    db.prepare('SELECT height, updated_at FROM festival_maps WHERE festival_id = ?').bind(f.id),
   ])
+  const map = (maps.results as { height: number; updated_at: number }[])[0]
+  const stageList = stages.results as { id: string; name: string; x: number; y: number; vibe: string }[]
   return c.json({
     festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), updatedAt: f.updated_at },
     days: days.results,
     stages: stages.results,
     acts: acts.results,
-    pois: (pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+    // stage markers are derived from the stages, so a stage cannot sit in two places
+    pois: [
+      ...stageList.map((s) => ({ id: 'stage-' + s.id, cat: 'stage', name: s.name, x: s.x, y: s.y, detail: s.vibe, important: true })),
+      ...(pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+    ],
+    // own site plan: image under /api/festivals/:slug/map/:version, coordinates 1000 × height
+    map: map ? { width: MAP_WIDTH, height: map.height, version: map.updated_at } : null,
     // published answers travel with the festival document, so FAQ and bot work offline
     faq: isEnabled(JSON.parse(f.modules) as ModuleState, 'faq') ? faqs.results : [],
   })
+})
+
+/** The site plan as an image file. Versioned URLs never change, so they may be cached forever. */
+app.get('/api/festivals/:slug/map/:version', async (c) => {
+  const f = await c.env.DB.prepare('SELECT id, status FROM festivals WHERE slug = ?').bind(c.req.param('slug')).first<{ id: string; status: string }>()
+  if (!f || (f.status === 'draft' && !(await isAdminRequest(c)))) throw new HttpError(404, 'Festival nicht gefunden')
+  const m = await c.env.DB.prepare('SELECT mime, data, updated_at FROM festival_maps WHERE festival_id = ?').bind(f.id).first<{ mime: string; data: string; updated_at: number }>()
+  if (!m) throw new HttpError(404, 'Kein Geländeplan hinterlegt')
+  const bin = atob(m.data)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  const current = String(m.updated_at) === c.req.param('version')
+  return c.body(bytes, 200, { 'Content-Type': m.mime, 'Cache-Control': current && f.status !== 'draft' ? 'public, max-age=31536000, immutable' : 'no-store' })
 })
 
 /* ---------- Guest identity ---------- */
@@ -753,6 +775,98 @@ app.delete('/api/admin/festivals/:slug/faq/:id', async (c) => {
   const f = await festivalBySlug(c)
   const res = await c.env.DB.prepare('DELETE FROM faqs WHERE festival_id = ? AND id = ?').bind(f.id, c.req.param('id')).run()
   if (!res.meta.changes) throw new HttpError(404, 'Eintrag nicht gefunden')
+  await touch(c.env.DB, f.id).run()
+  return c.body(null, 204)
+})
+
+/* Map editor (admin): site plan image, stage positions, points of interest. */
+const MAP_WIDTH = 1000
+const DEFAULT_MAP_HEIGHT = 940
+const MAP_MAX = 1_400_000 // characters of base64 (~1 MB image), well below D1's value limit
+const POI_CATS = ['water', 'wc', 'food', 'medical', 'bar', 'entrance', 'camping', 'info', 'shuttle'] as const
+const mapHeight = async (db: D1Database, festivalId: string) =>
+  (await db.prepare('SELECT height FROM festival_maps WHERE festival_id = ?').bind(festivalId).first<{ height: number }>())?.height ?? DEFAULT_MAP_HEIGHT
+const coord = (x: unknown, name: string, max: number) => {
+  if (typeof x !== 'number' || !Number.isFinite(x) || x < 0 || x > max) throw new HttpError(400, `${name} muss zwischen 0 und ${max} liegen`)
+  return Math.round(x * 10) / 10
+}
+
+/** Uploads (or replaces) the site plan. Markers outside a shorter plan are moved to its edge. */
+app.put('/api/admin/festivals/:slug/map', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  const m = typeof b.image === 'string' ? b.image.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/) : null
+  if (!m) throw new HttpError(400, 'Geländeplan muss ein JPEG, PNG oder WebP sein')
+  if (m[2].length > MAP_MAX) throw new HttpError(400, 'Geländeplan ist zu groß (max. ca. 1 MB)')
+  const w = v.int(b.width, 'Bildbreite', 100, 10000)
+  const h = v.int(b.height, 'Bildhöhe', 100, 10000)
+  const height = Math.round((MAP_WIDTH * h) / w)
+  if (height < 250 || height > 4000) throw new HttpError(400, 'Seitenverhältnis des Plans ist zu extrem (max. 4 : 1)')
+  const now = Date.now()
+  await c.env.DB.batch([
+    c.env.DB.prepare('INSERT INTO festival_maps (festival_id, mime, data, height, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(festival_id) DO UPDATE SET mime = excluded.mime, data = excluded.data, height = excluded.height, updated_at = excluded.updated_at').bind(f.id, m[1], m[2], height, now),
+    c.env.DB.prepare('UPDATE stages SET y = MIN(y, ?) WHERE festival_id = ?').bind(height, f.id),
+    c.env.DB.prepare('UPDATE pois SET y = MIN(y, ?) WHERE festival_id = ?').bind(height, f.id),
+    touch(c.env.DB, f.id),
+  ])
+  return c.json({ width: MAP_WIDTH, height, version: now })
+})
+
+app.delete('/api/admin/festivals/:slug/map', async (c) => {
+  const f = await festivalBySlug(c)
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM festival_maps WHERE festival_id = ?').bind(f.id),
+    c.env.DB.prepare('UPDATE stages SET y = MIN(y, ?) WHERE festival_id = ?').bind(DEFAULT_MAP_HEIGHT, f.id),
+    c.env.DB.prepare('UPDATE pois SET y = MIN(y, ?) WHERE festival_id = ?').bind(DEFAULT_MAP_HEIGHT, f.id),
+    touch(c.env.DB, f.id),
+  ])
+  return c.body(null, 204)
+})
+
+/** Places a stage on the plan. */
+app.put('/api/admin/festivals/:slug/stages/:id/position', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  const height = await mapHeight(c.env.DB, f.id)
+  const x = coord(b.x, 'x', MAP_WIDTH)
+  const y = coord(b.y, 'y', height)
+  const res = await c.env.DB.prepare('UPDATE stages SET x = ?, y = ? WHERE festival_id = ? AND id = ?').bind(x, y, f.id, c.req.param('id')).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Bühne nicht gefunden')
+  await touch(c.env.DB, f.id).run()
+  return c.json({ id: c.req.param('id'), x, y })
+})
+
+/** Creates or updates a point of interest (water, WC, food …). */
+app.put('/api/admin/festivals/:slug/pois/:id', async (c) => {
+  const f = await festivalBySlug(c)
+  const id = c.req.param('id')
+  if (!/^[a-z0-9-]{1,40}$/.test(id) || id.startsWith('stage-')) throw new HttpError(400, 'id darf nur a–z, 0–9 und - enthalten (nicht „stage-…“)')
+  const b = await body(c)
+  const height = await mapHeight(c.env.DB, f.id)
+  const poi = {
+    id,
+    cat: v.oneOf(b.cat, 'Kategorie', POI_CATS),
+    name: v.str(b.name, 'Name', { max: 60 })!,
+    x: coord(b.x, 'x', MAP_WIDTH),
+    y: coord(b.y, 'y', height),
+    detail: v.str(b.detail, 'Beschreibung', { max: 120, optional: true }) ?? '',
+    status: b.status === undefined || b.status === null ? null : v.oneOf(b.status, 'Status', ['open', 'busy', 'closed'] as const),
+    important: b.important === undefined ? false : v.bool(b.important, 'important'),
+  }
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO pois (festival_id, id, cat, name, x, y, detail, status, important) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(festival_id, id) DO UPDATE SET cat = excluded.cat, name = excluded.name, x = excluded.x, y = excluded.y, detail = excluded.detail, status = excluded.status, important = excluded.important`,
+    ).bind(f.id, poi.id, poi.cat, poi.name, poi.x, poi.y, poi.detail, poi.status, poi.important ? 1 : 0),
+    touch(c.env.DB, f.id),
+  ])
+  return c.json({ ...poi, status: poi.status ?? undefined })
+})
+
+app.delete('/api/admin/festivals/:slug/pois/:id', async (c) => {
+  const f = await festivalBySlug(c)
+  const res = await c.env.DB.prepare('DELETE FROM pois WHERE festival_id = ? AND id = ?').bind(f.id, c.req.param('id')).run()
+  if (!res.meta.changes) throw new HttpError(404, 'Ort nicht gefunden')
   await touch(c.env.DB, f.id).run()
   return c.body(null, 204)
 })

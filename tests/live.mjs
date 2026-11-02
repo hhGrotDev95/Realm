@@ -1,6 +1,7 @@
 // Two-user end-to-end test against the real worker (wrangler dev, local D1) and the Vite dev server.
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { crc32, deflateSync } from 'node:zlib'
 import { chromium } from 'playwright'
 
 const API = 'http://127.0.0.1:8798'
@@ -41,6 +42,23 @@ const user = async () => {
   const page = await ctx.newPage()
   page.on('pageerror', (e) => errors.push(e.stack ?? e.message))
   return page
+}
+/** A solid-colour PNG of the given size (a real, decodable site plan for the map editor). */
+const pngOf = (w, h) => {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4)
+    len.writeUInt32BE(data.length)
+    const body = Buffer.concat([Buffer.from(type), data])
+    const crc = Buffer.alloc(4)
+    crc.writeUInt32BE(crc32(body))
+    return Buffer.concat([len, body, crc])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(w, 0)
+  ihdr.writeUInt32BE(h, 4)
+  ihdr.set([8, 2, 0, 0, 0], 8) // 8 bit RGB
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, Buffer.from([60, 140, 90]))])
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(Buffer.concat(Array(h).fill(row)))), chunk('IEND', Buffer.alloc(0))])
 }
 const step = async (name, fn) => {
   await fn()
@@ -399,6 +417,43 @@ try {
     await visitor.getByRole('button', { name: 'Fragen' }).click()
     await visitor.getByText('Quelle: Service-Infos').waitFor()
     await visitor.context().setOffline(false)
+
+    // map editor: own site plan (2 : 1), a new place and a moved stage reach visitors; the plan is cached offline
+    await org.getByRole('tab', { name: 'Karte' }).click()
+    await org.locator('input[aria-label="Geländeplan hochladen"]').setInputFiles({ name: 'plan.png', mimeType: 'image/png', buffer: pngOf(1600, 800) })
+    await org.getByText('Geländeplan gespeichert').waitFor()
+    await org.getByRole('tab', { name: 'Karte' }).click()
+    await org.getByAltText('Geländeplan').waitFor()
+    const surface = org.getByTestId('map-editor')
+    const box = await surface.boundingBox()
+    await org.getByRole('button', { name: 'Neuer Ort' }).click()
+    await surface.click({ position: { x: box.width * 0.25, y: box.height * 0.5 } })
+    await org.getByLabel('Name', { exact: true }).fill('Schließfächer')
+    await org.getByLabel('Kategorie').selectOption('info')
+    await org.getByRole('button', { name: 'Speichern', exact: true }).click()
+    await org.getByText('„Schließfächer“ gespeichert').waitFor()
+    const stage = org.getByRole('button', { name: /^Bühne Wiese/ })
+    const sb = await stage.boundingBox()
+    await org.mouse.move(sb.x + sb.width / 2, sb.y + sb.height / 2)
+    await org.mouse.down()
+    await org.mouse.move(box.x + box.width * 0.75, box.y + box.height * 0.3, { steps: 8 })
+    await org.mouse.up()
+    await org.getByText('Wiese platziert').waitFor()
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/map-editor.png`, fullPage: true })
+    const doc = await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()
+    if (doc.map?.height !== 500) throw new Error('map space not 1000 × 500: ' + JSON.stringify(doc.map))
+    const locker = doc.pois.find((p) => p.name === 'Schließfächer')
+    if (!locker || Math.abs(locker.x - 250) > 15 || Math.abs(locker.y - 250) > 15) throw new Error('place not at its spot: ' + JSON.stringify(locker))
+    const wiese = doc.pois.find((p) => p.id === 'stage-wiese')
+    if (Math.abs(wiese.x - 750) > 15 || Math.abs(wiese.y - 150) > 15) throw new Error('stage not moved: ' + JSON.stringify(wiese))
+    await visitor.reload()
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await nav(visitor, 'Map')
+    await visitor.getByRole('button', { name: 'Schließfächer' }).waitFor()
+    await visitor.getByRole('button', { name: 'Wiese' }).first().waitFor()
+    await visitor.waitForFunction(() => [...document.querySelectorAll('main[aria-label="Festivalkarte"] img')].some((i) => i.complete && i.naturalWidth === 1600))
+    const cached = await visitor.evaluate(async () => (await (await caches.open('site-plans')).keys()).map((r) => r.url))
+    if (cached.length !== 1 || !cached[0].includes('/api/festivals/testwiese-festival/map/')) throw new Error('site plan not cached for offline use: ' + cached)
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

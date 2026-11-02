@@ -67,6 +67,10 @@ Veranstalter pflegen die FAQ in der Konsole (**FAQ**): Frage, Antwort, Kategorie
 
 Der Bot (`src/faq/match.ts`) läuft auf dem Gerät und **schreibt keine eigenen Texte**: Er sucht die passende freigegebene Antwort (Synonyme wie „Klo“ → „WC“, Umlaute, einfache Wortstämme) und zeigt sie mit **Quelle und Stand**. Ist er nicht sicher, bietet er Vorschläge an; findet er nichts, sagt er das und verweist aufs Info-Zelt. Ein Treffer nur im Antworttext reicht nie für eine Antwort. Module „FAQ & Infos“ und „FAQ-Bot“ sind abschaltbar.
 
+### Karte und Geländeplan
+
+In der Konsole unter **Karte**: eigenen Geländeplan als Bild hochladen (PNG/JPEG/WebP; wird im Browser auf max. 2400 px verkleinert und unter ~1 MB komprimiert), Bühnen per Ziehen (oder Auswahl + Pfeiltasten, Shift = größere Schritte) platzieren, Orte (Wasser, WC, Essen, Bar, Sanität, Eingang, Camping, Info, Shuttle) anlegen, bearbeiten und löschen. Koordinaten liegen in einem Kartenraum von 1000 Einheiten Breite, die Höhe folgt dem Seitenverhältnis des Plans; ein neuer, flacherer Plan zieht Marker außerhalb an den Rand. Die Bühnenmarker werden aus den Bühnen abgeleitet (eine Bühne kann nicht an zwei Orten stehen). Die App lädt den Plan unter einer versionierten URL (`/api/festivals/:slug/map/:version`) einmal herunter und hält ihn im Cache `site-plans` – die Karte funktioniert danach offline. Ohne eigenen Plan zeigt die App das Beispielgelände.
+
 ## Backend (`worker/`)
 
 Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt eine pseudonyme ID und ein Bearer-Token (gespeichert wird nur der SHA-256-Hash).

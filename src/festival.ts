@@ -2,11 +2,13 @@
 import { adminApi, api, online, setFestival } from './api'
 import { FESTIVAL, loadFestivalBundle as loadBundle, type FestivalBundle } from './data'
 import { applyTheme } from './theme/apply'
+import { prefetchMapImage } from './mapImage'
 
 /** Loads the data and applies the festival's branding in one go. */
 const loadFestivalBundle = (b: FestivalBundle) => {
   loadBundle(b)
   applyTheme(FESTIVAL.theme)
+  if (b.festival.status !== 'draft') prefetchMapImage()
 }
 
 export const DEFAULT_FESTIVAL = (import.meta.env.VITE_FESTIVAL as string | undefined) || 'realm-open-air'
