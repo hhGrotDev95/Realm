@@ -1,6 +1,6 @@
 # Realm – Fortschritt
 
-Stand: 19.10.2026
+Stand: 03.11.2026
 
 - Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
 - Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`, gemergt als PR #5
@@ -277,3 +277,38 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - `LazyBoundary`: ein fehlgeschlagener Chunk-Load zeigt „Erneut versuchen“ statt die App abstürzen zu lassen.
 - Smoke-Test prüft Offline jetzt ehrlich (Server wird beendet, da `setOffline` Service-Worker-Fetches nicht abdeckt).
 - Geprüft: typecheck, test:import, build, test:e2e, test:a11y, test:live – alles grün.
+
+## P6a · Karteneditor: Orte und Bühnenpositionen — erledigt (Branch `ccr-c4b0523e-arx1xq`, 03.11.2026)
+
+- Worker: `PUT /api/admin/festivals/:slug/map` mit `{ stages: [{id,x,y}], pois: [...] }` – Bühnenpositionen werden aktualisiert, Orte (Wasser, WC, Essen, Sanitäter, Bar, Eingang, Camping, Info, Shuttle) als Ganzes ersetzt. Validierung: Koordinaten innerhalb 0–1000 × 0–940, nur bekannte Bühnen, id `a-z0-9-` und nicht `stage-…`, Kategorie, Status (open/busy/closed), Dubletten, max. 200 Orte.
+- Festivaldokument: Bühnen-Marker werden jetzt immer aus der Bühnenliste erzeugt. Vorher hatten in der Konsole angelegte Festivals **keine** Bühnen auf der Karte (nur die Seed-Daten enthielten `stage-*`-Orte); Umbenennen/Verschieben einer Bühne wirkt sofort auf den Marker.
+- Konsole: neuer Tab „Karte“ – Marker ziehen (Greifversatz bleibt erhalten), per Tastatur verschieben (Pfeile 5, Umschalt+Pfeile 25), neuen Ort per Kategorie-Chip + Tippen (oder „In der Mitte einfügen“), Formular für Name, Kategorie, Status, Beschreibung, „immer zeigen“, X/Y, Entfernen; Verwerfen, Hinweis auf ungespeicherte Änderungen (inkl. `beforeunload`).
+- Gemeinsame Geometrie `src/mapGeometry.ts` (Kartenmaße, Kategorien, Labels) für App, Konsole und Worker; Geländezeichnung aus `MapScreen` nach `src/screens/MapGround.tsx` ausgelagert (nutzt Konsole und Besucherkarte).
+
+### Nebenbei gefundener Absturz (behoben)
+- Crew-Chat: `useEffect(() => end.current?.scrollIntoView(...))` gab den Rückgabewert zurück. Aktuelle Chromium-Versionen liefern dort ein Promise; React hielt es für die Cleanup-Funktion → **App stürzte beim Senden einer Nachricht ab** (schwarzer Bildschirm, „destroy is not a function“). Fiel im Smoke-Test mit Chromium 1243 auf; jetzt mit Block-Body.
+
+### Hinweise für Testläufe in der Cloud-Umgebung
+- Playwright-Browser: `CHROMIUM_PATH=/opt/pw-browsers/chromium` setzen (die gepinnte Headless-Shell fehlt dort).
+- Bricht `test:live` ab, bleiben `wrangler`/`vite` auf 8798/5199 stehen; der nächste Lauf spricht dann mit dem alten Worker (gelöschte DB → 500 „Festival nicht erreichbar“). Vorher alte Prozesse beenden.
+
+Dateien: `src/mapGeometry.ts`, `src/admin/MapEditor.tsx`, `src/admin/Admin.tsx`, `src/screens/MapGround.tsx`, `src/screens/MapScreen.tsx`, `src/api.ts` (`MapPlace`, `saveMap`), `src/data.ts`, `src/sheets.tsx`, `src/styles.css`, `worker/src/index.ts`, `worker/test/api.test.mjs`, `tests/live.mjs`.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler |
+| `npm run test:import` | 8 Parser, 9 Kontrast, 7 Module, 19 FAQ-Bot – bestanden |
+| `cd worker && npm test` | 28 API-Tests (neu: Karteneditor) + Migrationstest bestanden |
+| `npm run test:e2e` | 11 Abläufe bestanden (vor dem Chat-Fix: Absturz bei „crew chat sends a message“, auch auf unverändertem `main`) |
+| `npm run test:a11y` | keine schwerwiegenden Befunde (Konsole nur ohne Server geprüft) |
+| `npm run test:live` | alle 17 Szenarien bestanden; der Festival-Ablauf setzt jetzt per Klick eine Wasserstelle, verschiebt die Bühne per Tastatur, speichert und prüft API und Besucherkarte (Marker, Bühnen-Marker, Suche, Ort-Sheet) |
+
+Nicht geprüft: GitHub Actions (kein PR erstellt), echtes Ziehen per Touch auf einem Gerät (nur Maus/Tastatur über Playwright bzw. Code).
+
+## Nächste Schritte
+
+1. **P6b: eigener Geländeplan** – Veranstalter lädt ein Bild (PNG/JPEG/WebP, verkleinert im Browser wie das Logo) als Kartenhintergrund; ohne Bild bleibt die gezeichnete Demo-Karte. Speicherung z. B. als Data-URL in einer neuen Spalte `festivals.map_image` (Migration 0009) oder getrennt vom Festivaldokument abrufbar, damit das Dokument klein bleibt. Danach in `Ground` bzw. `MapGround.tsx` einhängen; Besucherkarte offline über den Bundle-Cache.
+2. a11y-Test um die Konsolenansicht „Karte“ erweitern (`tests/a11y.mjs`).
+3. P7: Sprachen DE/EN.
+
+Offene Blocker (unverändert): Deployment (Cloudflare-Konto), Web-Push (VAPID + Deployment), native Funktionen.

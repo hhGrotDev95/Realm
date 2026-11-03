@@ -470,6 +470,39 @@ try {
     assert.deepEqual(t, { brand: '#4fd1c5', font: 'space', logo: png })
   })
 
+  await test('map editor: stage positions and places, validated, replaced as a whole', async () => {
+    const A = 'test-admin-token'
+    const put = (body) => api('PUT', '/api/admin/festivals/nordlicht/map', A, body, null)
+    const bundle = async () => (await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data
+    const before = await bundle()
+    const stage = before.stages[0]
+    // every stage has a marker, even without a stored stage place
+    assert.ok(before.pois.some((p) => p.id === 'stage-' + stage.id && p.cat === 'stage'))
+    assert.equal((await api('PUT', '/api/admin/festivals/nordlicht/map', lea.token, { stages: [], pois: [] }, null)).status, 401)
+    assert.equal((await put({ stages: [] })).status, 400)
+    assert.equal((await put({ stages: [{ id: 'gibts-nicht', x: 1, y: 1 }], pois: [] })).status, 400)
+    assert.equal((await put({ stages: [{ id: stage.id, x: 1200, y: 1 }], pois: [] })).status, 400)
+    const water = { id: 'wasser-1', cat: 'water', name: 'Wasser am See', x: 300.4, y: 410, detail: 'Trinkwasser', status: 'open', important: true }
+    assert.equal((await put({ stages: [], pois: [{ ...water, cat: 'stage' }] })).status, 400)
+    assert.equal((await put({ stages: [], pois: [{ ...water, id: 'stage-x' }] })).status, 400)
+    assert.equal((await put({ stages: [], pois: [{ ...water, status: 'kaputt' }] })).status, 400)
+    assert.equal((await put({ stages: [], pois: [water, water] })).status, 400)
+    assert.equal((await put({ stages: [], pois: [{ ...water, name: '' }] })).status, 400)
+    const ok = await put({ stages: [{ id: stage.id, x: 111, y: 222 }], pois: [water, { id: 'wc-1', cat: 'wc', name: 'WC Süd', x: 500, y: 900 }] })
+    assert.equal(ok.status, 200)
+    const after = await bundle()
+    assert.ok(after.festival.updatedAt > before.festival.updatedAt)
+    assert.deepEqual(after.stages.find((s) => s.id === stage.id).x, 111)
+    assert.deepEqual(after.pois.find((p) => p.id === 'stage-' + stage.id), { id: 'stage-' + stage.id, cat: 'stage', name: stage.name, x: 111, y: 222, detail: stage.vibe, important: true })
+    assert.deepEqual(after.pois.find((p) => p.id === 'wasser-1'), { ...water, x: 300 })
+    assert.deepEqual(after.pois.find((p) => p.id === 'wc-1'), { id: 'wc-1', cat: 'wc', name: 'WC Süd', x: 500, y: 900, detail: '', important: false })
+    // replaced as a whole: places missing from the next save are gone
+    assert.equal((await put({ stages: [], pois: [water] })).status, 200)
+    const last = await bundle()
+    assert.equal(last.pois.filter((p) => p.cat !== 'stage').length, 1)
+    assert.equal(last.pois.filter((p) => p.cat === 'stage').length, last.stages.length)
+  })
+
   await test('modules: switched-off features are refused by the API, dependencies enforced', async () => {
     const A = 'test-admin-token'
     const N = 'nordlicht'

@@ -186,7 +186,8 @@ export function friendsFor(actId: string): string[] {
   return FRIENDS.filter((f) => hash(f.id + actId) < 0.1 + a.popularity * 0.6).map((f) => f.id)
 }
 
-export type PoiCat = 'stage' | 'water' | 'wc' | 'food' | 'medical' | 'bar' | 'entrance' | 'camping' | 'info' | 'shuttle'
+export type { PoiCat } from './mapGeometry.ts'
+import type { PoiCat } from './mapGeometry.ts'
 
 export interface Poi {
   id: string

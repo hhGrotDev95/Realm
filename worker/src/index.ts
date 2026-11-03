@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { isEnabled, MODULE_KEYS, moduleConflicts, MODULES, type ModuleKey, type ModuleState } from '../../src/modules'
 import { checkBrand, HEX } from '../../src/theme/contrast'
+import { MAP_H, MAP_W, MAX_PLACES, PLACE_CATS, PLACE_STATUS } from '../../src/mapGeometry'
 import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v } from './util'
 
 export interface Env {
@@ -164,7 +165,11 @@ app.get('/api/festivals/:slug', async (c) => {
     days: days.results,
     stages: stages.results,
     acts: acts.results,
-    pois: (pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+    pois: [
+      // stage markers always follow the stage list (also for festivals created in the console)
+      ...(stages.results as { id: string; name: string; x: number; y: number; vibe: string }[]).map((s) => ({ id: 'stage-' + s.id, cat: 'stage', name: s.name, x: s.x, y: s.y, detail: s.vibe, important: true })),
+      ...(pois.results as Record<string, unknown>[]).filter((p) => p.cat !== 'stage').map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+    ],
     // published answers travel with the festival document, so FAQ and bot work offline
     faq: isEnabled(JSON.parse(f.modules) as ModuleState, 'faq') ? faqs.results : [],
   })
@@ -694,6 +699,54 @@ app.put('/api/admin/festivals/:slug/stages', async (c) => {
     touch(c.env.DB, f.id),
   ])
   return c.json({ stages })
+})
+
+const coord = (x: unknown, name: string, max: number) => {
+  if (typeof x !== 'number' || !Number.isFinite(x) || x < 0 || x > max) throw new HttpError(400, `${name} liegt außerhalb der Karte`)
+  return Math.round(x)
+}
+
+/**
+ * Map editor: positions of the stages and the full list of other places (water, WC, food …).
+ * Places are replaced as a whole, so the console's state is exactly what visitors get.
+ */
+app.put('/api/admin/festivals/:slug/map', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  if (!Array.isArray(b.stages) || !Array.isArray(b.pois)) throw new HttpError(400, 'stages und pois müssen Listen sein')
+  if (b.pois.length > MAX_PLACES) throw new HttpError(400, `Höchstens ${MAX_PLACES} Orte`)
+  const known = new Set((await c.env.DB.prepare('SELECT id FROM stages WHERE festival_id = ?').bind(f.id).all<{ id: string }>()).results.map((r) => r.id))
+  const stages = b.stages.map((raw, i) => {
+    const s = (raw ?? {}) as Record<string, unknown>
+    if (typeof s.id !== 'string' || !known.has(s.id)) throw new HttpError(400, `Bühne ${i + 1}: unbekannte Bühne`)
+    return { id: s.id, x: coord(s.x, `Bühne „${s.id}“`, MAP_W), y: coord(s.y, `Bühne „${s.id}“`, MAP_H) }
+  })
+  const pois = b.pois.map((raw, i) => {
+    const p = (raw ?? {}) as Record<string, unknown>
+    const label = `Ort ${i + 1}`
+    const id = v.str(p.id, `${label}: id`, { max: 40 })!
+    if (!/^[a-z0-9-]{1,40}$/.test(id) || id.startsWith('stage-')) throw new HttpError(400, `${label}: id ist ungültig`)
+    const name = v.str(p.name, `${label}: Name`, { max: 40 })!
+    return {
+      id,
+      cat: v.oneOf(p.cat, `${label}: Kategorie`, PLACE_CATS),
+      name,
+      x: coord(p.x, `„${name}“`, MAP_W),
+      y: coord(p.y, `„${name}“`, MAP_H),
+      detail: v.str(p.detail, `${label}: Beschreibung`, { max: 80, optional: true }) ?? '',
+      status: p.status === undefined || p.status === null ? null : v.oneOf(p.status, `${label}: Status`, PLACE_STATUS),
+      important: p.important === undefined ? false : v.bool(p.important, `${label}: wichtig`),
+    }
+  })
+  if (new Set(pois.map((p) => p.id)).size !== pois.length) throw new HttpError(400, 'Zwei Orte haben dieselbe id')
+  const db = c.env.DB
+  await db.batch([
+    db.prepare('DELETE FROM pois WHERE festival_id = ?').bind(f.id),
+    ...pois.map((p) => db.prepare('INSERT INTO pois (festival_id, id, cat, name, x, y, detail, status, important) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, p.id, p.cat, p.name, p.x, p.y, p.detail, p.status, p.important ? 1 : 0)),
+    ...stages.map((s) => db.prepare('UPDATE stages SET x = ?, y = ? WHERE festival_id = ? AND id = ?').bind(s.x, s.y, f.id, s.id)),
+    touch(db, f.id),
+  ])
+  return c.json({ stages, pois })
 })
 
 /** Turns optional modules on or off; dependencies must be consistent. */

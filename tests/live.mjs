@@ -369,6 +369,35 @@ try {
     const refused = await fetch(`${API}/api/crews`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + guest.token, 'X-Festival': 'testwiese-festival' }, body: JSON.stringify({ name: 'X' }) })
     if (refused.status !== 403) throw new Error('crew API not refused: ' + refused.status)
 
+    // map editor: a new water point placed by click, a stage moved by keyboard – visitors find both
+    await org.getByRole('tab', { name: 'Karte' }).click()
+    await org.getByRole('group', { name: 'Neuen Ort hinzufügen' }).getByRole('button', { name: 'Wasser' }).click()
+    await org.getByRole('group', { name: 'Kartenfläche' }).click({ position: { x: 120, y: 140 } })
+    await org.getByLabel('Name', { exact: true }).fill('Trinkwasser Wiese')
+    await org.getByLabel('Beschreibung').fill('kostenlos auffüllen')
+    const before = await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()
+    const wiese = before.stages.find((st) => st.id === 'wiese')
+    await org.getByRole('button', { name: /^Bühne Wiese/ }).focus()
+    await org.keyboard.press('Shift+ArrowRight')
+    await org.getByText('Ungespeicherte Änderungen').waitFor()
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/map-editor.png`, fullPage: true })
+    await org.getByRole('button', { name: 'Karte speichern' }).click()
+    await org.getByText(/Karte gespeichert/).waitFor()
+    const after = await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()
+    const water = after.pois.find((p) => p.name === 'Trinkwasser Wiese')
+    if (!water || water.cat !== 'water' || water.detail !== 'kostenlos auffüllen') throw new Error('place not saved: ' + JSON.stringify(after.pois))
+    if (after.pois.find((p) => p.id === 'stage-wiese')?.x !== wiese.x + 25) throw new Error('stage not moved')
+    await visitor.reload()
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await nav(visitor, 'Map')
+    await visitor.getByRole('button', { name: 'Trinkwasser Wiese', exact: true }).waitFor() // marker on the map
+    await visitor.getByRole('button', { name: 'Wiese', exact: true }).waitFor() // stage marker of a console-made festival
+    await visitor.getByLabel('Karte durchsuchen').fill('Trinkwasser')
+    await visitor.locator('.tile', { hasText: 'Trinkwasser Wiese' }).click()
+    await visitor.getByRole('dialog').getByText('kostenlos auffüllen').first().waitFor()
+    await visitor.keyboard.press('Escape')
+    await nav(visitor, 'Home')
+
     // FAQ: a draft stays invisible; once published the bot answers with source – also offline
     await org.getByRole('tab', { name: 'FAQ' }).click()
     await org.getByRole('button', { name: 'Neue Frage' }).click()
