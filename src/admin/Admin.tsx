@@ -10,11 +10,12 @@ import { ChatModeration } from './ChatModeration'
 import { LegalEditor } from './Legal'
 import { AccessPanel, inviteFromUrl, SignIn, sessionState } from './Access'
 import { CommunityReports } from './CommunityReports'
+import { announcementDraft, type AnnouncementDraft } from './announcementDraft'
 import { CreateFestival, ImportPanel, Settings, SetupWizard, StagesEditor } from './Setup'
 import { currentSlug } from '../festival'
 import { night } from '../festivalTime'
 import type { ModuleKey } from '../modules'
-import { ACTS, DAYS, FESTIVAL, fmt, loadFestivalBundle, on, STAGES, stageById, type Act, type StageId, type TimetableChange } from '../data'
+import { ACTS, DAYS, FESTIVAL, fmt, loadFestivalBundle, on, STAGES, stageById, type Act, type StageId, type TimetableChange, actTime } from '../data'
 
 const KEY = 'realm.admin'
 type Tab = 'legal' | 'access' | 'setup' | 'announcements' | 'timetable' | 'import' | 'stages' | 'map' | 'faq' | 'analytics' | 'chat' | 'branding' | 'modules' | 'settings'
@@ -225,6 +226,8 @@ function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string
   // the setup wizard only exists for drafts; once published the same place shows the status
   if (tab === 'setup' && !draft) tab = 'settings'
   const visible = TABS.filter((t) => (!t.draftOnly || draft) && (!t.module || on(t.module)))
+  // an announcement prepared from a cancellation or move in "Live-Änderungen"
+  const [annDraft, setAnnDraft] = useState<AnnouncementDraft | null>(null)
   return (
     <>
       {/* narrow screens: one compact picker instead of five rows of tabs; going live stays one tap away (audit D09) */}
@@ -255,11 +258,21 @@ function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string
       {tab === 'setup' && <SetupWizard token={token} flash={flash} slug={slug} reload={reload} />}
       {tab === 'announcements' && (
         <div className="stack" style={{ gap: 16 }}>
-          <Announcements token={token} flash={flash} />
+          <Announcements key={annDraft ? `draft:${annDraft.title}` : 'new'} token={token} flash={flash} draft={annDraft} onDraftDone={() => setAnnDraft(null)} />
           {on('reports') && <CommunityReports token={token} flash={flash} slug={slug} />}
         </div>
       )}
-      {tab === 'timetable' && <Timetable token={token} flash={flash} slug={slug} />}
+      {tab === 'timetable' && (
+        <Timetable
+          token={token}
+          flash={flash}
+          slug={slug}
+          onDraft={(d) => {
+            setAnnDraft(d)
+            setTab('announcements')
+          }}
+        />
+      )}
       {tab === 'import' && (
         <div className="card">
           <ImportPanel token={token} flash={flash} slug={slug} reload={reload} />
@@ -289,10 +302,12 @@ function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : 'Fehler')
 
-function Announcements({ token, flash }: { token: string; flash: (k: 'ok' | 'err', t: string) => void }) {
+const EMPTY_FORM = { title: '', body: '', titleEn: '', bodyEn: '', place: '', severity: 'info' as Announcement['severity'], valid: '' }
+
+function Announcements({ token, flash, draft, onDraftDone }: { token: string; flash: (k: 'ok' | 'err', t: string) => void; draft?: AnnouncementDraft | null; onDraftDone?: () => void }) {
   const admin = useMemo(() => adminApi(token), [token])
   const [items, setItems] = useState<Announcement[] | null>(null)
-  const [form, setForm] = useState({ title: '', body: '', titleEn: '', bodyEn: '', place: '', severity: 'info' as Announcement['severity'], valid: '' })
+  const [form, setForm] = useState(() => (draft ? { title: draft.title, body: draft.body, titleEn: draft.titleEn, bodyEn: draft.bodyEn, place: draft.place, severity: draft.severity as Announcement['severity'], valid: draft.valid } : EMPTY_FORM))
   const [busy, setBusy] = useState(false)
   const load = useCallback(() => admin.announcements().then(setItems, (e) => flash('err', errText(e))), [admin, flash])
   useEffect(() => {
@@ -309,7 +324,8 @@ function Announcements({ token, flash }: { token: string; flash: (k: 'ok' | 'err
           setBusy(true)
           try {
             await admin.announce({ title: form.title.trim(), body: form.body.trim() || undefined, titleEn: form.titleEn.trim() || undefined, bodyEn: form.bodyEn.trim() || undefined, place: form.place.trim() || undefined, severity: form.severity, validMin })
-            setForm({ title: '', body: '', titleEn: '', bodyEn: '', place: '', severity: 'info', valid: '' })
+            setForm(EMPTY_FORM)
+            onDraftDone?.()
             flash('ok', 'Meldung veröffentlicht')
             load()
           } catch (e) {
@@ -319,6 +335,21 @@ function Announcements({ token, flash }: { token: string; flash: (k: 'ok' | 'err
         }}
       >
         <h2 className="admin-h">Neue Meldung</h2>
+        {draft && (
+          <div className="admin-draft small" role="status" data-testid="announcement-draft">
+            <span className="grow">Vorausgefüllt aus der Änderung an {draft.source}. Bitte prüfen, dann veröffentlichen.</span>
+            <button
+              type="button"
+              className="btn secondary sm"
+              onClick={() => {
+                setForm(EMPTY_FORM)
+                onDraftDone?.()
+              }}
+            >
+              Verwerfen
+            </button>
+          </div>
+        )}
         <label className="admin-field">
           <span>Titel</span>
           <input className="field" value={form.title} maxLength={120} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="z. B. Gewitterwarnung ab 22:30" />
@@ -415,11 +446,15 @@ function Announcements({ token, flash }: { token: string; flash: (k: 'ok' | 'err
   )
 }
 
-function Timetable({ token, flash, slug }: { token: string; flash: (k: 'ok' | 'err', t: string) => void; slug: string }) {
+const dayEn = (date: string) => new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'UTC' })
+
+function Timetable({ token, flash, slug, onDraft }: { token: string; flash: (k: 'ok' | 'err', t: string) => void; slug: string; onDraft: (d: AnnouncementDraft) => void }) {
   const admin = useMemo(() => adminApi(token), [token])
   const [day, setDay] = useState(0)
   const [changes, setChanges] = useState<TimetableChange[] | null>(null)
   const [edit, setEdit] = useState<Act | null>(null)
+  // the last published change, offered as an announcement for everyone (cleared when another act is picked)
+  const [published, setPublished] = useState<{ actId: string; draft: AnnouncementDraft } | null>(null)
   // how many synced plans hold each act, so a cancellation or move says whom it reaches;
   // the same aggregates as the analytics tab (groups below minGroup withheld). Optional: on failure the list stays as is.
   const [interest, setInterest] = useState<PlanInterest | null>(null)
@@ -457,7 +492,14 @@ function Timetable({ token, flash, slug }: { token: string; flash: (k: 'ok' | 'e
           {ACTS.filter((a) => a.day === day).map((a) => {
             const c = byId.get(a.id)
             return (
-              <button key={a.id} className={`list-item ${edit?.id === a.id ? 'admin-sel' : ''}`} onClick={() => setEdit(a)}>
+              <button
+                key={a.id}
+                className={`list-item ${edit?.id === a.id ? 'admin-sel' : ''}`}
+                onClick={() => {
+                  setEdit(a)
+                  if (published?.actId !== a.id) setPublished(null)
+                }}
+              >
                 <span style={{ width: 110, flex: 'none', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
                   {fmt(a.start)}–{fmt(a.end)}
                 </span>
@@ -485,6 +527,25 @@ function Timetable({ token, flash, slug }: { token: string; flash: (k: 'ok' | 'e
               try {
                 await admin.setChange(edit.id, c)
                 flash('ok', `${edit.artist}: Änderung veröffentlicht`)
+                const d = DAYS[edit.day]
+                const draft = announcementDraft(
+                  {
+                    artist: edit.artist,
+                    dayDe: d.label,
+                    dayEn: dayEn(d.date),
+                    start: edit.start,
+                    end: edit.end,
+                    stage: stageById[edit.stage].name,
+                    cancelled: !!c.cancelled,
+                    newStart: c.start,
+                    newEnd: c.end,
+                    newStage: c.stage ? stageById[c.stage].name : undefined,
+                    note: c.note,
+                    endsAt: actTime(edit.day, c.end ?? edit.end),
+                  },
+                  Date.now(),
+                )
+                setPublished(draft ? { actId: edit.id, draft } : null)
                 load()
               } catch (e) {
                 flash('err', errText(e))
@@ -493,6 +554,7 @@ function Timetable({ token, flash, slug }: { token: string; flash: (k: 'ok' | 'e
             onRevert={async () => {
               try {
                 await admin.revertChange(edit.id)
+                setPublished(null)
                 flash('ok', `${edit.artist}: Originalzeit wiederhergestellt`)
                 load()
               } catch (e) {
@@ -502,6 +564,16 @@ function Timetable({ token, flash, slug }: { token: string; flash: (k: 'ok' | 'e
           />
         ) : (
           <p className="muted small">Wähle links einen Act, um ihn zu verschieben, die Bühne zu ändern oder ihn abzusagen.</p>
+        )}
+        {edit && published?.actId === edit.id && (
+          <div className="admin-draft small" role="status" data-testid="offer-announcement" style={{ marginTop: 14 }}>
+            <span className="grow">
+              Die Änderung ist live. Wer {edit.artist} geplant hat, sieht sie auf Home, alle anderen nur im Line-up. {published.draft.severity === 'warning' ? 'Eine Warnung erreicht alle Besucher:innen ganz oben auf Home.' : 'Eine Meldung erreicht alle Besucher:innen in den Updates.'}
+            </span>
+            <button type="button" className="btn primary sm" onClick={() => onDraft(published.draft)}>
+              <Megaphone size={16} /> Meldung vorbereiten
+            </button>
+          </div>
         )}
       </section>
     </div>

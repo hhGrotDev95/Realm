@@ -526,6 +526,7 @@ select.field { appearance: none; }
 
 /* optional English content in the console */
 .admin-en { margin: 0 0 14px; padding: 10px 14px; border-radius: var(--r-sm); background: var(--surface-2); }
+.admin-draft { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 14px; padding: 10px 14px; border-radius: var(--r-sm); background: var(--surface-2); border-left: 3px solid var(--brand); }
 .admin-en summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-2); min-height: 32px; display: flex; align-items: center; }
 
 /* narrow phones (320 px): segments and toolbar stay on one line (audit D08) */
