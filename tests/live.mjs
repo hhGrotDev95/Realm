@@ -517,6 +517,17 @@ try {
     await nav(lea, 'Line-up')
     await lea.getByRole('tab', { name: 'Alle', exact: true }).click()
     await lea.locator('.act', { hasText: 'Ruby Kade' }).getByText('Neu 18:15 statt 17:45').waitFor({ timeout: 15000 })
+    // the published move is offered as an announcement for everyone, prefilled in the announcements tab
+    await org.getByTestId('offer-announcement').getByRole('button', { name: 'Meldung vorbereiten' }).click()
+    await org.getByTestId('announcement-draft').getByText('Vorausgefüllt aus der Änderung an Ruby Kade').waitFor()
+    const drafted = await org.getByPlaceholder('z. B. Gewitterwarnung ab 22:30').inputValue()
+    if (drafted !== 'Verschoben: Ruby Kade jetzt 18:15 statt 17:45') throw new Error('announcement not prefilled from the move: ' + drafted)
+    if (!(await org.getByRole('button', { name: 'Info', exact: true }).getAttribute('aria-pressed') === 'true')) throw new Error('a move should be drafted as info')
+    await org.getByTestId('announcement-draft').getByRole('button', { name: 'Verwerfen' }).click()
+    if (await org.getByPlaceholder('z. B. Gewitterwarnung ab 22:30').inputValue()) throw new Error('discarding the draft left the form filled')
+    await org.getByRole('tab', { name: /Live-Änderungen/ }).click()
+    await org.getByRole('button', { name: 'Freitag' }).click()
+    await org.locator('.list-item', { hasText: 'Ruby Kade' }).click()
     await org.getByRole('button', { name: 'Zurücksetzen' }).click()
     await org.getByText('Originalzeit wiederhergestellt').waitFor()
     // the change log names Olga for each change
