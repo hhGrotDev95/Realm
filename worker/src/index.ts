@@ -761,7 +761,7 @@ app.delete('/api/meetups/:id', async (c) => {
 
 /* ---------- Official announcements ---------- */
 
-type AnnouncementRow = { id: string; title: string; body: string | null; place: string | null; poi: string | null; severity: string; created_at: number; expires_at: number | null; title_en: string | null; body_en: string | null }
+type AnnouncementRow = { id: string; title: string; body: string | null; place: string | null; poi: string | null; severity: string; created_at: number; expires_at: number | null; title_en: string | null; body_en: string | null; act_id: string | null }
 const toAnnouncement = (r: AnnouncementRow, now: number) => ({
   id: r.id,
   title: r.title,
@@ -772,6 +772,8 @@ const toAnnouncement = (r: AnnouncementRow, now: number) => ({
   ageMin: Math.max(0, Math.floor((now - r.created_at) / MIN)),
   validMin: r.expires_at === null ? null : Math.max(0, Math.ceil((r.expires_at - now) / MIN)),
   ...(r.title_en ? { en: { title: r.title_en, body: r.body_en } } : {}),
+  // set when the announcement was prepared from a timetable change of this act
+  ...(r.act_id ? { actId: r.act_id } : {}),
 })
 
 app.get('/api/announcements', async (c) => {
@@ -1022,15 +1024,17 @@ function announcementInput(b: Record<string, unknown>, partial = false) {
     validMin: b.validMin === undefined || b.validMin === null ? (opt('validMin') ? undefined : null) : v.int(b.validMin, 'validMin', 1, 7 * 24 * 60),
     titleEn: v.str(b.titleEn, 'Titel (Englisch)', { min: 3, max: 120, optional: true }) ?? (opt('titleEn') ? undefined : null),
     bodyEn: v.str(b.bodyEn, 'Text (Englisch)', { max: 1000, optional: true }) ?? (opt('bodyEn') ? undefined : null),
+    actId: v.str(b.actId, 'actId', { max: 80, optional: true }) ?? null,
   }
 }
 
 app.post('/api/admin/announcements', async (c) => {
   const a = announcementInput(await body(c))
+  if (a.actId && !(await actExists(c, a.actId))) throw new HttpError(400, 'Act gehört nicht zu diesem Festival')
   const now = Date.now()
-  const row: AnnouncementRow = { id: randomId('a'), title: a.title!, body: a.body ?? null, place: a.place ?? null, poi: a.poi ?? null, severity: a.severity!, created_at: now, expires_at: a.validMin ? now + a.validMin * MIN : null, title_en: a.titleEn ?? null, body_en: a.titleEn ? (a.bodyEn ?? null) : null }
-  await c.env.DB.prepare('INSERT INTO announcements (id, festival_id, title, body, place, poi, severity, created_at, expires_at, title_en, body_en) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(row.id, c.get('festival').id, row.title, row.body, row.place, row.poi, row.severity, row.created_at, row.expires_at, row.title_en, row.body_en)
+  const row: AnnouncementRow = { id: randomId('a'), title: a.title!, body: a.body ?? null, place: a.place ?? null, poi: a.poi ?? null, severity: a.severity!, created_at: now, expires_at: a.validMin ? now + a.validMin * MIN : null, title_en: a.titleEn ?? null, body_en: a.titleEn ? (a.bodyEn ?? null) : null, act_id: a.actId }
+  await c.env.DB.prepare('INSERT INTO announcements (id, festival_id, title, body, place, poi, severity, created_at, expires_at, title_en, body_en, act_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(row.id, c.get('festival').id, row.title, row.body, row.place, row.poi, row.severity, row.created_at, row.expires_at, row.title_en, row.body_en, row.act_id)
     .run()
   return c.json(toAnnouncement(row, now), 201)
 })

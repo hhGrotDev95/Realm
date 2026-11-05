@@ -133,6 +133,8 @@ export interface Announcement {
   ageMin: number
   validMin: number | null
   en?: { title: string; body: string | null }
+  /** set when the announcement was prepared from a timetable change of this act */
+  actId?: string
 }
 export interface PublicMessage {
   id: string
@@ -352,7 +354,7 @@ export const adminApi = (adminToken: string) => {
     dismissFaqMiss: (slug: string, question: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/analytics/faq-misses`, { question }),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
     restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),
-    announce: (a: { title: string; body?: string; titleEn?: string; bodyEn?: string; place?: string; severity: Announcement['severity']; validMin?: number }) => req<Announcement>('POST', '/api/admin/announcements', a),
+    announce: (a: { title: string; body?: string; titleEn?: string; bodyEn?: string; place?: string; severity: Announcement['severity']; validMin?: number; actId?: string }) => req<Announcement>('POST', '/api/admin/announcements', a),
     removeAnnouncement: (id: string) => req<void>('DELETE', `/api/admin/announcements/${id}`),
     setChange: (actId: string, c: { start?: number; end?: number; stage?: string; cancelled?: boolean; note?: string }) => req<TimetableChange>('PUT', `/api/admin/timetable/${actId}`, c),
     revertChange: (actId: string) => req<void>('DELETE', `/api/admin/timetable/${actId}`),
