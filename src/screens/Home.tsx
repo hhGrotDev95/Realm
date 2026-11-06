@@ -76,7 +76,7 @@ function UpdatesModule({ i, exclude }: { i: number; exclude?: string }) {
       </div>
       <div className="list">
         {items.map((u) => (
-          <button key={u.id} className="list-item" onClick={() => openSheet(u.poi ? { kind: 'poi', id: u.poi } : { kind: 'updates' })}>
+          <button key={u.id} className="list-item" onClick={() => openSheet(u.actId && actById[u.actId] ? { kind: 'act', id: u.actId } : u.poi ? { kind: 'poi', id: u.poi } : { kind: 'updates' })}>
             <div className="grow">
               <div style={{ fontWeight: 600 }}>{u.title}</div>
               <div className="row tiny faint" style={{ gap: 8, marginTop: 5 }}>
