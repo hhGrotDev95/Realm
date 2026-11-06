@@ -246,6 +246,8 @@ export interface FestivalUpdate {
   fixedVotes?: number
   /** your own report: you can withdraw it, your vote does not count again */
   mine?: boolean
+  /** official announcement prepared from a timetable change of this act */
+  actId?: string
   phases: Phase[]
 }
 

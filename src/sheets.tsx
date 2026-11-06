@@ -188,8 +188,10 @@ function goRoute(poi: string, app: ReturnType<typeof useApp>) {
 function ActSheet({ id }: { id: string }) {
   const { crew } = useApp()
   const app = useApp()
-  const { plan, toggleFav, now, reminders, toggleReminder, openSheet, requireIdentity, attended, setAttended } = app
+  const { plan, toggleFav, now, reminders, toggleReminder, openSheet, requireIdentity, attended, setAttended, updates, vote, votes } = app
   const a = actById[id]
+  // the organizer's announcements about this act, e.g. a cancellation for everyone – not only in Updates
+  const notices = updates.filter((u) => u.source === 'official' && u.actId === id)
   const s = stageById[a.stage]
   const st = status(a, now)
   const inPlan = plan.includes(id)
@@ -219,6 +221,15 @@ function ActSheet({ id }: { id: string }) {
             <span className="small muted">{t('Offiziell')}{a.change.note ? ` · ${a.change.note}` : ''}</span>
           </span>
         </div>
+      )}
+      {notices.length > 0 && (
+        <section style={{ marginBottom: 16 }} data-testid="act-announcements" aria-label={t('Meldungen zu diesem Auftritt')}>
+          <div className="list">
+            {notices.map((u) => (
+              <UpdateItem key={u.id} u={u} vote={vote} voted={votes[u.id]} />
+            ))}
+          </div>
+        </section>
       )}
       <div className="sheet-actions">
         <button className={`btn ${inPlan ? 'on' : 'primary'}`} onClick={() => toggleFav(id)}>

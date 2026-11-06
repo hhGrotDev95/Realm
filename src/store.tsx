@@ -745,6 +745,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         severity: a.severity,
         ageMin: a.ageMin,
         validMin: a.validMin ?? undefined,
+        ...(a.actId ? { actId: a.actId } : {}),
         phases: ['before', 'arrival', 'during', 'departure', 'after'] as Phase[],
       }))
     const updates = online ? [...official, ...remoteUpdates, ...UPDATES.filter((u) => u.source === 'app')] : [...s.myUpdates, ...UPDATES]
