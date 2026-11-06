@@ -321,6 +321,16 @@ try {
     assert.equal((await api('DELETE', `/api/admin/announcements/${a.data.id}`, 'test-admin-token')).status, 204)
     assert.ok(!(await api('GET', '/api/announcements')).data.some((x) => x.id === a.data.id))
     assert.equal((await api('DELETE', `/api/admin/announcements/${a.data.id}`, 'test-admin-token')).status, 404)
+    // an announcement prepared from a timetable change remembers its act (backlog 5g)
+    assert.equal((await api('POST', '/api/admin/announcements', 'test-admin-token', { title: 'Verschoben: Niemand', actId: '9-niemand' })).status, 400)
+    assert.equal((await api('POST', '/api/admin/announcements', 'test-admin-token', { title: 'Verschoben: Arcturus', actId: '1-arcturus' }, 'nordlicht')).status, 400) // act of another festival
+    const linked = await api('POST', '/api/admin/announcements', 'test-admin-token', { title: 'Verschoben: Arcturus', actId: '1-arcturus' })
+    assert.equal(linked.status, 201)
+    assert.equal(linked.data.actId, '1-arcturus')
+    assert.equal((await api('GET', '/api/announcements')).data.find((x) => x.id === linked.data.id).actId, '1-arcturus')
+    assert.equal(a.data.actId, undefined)
+    assert.equal((await api('PATCH', `/api/admin/announcements/${linked.data.id}`, 'test-admin-token', { severity: 'warning' })).data.actId, '1-arcturus')
+    assert.equal((await api('DELETE', `/api/admin/announcements/${linked.data.id}`, 'test-admin-token')).status, 204)
   })
 
   await test('timetable changes: admin-only, validated, public, revertible', async () => {

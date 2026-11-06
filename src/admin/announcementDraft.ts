@@ -33,6 +33,8 @@ export type AnnouncementDraft = {
   valid: string
   /** shown above the prefilled form */
   source: string
+  /** the changed act; stored with the announcement so a later revert can offer to remove it */
+  actId?: string
 }
 
 const TITLE_MAX = 120

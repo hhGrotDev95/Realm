@@ -1,6 +1,6 @@
 import { BarChart3, KeyRound, Scale, MessagesSquare, CalendarClock, Map as MapIcon, CircleHelp, FileUp, LayoutGrid, Palette, ToggleRight, LogOut, Megaphone, Plus, RotateCcw, Settings2, Trash2, Wand2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { adminApi, online, setFestival, type Announcement } from '../api'
+import { adminApi, ApiError, online, setFestival, type Announcement } from '../api'
 import { Branding } from './Branding'
 import { Modules } from './Modules'
 import { FaqEditor } from './FaqEditor'
@@ -15,7 +15,7 @@ import { CreateFestival, ImportPanel, Settings, SetupWizard, StagesEditor } from
 import { currentSlug } from '../festival'
 import { night } from '../festivalTime'
 import type { ModuleKey } from '../modules'
-import { ACTS, DAYS, FESTIVAL, fmt, loadFestivalBundle, on, STAGES, stageById, type Act, type StageId, type TimetableChange, actTime } from '../data'
+import { ACTS, actById, DAYS, FESTIVAL, fmt, loadFestivalBundle, on, STAGES, stageById, type Act, type StageId, type TimetableChange, actTime } from '../data'
 
 const KEY = 'realm.admin'
 type Tab = 'legal' | 'access' | 'setup' | 'announcements' | 'timetable' | 'import' | 'stages' | 'map' | 'faq' | 'analytics' | 'chat' | 'branding' | 'modules' | 'settings'
@@ -323,7 +323,7 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
           e.preventDefault()
           setBusy(true)
           try {
-            await admin.announce({ title: form.title.trim(), body: form.body.trim() || undefined, titleEn: form.titleEn.trim() || undefined, bodyEn: form.bodyEn.trim() || undefined, place: form.place.trim() || undefined, severity: form.severity, validMin })
+            await admin.announce({ title: form.title.trim(), body: form.body.trim() || undefined, titleEn: form.titleEn.trim() || undefined, bodyEn: form.bodyEn.trim() || undefined, place: form.place.trim() || undefined, severity: form.severity, validMin, actId: draft?.actId })
             setForm(EMPTY_FORM)
             onDraftDone?.()
             flash('ok', 'Meldung veröffentlicht')
@@ -420,6 +420,7 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
                   </div>
                   <div style={{ fontWeight: 600, marginTop: 4 }}>{a.title}</div>
                   {a.body && <div className="small muted">{a.body}</div>}
+                  {a.actId && actById[a.actId] && <div className="tiny faint">Zur Änderung an {actById[a.actId].artist} – wird beim Zurücksetzen zum Entfernen angeboten</div>}
                 </div>
                 <button
                   className="icon-btn"
@@ -455,6 +456,19 @@ function Timetable({ token, flash, slug, onDraft }: { token: string; flash: (k: 
   const [edit, setEdit] = useState<Act | null>(null)
   // the last published change, offered as an announcement for everyone (cleared when another act is picked)
   const [published, setPublished] = useState<{ actId: string; draft: AnnouncementDraft } | null>(null)
+  // announcements published earlier from a change of this act that no longer describe the timetable
+  const [stale, setStale] = useState<{ actId: string; reverted: boolean; items: Announcement[] } | null>(null)
+  const checkStale = useCallback(
+    async (actId: string, reverted: boolean) => {
+      try {
+        const items = (await admin.announcements()).filter((a) => a.actId === actId)
+        setStale(items.length ? { actId, reverted, items } : null)
+      } catch {
+        setStale(null) // optional hint: the change itself already succeeded
+      }
+    },
+    [admin],
+  )
   // how many synced plans hold each act, so a cancellation or move says whom it reaches;
   // the same aggregates as the analytics tab (groups below minGroup withheld). Optional: on failure the list stays as is.
   const [interest, setInterest] = useState<PlanInterest | null>(null)
@@ -545,8 +559,9 @@ function Timetable({ token, flash, slug, onDraft }: { token: string; flash: (k: 
                   },
                   Date.now(),
                 )
-                setPublished(draft ? { actId: edit.id, draft } : null)
+                setPublished(draft ? { actId: edit.id, draft: { ...draft, actId: edit.id } } : null)
                 load()
+                checkStale(edit.id, false)
               } catch (e) {
                 flash('err', errText(e))
               }
@@ -557,6 +572,7 @@ function Timetable({ token, flash, slug, onDraft }: { token: string; flash: (k: 
                 setPublished(null)
                 flash('ok', `${edit.artist}: Originalzeit wiederhergestellt`)
                 load()
+                checkStale(edit.id, true)
               } catch (e) {
                 flash('err', errText(e))
               }
@@ -564,6 +580,32 @@ function Timetable({ token, flash, slug, onDraft }: { token: string; flash: (k: 
           />
         ) : (
           <p className="muted small">Wähle links einen Act, um ihn zu verschieben, die Bühne zu ändern oder ihn abzusagen.</p>
+        )}
+        {edit && stale?.actId === edit.id && (
+          <div className="admin-draft small" role="status" data-testid="stale-announcements" style={{ marginTop: 14 }}>
+            <span className="grow">
+              {stale.reverted ? `${edit.artist} spielt wieder wie ursprünglich geplant.` : `${edit.artist} hat sich erneut geändert.`}{' '}
+              {stale.items.length === 1 ? 'Diese Meldung ist noch aktiv und stimmt nicht mehr' : `Diese ${stale.items.length} Meldungen sind noch aktiv und stimmen nicht mehr`}: {stale.items.map((a) => `„${a.title}“`).join(', ')}
+            </span>
+            <span className="row" style={{ gap: 8 }}>
+              <button
+                type="button"
+                className="btn primary sm"
+                onClick={async () => {
+                  const results = await Promise.allSettled(stale.items.map((a) => admin.removeAnnouncement(a.id)))
+                  const failed = results.filter((r) => r.status === 'rejected' && !(r.reason instanceof ApiError && r.reason.status === 404)).length
+                  if (failed) flash('err', `${failed} Meldung(en) konnten nicht entfernt werden – bitte unter „Meldungen“ erneut versuchen`)
+                  else flash('ok', stale.items.length === 1 ? 'Meldung entfernt' : 'Meldungen entfernt')
+                  setStale(null)
+                }}
+              >
+                <Trash2 size={16} /> {stale.items.length === 1 ? 'Meldung entfernen' : 'Meldungen entfernen'}
+              </button>
+              <button type="button" className="btn secondary sm" onClick={() => setStale(null)}>
+                Behalten
+              </button>
+            </span>
+          </div>
         )}
         {edit && published?.actId === edit.id && (
           <div className="admin-draft small" role="status" data-testid="offer-announcement" style={{ marginTop: 14 }}>
