@@ -729,7 +729,9 @@ function NewMeetup({ actId, poi, place: initialPlace, note: initialNote }: { act
 }
 
 /* ---------------- Updates ---------------- */
-function UpdateItem({ u, vote, voted }: { u: FestivalUpdate; vote: (id: string, v: 'still' | 'fixed') => void; voted?: 'still' | 'fixed' }) {
+function UpdateItem({ u, vote, voted, onAct }: { u: FestivalUpdate; vote: (id: string, v: 'still' | 'fixed') => void; voted?: 'still' | 'fixed'; onAct?: (id: string) => void }) {
+  // an announcement tied to an act links to it – only while the act is still in the line-up
+  const act = onAct && u.actId ? actById[u.actId] : undefined
   const community = (u.source === 'confirmed' || u.source === 'unconfirmed') && on('reports')
   // how many people reported it – a count, not a check (audit F06); your own vote does not add to your own report
   const people = (u.confirms ?? 0) + (voted === 'still' && !u.mine ? 1 : 0)
@@ -747,6 +749,11 @@ function UpdateItem({ u, vote, voted }: { u: FestivalUpdate; vote: (id: string, 
       {u.body && <div className="small muted">{u.body}</div>}
       {community && <div className="tiny faint">{people === 1 ? t('Von 1 Person gemeldet · nicht geprüft') : t('Von {n} Personen gemeldet · nicht geprüft', { n: people })}{u.fixedVotes ? ' · ' + t('{n} sagen: behoben', { n: u.fixedVotes }) : ''}</div>}
       {u.validMin !== undefined && <div className="tiny faint">{community ? t('Läuft in {n} Min. ab, wenn niemand bestätigt', { n: u.validMin }) : t('Gültig noch {n} Min.', { n: u.validMin })}</div>}
+      {act && onAct && (
+        <button className="btn ghost sm" data-testid="update-open-act" onClick={() => onAct(act.id)} aria-label={t('Zum Auftritt: {artist}', { artist: act.artist })}>
+          {t('Zum Auftritt')} <ChevronRight size={15} />
+        </button>
+      )}
       {u.mine === false && on('reports') && <ReportAbuse label={t('Inhalt melden')} submit={(reason) => api.flagReport(u.id, reason)} />}
       {community && u.mine && (
         <div className="row" style={{ gap: 8, marginTop: 4 }}>
@@ -802,7 +809,7 @@ function Updates() {
       </div>
       <div className="list">
         {list.map((u) => (
-          <UpdateItem key={u.id} u={u} vote={vote} voted={votes[u.id]} />
+          <UpdateItem key={u.id} u={u} vote={vote} voted={votes[u.id]} onAct={(id) => openSheet({ kind: 'act', id })} />
         ))}
         {!list.length && (
           <div className="empty">
