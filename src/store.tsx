@@ -63,6 +63,8 @@ interface Persisted {
   reportsFetchedAt: number
   pendingJoin: string | null
   outbox: OutboxOp[]
+  /** ids of the last writes this device sent (or gave up on) – tells a second tab "sent", not "stale" */
+  outboxSent: string[]
   announcements: { items: Announcement[]; fetchedAt: number } | null
   timetableChanges: TimetableChange[] | null
 }
@@ -115,6 +117,7 @@ function initial(): Persisted {
     reportsFetchedAt: 0,
     pendingJoin: null,
     outbox: [],
+    outboxSent: [],
     announcements: null,
     timetableChanges: null,
   }
@@ -152,6 +155,8 @@ function fromStorage(raw: string, base: Persisted): Persisted {
   const state = restore(base, JSON.parse(raw))
   if (typeof state.guest.id !== 'string') state.guest = base.guest
   state.plan = state.plan.filter((id) => typeof id === 'string')
+  if (!Array.isArray(state.outboxSent)) state.outboxSent = []
+  state.outboxSent = state.outboxSent.filter((id) => typeof id === 'string')
   state.planNotices = state.planNotices.filter((n) => n && typeof n.id === 'string' && (n.kind === 'gone' || (n.kind === 'moved' && typeof n.to === 'string')))
   return state
 }
@@ -326,11 +331,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         const adopted = fromStorage(e.newValue, fresh())
         // writes queued here survive a save the other tab made before it saw them
-        const outbox = mergeOutbox(sRef.current.outbox, adopted.outbox, queuedHere.current, privacyKey)
-        const kept = outbox.slice(adopted.outbox.length).filter((o) => 'crewId' in o && o.crewId === adopted.crewRef?.id)
+        const outbox = mergeOutbox(sRef.current.outbox, adopted.outbox, queuedHere.current, { key: privacyKey, sentThere: adopted.outboxSent, sentHere: sRef.current.outboxSent })
+        const kept = outbox.filter((o) => !adopted.outbox.some((a) => a.id === o.id) && 'crewId' in o && o.crewId === adopted.crewRef?.id)
         const next = {
           ...adopted,
           outbox,
+          outboxSent: [...new Set([...adopted.outboxSent, ...sRef.current.outboxSent])].slice(-50),
           // … and stay visible as pending in the chat and the meetup list
           chat: [...adopted.chat, ...kept.flatMap((o) => (o.kind === 'message' && !adopted.chat.some((m) => m.id === o.id) ? [{ id: o.id, from: 'me', text: o.text, min: minuteOfDay(o.at), pending: true }] : []))],
           meetups: [...adopted.meetups, ...kept.flatMap((o) => (o.kind === 'meetup' && !adopted.meetups.some((m) => m.id === o.id) ? [{ id: o.id, title: o.data.note || 'Meetup', ...o.data, going: ['me'], createdBy: 'me' }] : []))],
@@ -450,8 +456,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const done = op.id
         confirmations.current.delete(done)
         queuedHere.current.delete(done)
-        setS((p) => ({ ...p, outbox: p.outbox.filter((o) => o.id !== done) }))
-        sRef.current = { ...sRef.current, outbox: sRef.current.outbox.filter((o) => o.id !== done) }
+        setS((p) => ({ ...p, outbox: p.outbox.filter((o) => o.id !== done), outboxSent: [...p.outboxSent.filter((id) => id !== done), done].slice(-50) }))
+        sRef.current = { ...sRef.current, outbox: sRef.current.outbox.filter((o) => o.id !== done), outboxSent: [...sRef.current.outboxSent.filter((id) => id !== done), done].slice(-50) }
       }
     } finally {
       flushing.current = false

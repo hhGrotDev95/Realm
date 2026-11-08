@@ -309,8 +309,12 @@ try {
       const n = await lea.locator('.bubble', { hasText: text }).count()
       if (n !== 1) throw new Error(`"${text}" arrived ${n} times`)
     }
-    const outbox = await ben.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:realm-open-air') ?? '{}').outbox?.length ?? -1)
-    if (outbox !== 0) throw new Error('outbox not empty after delivery: ' + outbox)
+    // both tabs flush at once; give the last removal a moment to be saved (well below the 8 s poll,
+    // so a write wrongly queued again by one tab would still show up here)
+    const queued = () => ben.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? '{}').outbox?.map((o) => o.text ?? o.kind) ?? null, key)
+    let left = await queued()
+    for (const end = Date.now() + 3000; left?.length && Date.now() < end; left = await queued()) await ben.waitForTimeout(200)
+    if (!left || left.length) throw new Error('outbox not empty after delivery: ' + JSON.stringify(left))
     await lea.keyboard.press('Escape')
     await ben.keyboard.press('Escape')
     await ben2.close()

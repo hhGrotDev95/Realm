@@ -46,15 +46,25 @@ check('a tracked write that left this tab’s outbox (sent here) is forgotten', 
 
 check('privacy decisions: the adopted one for the same target wins, no duplicate', () => {
   const tracked = new Map([['loc-mine', false]])
-  const r = mergeOutbox([op('loc-mine', 'location:c1')], [op('loc-other', 'location:c1')], tracked, key)
+  const r = mergeOutbox([op('loc-mine', 'location:c1')], [op('loc-other', 'location:c1')], tracked, { key })
   assert.deepEqual(ids(r), ['loc-other'])
   assert.equal(tracked.has('loc-mine'), false)
 })
 
 check('a privacy decision for another target is kept', () => {
   const tracked = new Map([['steps', false]])
-  const r = mergeOutbox([op('steps', 'deleteSteps')], [op('loc', 'location:c1')], tracked, key)
+  const r = mergeOutbox([op('steps', 'deleteSteps')], [op('loc', 'location:c1')], tracked, { key })
   assert.deepEqual(ids(r), ['loc', 'steps'])
+})
+
+check('a write the other tab sent without ever saving it queued is not queued again', () => {
+  const tracked = new Map([['m1', false]])
+  assert.deepEqual(ids(mergeOutbox([op('m1')], [], tracked, { key, sentThere: ['m1'] })), [])
+  assert.equal(tracked.has('m1'), false)
+})
+
+check('a stale state still listing a write this tab already sent does not queue it again', () => {
+  assert.deepEqual(ids(mergeOutbox([], [op('x'), op('y')], new Map(), { sentHere: ['x'] })), ['y'])
 })
 
 console.log(`${passed} outbox merge checks passed`)
