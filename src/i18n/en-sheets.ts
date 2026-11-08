@@ -14,6 +14,8 @@ export const EN_SHEETS: Record<string, string> = {
   "Vorbei": "Over",
   "Dieser Auftritt wurde abgesagt": "This set has been cancelled",
   "Meldungen zu diesem Auftritt": "Announcements about this set",
+  "Zum Auftritt": "Go to set",
+  "Zum Auftritt: {artist}": "Go to set: {artist}",
   "Neue Zeit: {time} (statt {was})": "New time: {time} (instead of {was})",
   "Neue Bühne: {stage}": "New stage: {stage}",
   "In deinem Plan": "In your plan",
