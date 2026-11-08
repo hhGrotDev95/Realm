@@ -265,6 +265,61 @@ try {
     await lea.keyboard.press('Escape')
   })
 
+  await step('two tabs offline: messages written in both arrive exactly once after reconnect', async () => {
+    // both tabs share one stored state (and one outbox); both start sending when the network returns
+    const ben2 = await ben.context().newPage()
+    ben2.on('pageerror', (e) => errors.push(e.stack ?? e.message))
+    await ben2.goto(WEB)
+    await nav(ben2, 'Crew')
+    await ben.getByRole('button', { name: /^Crew-Chat/ }).click()
+    await ben2.getByRole('button', { name: /^Crew-Chat/ }).click()
+    await ben.context().setOffline(true)
+    const send = async (p, text) => {
+      await p.getByPlaceholder(/Nachricht/).fill(text)
+      await p.getByRole('button', { name: 'Senden' }).click()
+    }
+    // one after the other, then at the same moment (the tabs adopt each other's saved state)
+    await send(ben, 'Tab eins')
+    await ben2.locator('.bubble.me.pending', { hasText: 'Tab eins' }).waitFor({ timeout: 5000 })
+    await send(ben2, 'Tab zwei')
+    await ben.locator('.bubble.me.pending', { hasText: 'Tab zwei' }).waitFor({ timeout: 5000 })
+    await Promise.all([send(ben, 'Gleichzeitig A'), send(ben2, 'Gleichzeitig B')])
+    // the narrow race: the other tab saves a state from before the new message (e.g. after a poll)
+    // – adopting it wholesale used to drop the message from this tab's outbox and from storage
+    const key = 'realm.v2:realm-open-air'
+    const stale = await ben.evaluate((k) => localStorage.getItem(k), key)
+    await send(ben, 'Nicht verdrängt')
+    await ben.locator('.bubble.me.pending', { hasText: 'Nicht verdrängt' }).waitFor()
+    await ben.evaluate(([k, v]) => {
+      localStorage.setItem(k, v) // what the other tab wrote …
+      window.dispatchEvent(new StorageEvent('storage', { key: k, newValue: v, storageArea: localStorage })) // … and this tab hears about it
+    }, [key, stale])
+    await ben.waitForTimeout(300)
+    const kept = await ben.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? '{}').outbox?.some((o) => o.text === 'Nicht verdrängt'), key)
+    if (!kept) throw new Error('a stale state from the other tab dropped a queued message from storage')
+    const texts = ['Tab eins', 'Tab zwei', 'Gleichzeitig A', 'Gleichzeitig B', 'Nicht verdrängt']
+    for (const p of [ben, ben2]) for (const text of texts) await p.locator('.bubble.me', { hasText: text }).waitFor({ timeout: 5000 })
+    await ben.context().setOffline(false)
+    for (const p of [ben, ben2]) for (const text of texts) await p.locator('.bubble.me:not(.pending)', { hasText: text }).waitFor({ timeout: 20000 })
+    await lea.reload()
+    await nav(lea, 'Crew')
+    await lea.getByRole('button', { name: /^Crew-Chat/ }).click()
+    for (const text of texts) {
+      await lea.locator('.bubble.them', { hasText: text }).waitFor({ timeout: 20000 })
+      const n = await lea.locator('.bubble', { hasText: text }).count()
+      if (n !== 1) throw new Error(`"${text}" arrived ${n} times`)
+    }
+    // both tabs flush at once; give the last removal a moment to be saved (well below the 8 s poll,
+    // so a write wrongly queued again by one tab would still show up here)
+    const queued = () => ben.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? '{}').outbox?.map((o) => o.text ?? o.kind) ?? null, key)
+    let left = await queued()
+    for (const end = Date.now() + 3000; left?.length && Date.now() < end; left = await queued()) await ben.waitForTimeout(200)
+    if (!left || left.length) throw new Error('outbox not empty after delivery: ' + JSON.stringify(left))
+    await lea.keyboard.press('Escape')
+    await ben.keyboard.press('Escape')
+    await ben2.close()
+  })
+
   await step('privacy (audit F02): a location share switched off while offline ends on the server after reconnect – without reload', async () => {
     const stored = (page) => page.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:realm-open-air') ?? '{}'))
     const { session, crewRef } = await stored(lea)
