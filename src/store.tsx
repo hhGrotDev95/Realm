@@ -1,5 +1,6 @@
 import type { FlagReason } from './api'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { mergeOutbox } from './outboxMerge'
 import { api, ApiError, execute, online, opId, privacyKey, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
 import { lang, t } from './i18n'
 import { ageSince } from './aging'
@@ -316,13 +317,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toast(t('Speicher des Geräts voll oder gesperrt – Änderungen gehen beim Schließen verloren'))
     }
   }, [s, toast])
+  /** writes queued in this tab, and whether the other tab's saves have shown them yet (src/outboxMerge.ts) */
+  const queuedHere = useRef(new Map<string, boolean>())
   // a second tab of the app saves its own changes: adopt them, so neither tab overwrites the other's plan
   useEffect(() => {
     const h = (e: StorageEvent) => {
       if (e.key !== storageKey() || !e.newValue || e.storageArea !== storage()) return
       try {
-        const next = fromStorage(e.newValue, fresh())
-        written.current = JSON.stringify(next)
+        const adopted = fromStorage(e.newValue, fresh())
+        // writes queued here survive a save the other tab made before it saw them
+        const outbox = mergeOutbox(sRef.current.outbox, adopted.outbox, queuedHere.current, privacyKey)
+        const kept = outbox.slice(adopted.outbox.length).filter((o) => 'crewId' in o && o.crewId === adopted.crewRef?.id)
+        const next = {
+          ...adopted,
+          outbox,
+          // … and stay visible as pending in the chat and the meetup list
+          chat: [...adopted.chat, ...kept.flatMap((o) => (o.kind === 'message' && !adopted.chat.some((m) => m.id === o.id) ? [{ id: o.id, from: 'me', text: o.text, min: minuteOfDay(o.at), pending: true }] : []))],
+          meetups: [...adopted.meetups, ...kept.flatMap((o) => (o.kind === 'meetup' && !adopted.meetups.some((m) => m.id === o.id) ? [{ id: o.id, title: o.data.note || 'Meetup', ...o.data, going: ['me'], createdBy: 'me' }] : []))],
+        }
+        written.current = JSON.stringify(adopted) // a healed outbox differs, so it is saved again
         if (next.session?.token !== sRef.current.session?.token) setToken(next.session?.token ?? null)
         setS(next)
       } catch {}
@@ -436,6 +449,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         const done = op.id
         confirmations.current.delete(done)
+        queuedHere.current.delete(done)
         setS((p) => ({ ...p, outbox: p.outbox.filter((o) => o.id !== done) }))
         sRef.current = { ...sRef.current, outbox: sRef.current.outbox.filter((o) => o.id !== done) }
       }
@@ -609,6 +623,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const next = (list: OutboxOp[]) => [op, ...list.filter((o) => privacyKey(o) !== key)]
       setS((p) => ({ ...p, outbox: next(p.outbox) }))
       sRef.current = { ...sRef.current, outbox: next(sRef.current.outbox) }
+      queuedHere.current.set(op.id, false)
       void flush()
     },
     [flush],
@@ -754,6 +769,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const enqueue = (op: OutboxOp, sentMsg?: string) => {
       setS((p) => ({ ...p, outbox: [...p.outbox, op] }))
       sRef.current = { ...sRef.current, outbox: [...sRef.current.outbox, op] }
+      queuedHere.current.set(op.id, false)
       // the success message waits for the server; until then the item shows as pending
       if (sentMsg) confirmations.current.set(op.id, sentMsg)
       if (!navigator.onLine) toast(t('Offline – wird gesendet, sobald du wieder Netz hast'))
