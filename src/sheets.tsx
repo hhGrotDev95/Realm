@@ -12,6 +12,7 @@ import { CAT_ICON } from './screens/mapIcons'
 import { downloadIcs } from './calendar/download'
 import { ActRow } from './screens/Lineup'
 import { useApp, type SheetState } from './store'
+import { poiForUpdate } from './updatePoi'
 import { status, untilLabel } from './time'
 import { t, num, setLang, LANGS, lang } from './i18n'
 import { Avatar, AvatarStack, Segmented, Sheet, SourceTag, StageDot, ago, spring, LazyBoundary, Switch } from './ui'
@@ -729,9 +730,11 @@ function NewMeetup({ actId, poi, place: initialPlace, note: initialNote }: { act
 }
 
 /* ---------------- Updates ---------------- */
-function UpdateItem({ u, vote, voted, onAct }: { u: FestivalUpdate; vote: (id: string, v: 'still' | 'fixed') => void; voted?: 'still' | 'fixed'; onAct?: (id: string) => void }) {
+function UpdateItem({ u, vote, voted, onAct, onMap }: { u: FestivalUpdate; vote: (id: string, v: 'still' | 'fixed') => void; voted?: 'still' | 'fixed'; onAct?: (id: string) => void; onMap?: (poi: string) => void }) {
   // an announcement tied to an act links to it – only while the act is still in the line-up
   const act = onAct && u.actId ? actById[u.actId] : undefined
+  // otherwise a notice about a place links to that point on the map – only if the place names exactly one
+  const point = !act && onMap ? poiForUpdate(u, POIS) : undefined
   const community = (u.source === 'confirmed' || u.source === 'unconfirmed') && on('reports')
   // how many people reported it – a count, not a check (audit F06); your own vote does not add to your own report
   const people = (u.confirms ?? 0) + (voted === 'still' && !u.mine ? 1 : 0)
@@ -752,6 +755,11 @@ function UpdateItem({ u, vote, voted, onAct }: { u: FestivalUpdate; vote: (id: s
       {act && onAct && (
         <button className="btn ghost sm" data-testid="update-open-act" onClick={() => onAct(act.id)} aria-label={t('Zum Auftritt: {artist}', { artist: act.artist })}>
           {t('Zum Auftritt')} <ChevronRight size={15} />
+        </button>
+      )}
+      {point && onMap && (
+        <button className="btn ghost sm" data-testid="update-open-map" onClick={() => onMap(point.id)} aria-label={t('Auf der Karte zeigen: {place}', { place: point.name })}>
+          <Navigation size={15} /> {t('Auf der Karte zeigen')}
         </button>
       )}
       {u.mine === false && on('reports') && <ReportAbuse label={t('Inhalt melden')} submit={(reason) => api.flagReport(u.id, reason)} />}
@@ -777,7 +785,7 @@ function UpdateItem({ u, vote, voted, onAct }: { u: FestivalUpdate; vote: (id: s
 }
 
 function Updates() {
-  const { phase, updates, votes, vote, openSheet } = useApp()
+  const { phase, updates, votes, vote, openSheet, closeSheet, setFocusPoi, setTab } = useApp()
   const [f, setF] = useState<UpdateSource | 'all'>('all')
   const all = updates.filter((u) => u.phases.includes(phase) && votes[u.id] !== 'fixed')
   const list = all.filter((u) => f === 'all' || u.source === f)
@@ -809,7 +817,7 @@ function Updates() {
       </div>
       <div className="list">
         {list.map((u) => (
-          <UpdateItem key={u.id} u={u} vote={vote} voted={votes[u.id]} onAct={(id) => openSheet({ kind: 'act', id })} />
+          <UpdateItem key={u.id} u={u} vote={vote} voted={votes[u.id]} onAct={(id) => openSheet({ kind: 'act', id })} onMap={(poi) => (closeSheet(), setFocusPoi('poi:' + poi), setTab('map'))} />
         ))}
         {!list.length && (
           <div className="empty">
