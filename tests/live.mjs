@@ -471,7 +471,14 @@ try {
     await alert.waitFor({ timeout: 15000 })
     await alert.click()
     await lea.locator('.sheet').getByText('Gültig noch 30 Min.').waitFor()
+    // the organizer typed the place freely ("Lagoon"); Updates leads to that stage on the map (backlog j)
+    const item = lea.locator('.sheet .list-item', { hasText: 'Bühne Lagoon pausiert wegen Wind' })
+    if (await item.getByTestId('update-open-act').count()) throw new Error('announcement without act offers "Zum Auftritt"')
+    await item.getByRole('button', { name: 'Auf der Karte zeigen: Lagoon' }).click()
+    await lea.getByRole('dialog', { name: 'Lagoon' }).waitFor({ timeout: 10000 })
+    // one Escape closes it: the deep link must not stack the same sheet twice
     await lea.keyboard.press('Escape')
+    await lea.getByRole('dialog', { name: 'Lagoon' }).waitFor({ state: 'hidden' })
   })
 
   await step('honest navigation (audit F04/D02): no invented position, no route without a chosen place, no guidance to help points', async () => {

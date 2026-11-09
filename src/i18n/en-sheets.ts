@@ -168,6 +168,7 @@ export const EN_SHEETS: Record<string, string> = {
   "Demo · nur auf diesem Gerät gespeichert": "Demo · only stored on this device",
   "Für Gerätewechsel – mit Recovery-Code": "For switching devices – with a recovery code",
   "Auf der Karte zeigen": "Show on map",
+  "Auf der Karte zeigen: {place}": "Show on map: {place}",
   "Entfernung: erst Standort wählen": "Distance: choose your location first",
   "Im Notfall: 112": "In an emergency: 112",
   "Ort suchen": "Search places",

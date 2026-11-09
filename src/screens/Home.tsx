@@ -3,6 +3,7 @@ import { CalendarClock, Megaphone, Users, ArrowRight, Bus, CalendarHeart, Car, C
 import { useEffect, useRef } from 'react'
 import { on, dateRange, FESTIVAL, ACTS, actById, DAYS, fmt, POIS, stageById, walkMinutes } from '../data'
 import { conflictClusters, isMeetupActive, useApp } from '../store'
+import { poiForUpdate } from '../updatePoi'
 import { t } from '../i18n'
 import { nowNext, planFor, status, untilLabel } from '../time'
 import { AvatarStack, SourceTag, StageDot, ago, stagger } from '../ui'
@@ -75,8 +76,10 @@ function UpdatesModule({ i, exclude }: { i: number; exclude?: string }) {
         </button>
       </div>
       <div className="list">
-        {items.map((u) => (
-          <button key={u.id} className="list-item" onClick={() => openSheet(u.actId && actById[u.actId] ? { kind: 'act', id: u.actId } : u.poi ? { kind: 'poi', id: u.poi } : { kind: 'updates' })}>
+        {items.map((u) => {
+          const point = poiForUpdate(u, POIS)
+          return (
+          <button key={u.id} className="list-item" onClick={() => openSheet(u.actId && actById[u.actId] ? { kind: 'act', id: u.actId } : point ? { kind: 'poi', id: point.id } : { kind: 'updates' })}>
             <div className="grow">
               <div style={{ fontWeight: 600 }}>{u.title}</div>
               <div className="row tiny faint" style={{ gap: 8, marginTop: 5 }}>
@@ -87,7 +90,8 @@ function UpdatesModule({ i, exclude }: { i: number; exclude?: string }) {
             </div>
             <ChevronRight size={18} className="faint" />
           </button>
-        ))}
+          )
+        })}
       </div>
     </motion.section>
   )

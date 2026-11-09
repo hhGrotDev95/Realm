@@ -673,7 +673,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     sRef.current = { ...sRef.current, session: { id: g.id, token: g.token } }
   }, [])
 
-  const openSheet = useCallback((sh: SheetState) => setStack((st) => (sh ? [...st, sh] : st)), [])
+  // opening the sheet that is already on top (a double tap, a deep link handled twice) must not
+  // stack a copy – otherwise Back/Escape seems to do nothing the first time
+  const openSheet = useCallback((sh: SheetState) => setStack((st) => (!sh || JSON.stringify(st[st.length - 1]) === JSON.stringify(sh) ? st : [...st, sh])), [])
   const closeSheet = useCallback(() => {
     // Cancelling identity must also cancel the action it was requested for.
     if (stack[stack.length - 1]?.kind === 'identity') pending.current = null
