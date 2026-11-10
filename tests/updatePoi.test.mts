@@ -1,6 +1,6 @@
 // An update links to the map only when its place names exactly one point (src/updatePoi.ts).
 import assert from 'node:assert/strict'
-import { poiForUpdate } from '../src/updatePoi.ts'
+import { matchPlace, poiForUpdate } from '../src/updatePoi.ts'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -44,6 +44,15 @@ check('a partial or unknown place gets no guess', () => {
 })
 check('a place naming two points is ambiguous and gets no link', () => {
   assert.equal(id({ place: 'Bar' }), undefined)
+})
+check('the console sees whether a typed place links, is ambiguous or unknown', () => {
+  const m = matchPlace('Bühne Lagoon', POIS)
+  assert.ok(m && 'point' in m && m.point.id === 'stage-lagoon')
+  const amb = matchPlace('bar', POIS)
+  assert.ok(amb && 'ambiguous' in amb)
+  assert.deepEqual(amb.ambiguous.map((p) => p.id), ['x1', 'x2'])
+  assert.equal(matchPlace('Haupteingang', POIS), null)
+  assert.equal(matchPlace('   ', POIS), null)
 })
 
 console.log(`${passed} update-place checks passed`)
