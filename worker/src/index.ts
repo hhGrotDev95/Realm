@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { isEnabled, MODULE_KEYS, moduleConflicts, MODULES, type ModuleKey, type ModuleState } from '../../src/modules'
 import { checkBrand, HEX } from '../../src/theme/contrast'
+import { MAP_H, MAP_IMAGE_MAX, MAP_IMAGE_RE, MAP_W, MAX_POIS, POI_CATS, POI_STATUSES, type MapSettings } from '../../src/map'
 import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v } from './util'
 
 export interface Env {
@@ -140,7 +141,7 @@ app.get('/api/health', (c) => c.json({ ok: true }))
 
 /* ---------- Festivals (public) ---------- */
 
-type FestivalRow = { id: string; slug: string; name: string; location: string | null; status: string; theme: string; modules: string; updated_at: number }
+type FestivalRow = { id: string; slug: string; name: string; location: string | null; status: string; theme: string; modules: string; map: string | null; updated_at: number }
 
 app.get('/api/festivals', async (c) => {
   const rows = await c.env.DB.prepare("SELECT slug, name, location FROM festivals WHERE status = 'published' ORDER BY name").all()
@@ -156,15 +157,19 @@ app.get('/api/festivals/:slug', async (c) => {
     db.prepare('SELECT idx, date, label, short FROM festival_days WHERE festival_id = ? ORDER BY idx').bind(f.id),
     db.prepare('SELECT id, name, color, x, y, vibe FROM stages WHERE festival_id = ? ORDER BY sort, name').bind(f.id),
     db.prepare('SELECT id, day, stage_id AS stage, artist, start_min AS start, end_min AS "end", genre, bio, popularity FROM acts WHERE festival_id = ? ORDER BY day, start_min').bind(f.id),
-    db.prepare('SELECT id, cat, name, x, y, detail, status, important FROM pois WHERE festival_id = ?').bind(f.id),
+    db.prepare("SELECT id, cat, name, x, y, detail, status, important FROM pois WHERE festival_id = ? AND cat != 'stage' ORDER BY name").bind(f.id),
     db.prepare("SELECT id, question, answer, category, keywords, source, updated_at AS updatedAt FROM faqs WHERE festival_id = ? AND status = 'published' ORDER BY sort, category, question").bind(f.id),
   ])
   return c.json({
-    festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), updatedAt: f.updated_at },
+    festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), map: JSON.parse(f.map || '{}') as MapSettings, updatedAt: f.updated_at },
     days: days.results,
     stages: stages.results,
     acts: acts.results,
-    pois: (pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+    // every stage is a marker at its own position – festivals created in the console have no stage POIs
+    pois: [
+      ...(stages.results as { id: string; name: string; x: number; y: number; vibe: string }[]).map((st) => ({ id: 'stage-' + st.id, cat: 'stage', name: st.name, x: st.x, y: st.y, detail: st.vibe, important: true })),
+      ...(pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+    ],
     // published answers travel with the festival document, so FAQ and bot work offline
     faq: isEnabled(JSON.parse(f.modules) as ModuleState, 'faq') ? faqs.results : [],
   })
@@ -779,6 +784,78 @@ app.put('/api/admin/festivals/:slug/theme', async (c) => {
   }
   await c.env.DB.prepare('UPDATE festivals SET theme = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(theme), Date.now(), f.id).run()
   return c.json(theme)
+})
+
+/** Admin view of the map: positions of stages and all places, plus the ground settings. */
+app.get('/api/admin/festivals/:slug/map', async (c) => {
+  const f = await festivalBySlug(c)
+  const db = c.env.DB
+  const [row, stages, pois] = await db.batch([
+    db.prepare('SELECT map FROM festivals WHERE id = ?').bind(f.id),
+    db.prepare('SELECT id, name, color, x, y FROM stages WHERE festival_id = ? ORDER BY sort, name').bind(f.id),
+    db.prepare("SELECT id, cat, name, x, y, detail, status, important FROM pois WHERE festival_id = ? AND cat != 'stage' ORDER BY name").bind(f.id),
+  ])
+  return c.json({
+    map: JSON.parse((row.results[0] as { map?: string } | undefined)?.map || '{}') as MapSettings,
+    stages: stages.results,
+    pois: (pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+  })
+})
+
+/**
+ * Saves the map in one go: stage positions, the complete list of places (replaced) and the
+ * ground (uploaded image, or built-in art). Coordinates are canvas units (see src/map.ts).
+ */
+app.put('/api/admin/festivals/:slug/map', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  const coord = (x: unknown, max: number, name: string) => {
+    if (typeof x !== 'number' || !Number.isFinite(x) || x < 0 || x > max) throw new HttpError(400, `${name} liegt außerhalb der Karte`)
+    return Math.round(x)
+  }
+  const known = new Set((await c.env.DB.prepare('SELECT id FROM stages WHERE festival_id = ?').bind(f.id).all<{ id: string }>()).results.map((r) => r.id))
+  if (b.stages !== undefined && !Array.isArray(b.stages)) throw new HttpError(400, 'stages muss eine Liste sein')
+  const stages = ((b.stages ?? []) as unknown[]).map((raw, i) => {
+    const s = (raw ?? {}) as Record<string, unknown>
+    const id = v.str(s.id, `Bühne ${i + 1}: id`, { max: 40 })!
+    if (!known.has(id)) throw new HttpError(400, `Unbekannte Bühne „${id}“`)
+    return { id, x: coord(s.x, MAP_W, `Bühne „${id}“`), y: coord(s.y, MAP_H, `Bühne „${id}“`) }
+  })
+  if (!Array.isArray(b.pois) || b.pois.length > MAX_POIS) throw new HttpError(400, `pois muss eine Liste mit höchstens ${MAX_POIS} Orten sein`)
+  const pois = (b.pois as unknown[]).map((raw, i) => {
+    const p = (raw ?? {}) as Record<string, unknown>
+    const label = `Ort ${i + 1}`
+    const id = v.str(p.id, `${label}: id`, { max: 40 })!
+    if (!/^[a-z0-9-]{1,40}$/.test(id) || id.startsWith('stage-')) throw new HttpError(400, `${label}: id ist ungültig`)
+    const name = v.str(p.name, `${label}: Name`, { max: 60 })!
+    return {
+      id,
+      cat: v.oneOf(p.cat, `${label} (${name}): Kategorie`, POI_CATS),
+      name,
+      x: coord(p.x, MAP_W, `${label} (${name})`),
+      y: coord(p.y, MAP_H, `${label} (${name})`),
+      detail: v.str(p.detail, `${label}: Beschreibung`, { max: 120, optional: true }) ?? '',
+      status: p.status === undefined || p.status === null || p.status === '' ? null : v.oneOf(p.status, `${label}: Status`, POI_STATUSES),
+      important: p.important === undefined ? 0 : v.bool(p.important, `${label}: wichtig`) ? 1 : 0,
+    }
+  })
+  const dup = pois.find((p, i) => pois.findIndex((q) => q.id === p.id) !== i)
+  if (dup) throw new HttpError(400, `Zwei Orte haben die id „${dup.id}“`)
+  const map: MapSettings = {}
+  if (b.image !== undefined && b.image !== null) {
+    if (typeof b.image !== 'string' || !MAP_IMAGE_RE.test(b.image)) throw new HttpError(400, 'Geländeplan muss ein PNG, JPEG oder WebP sein')
+    if (b.image.length > MAP_IMAGE_MAX) throw new HttpError(400, 'Geländeplan ist zu groß (max. ca. 450 kB)')
+    map.image = b.image
+  }
+  if (b.art !== undefined && b.art !== null) map.art = v.oneOf(b.art, 'Gelände', ['demo', 'plain'] as const)
+  const db = c.env.DB
+  await db.batch([
+    ...stages.map((s) => db.prepare('UPDATE stages SET x = ?, y = ? WHERE festival_id = ? AND id = ?').bind(s.x, s.y, f.id, s.id)),
+    db.prepare("DELETE FROM pois WHERE festival_id = ? AND cat != 'stage'").bind(f.id),
+    ...pois.map((p) => db.prepare('INSERT INTO pois (festival_id, id, cat, name, x, y, detail, status, important) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, p.id, p.cat, p.name, p.x, p.y, p.detail, p.status, p.important)),
+    db.prepare('UPDATE festivals SET map = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(map), Date.now(), f.id),
+  ])
+  return c.json({ map: { ...map, image: map.image ? true : undefined }, stages: stages.length, pois: pois.length })
 })
 
 type ImportRow = { row: number; id?: string; day: number; stage: string; artist: string; start: number; end: number; genre?: string; bio?: string }

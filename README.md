@@ -61,6 +61,10 @@ Pro Festival in der Konsole unter **Branding**: Markenfarbe (Voreinstellungen, F
 
 Timetable, Plan, Karte und offizielle Meldungen sind immer dabei. Optional und pro Festival schaltbar (Konsole → **Module**): Crew & Freunde, Crew-Chat, Standort teilen, Step-Challenge (diese drei brauchen Crew), Community-Meldungen, Festival-Rückblick. Die Liste steht zentral in `src/modules.ts`. Ausgeschaltete Module verschwinden aus der App ohne Lücken **und** werden vom Worker mit 403 abgelehnt; der Crew-Snapshot liefert dann auch keine Chat-, Standort- oder Schrittdaten.
 
+### Karte
+
+Pro Festival in der Konsole unter **Karte**: Bühnen per Ziehen (oder Pfeiltasten, mit Umschalt in größeren Schritten) auf dem Gelände platzieren, Orte setzen („Ort hinzufügen“ → Kategorie → auf die Karte tippen) und mit Name, Beschreibung, Status und „wichtig“ (ohne Filter sichtbar) pflegen. Als Hintergrund dient ein neutrales Raster oder ein **eigener Geländeplan** (PNG/JPEG/WebP; wird auf die Kartenfläche eingepasst und auf max. ca. 450 kB komprimiert). Koordinaten sind Karteneinheiten 0–1000 × 0–940 (`src/map.ts`, gemeinsam für App, Konsole und Worker); der Plan reist im Festivaldokument mit und funktioniert offline. Bühnen erscheinen immer an ihrer eigenen Position als Marker – auch bei Festivals, die in der Konsole angelegt wurden. Entfernt der Veranstalter einen Ort, auf den noch eine Meldung zeigt, zeigt die App „Ort nicht mehr auf der Karte“ statt abzustürzen.
+
 ### FAQ und FAQ-Bot
 
 Veranstalter pflegen die FAQ in der Konsole (**FAQ**): Frage, Antwort, Kategorie, Quelle, Stichworte für Alltagswörter, Status Entwurf/Freigegeben, plus ein Testfeld für den Bot. Nur freigegebene Antworten erreichen die App – sie reisen im Festivaldokument mit und funktionieren dadurch offline.
@@ -74,7 +78,7 @@ Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt e
 | Bereich | Endpunkte |
 | --- | --- |
 | Festivals | `GET /api/festivals` (veröffentlichte), `GET /api/festivals/:slug` (Festivaldokument), `GET /api/admin/festivals` (alle, Admin) |
-| Einrichtung (Admin) | `GET/PUT/DELETE /api/admin/festivals/:slug/faq[/:id]`, `PUT /api/admin/festivals/:slug/modules`, `PUT /api/admin/festivals/:slug/theme` (Farbe, Schrift, Logo), `POST /api/admin/festivals`, `PATCH /api/admin/festivals/:slug` (Name, Ort, Status), `PUT …/:slug/stages`, `POST …/:slug/import` (`mode`, `dryRun`, `rows`), `GET …/:slug/snapshots`, `POST …/:slug/snapshots/:id/restore` |
+| Einrichtung (Admin) | `GET/PUT/DELETE /api/admin/festivals/:slug/faq[/:id]`, `PUT /api/admin/festivals/:slug/modules`, `PUT /api/admin/festivals/:slug/theme` (Farbe, Schrift, Logo), `GET/PUT /api/admin/festivals/:slug/map` (Bühnenpositionen, Orte, Geländeplan), `POST /api/admin/festivals`, `PATCH /api/admin/festivals/:slug` (Name, Ort, Status), `PUT …/:slug/stages`, `POST …/:slug/import` (`mode`, `dryRun`, `rows`), `GET …/:slug/snapshots`, `POST …/:slug/snapshots/:id/restore` |
 | Profil | `POST /api/guests`, `GET/PATCH/DELETE /api/me`, `POST /api/me/recovery`, `POST /api/restore`, `PUT /api/me/plan`, `PUT/DELETE /api/me/steps` |
 | Crew | `POST /api/crews`, `POST /api/crews/join`, `GET /api/crews/:id` (Snapshot), `POST /api/crews/:id/leave`, `PUT /api/crews/:id/location`, `POST /api/crews/:id/messages`, `POST /api/crews/:id/meetups` |
 | Moderation | `DELETE /api/crews/:id/messages/:msgId` (eigene / Gründer:in), `POST /api/crews/:id/messages/:msgId/flag` (ab 2 Meldungen ausgeblendet), `DELETE /api/crews/:id/members/:guestId` (Gründer:in, sperrt Wiederbeitritt) |

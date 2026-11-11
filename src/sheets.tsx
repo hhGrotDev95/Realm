@@ -234,7 +234,17 @@ function ActSheet({ id }: { id: string }) {
 function PoiSheet({ id }: { id: string }) {
   const app = useApp()
   const { openSheet, requireIdentity, now, updates, votes, vote, plan } = app
-  const p = POIS.find((x) => x.id === id)!
+  const p = POIS.find((x) => x.id === id)
+  // the organizer may have removed the place since a meetup or report pointed to it
+  if (!p)
+    return (
+      <div className="sheet-head">
+        <div className="grow">
+          <h2 style={{ marginTop: 0 }}>Ort nicht mehr auf der Karte</h2>
+          <div className="small muted">Der Veranstalter hat diesen Ort entfernt oder umbenannt.</div>
+        </div>
+      </div>
+    )
   const I = CAT_ICON[p.cat]
   const walk = walkMinutes(ME.x, ME.y, p.x, p.y)
   const reports = updates.filter((u) => u.poi === id && votes[u.id] !== 'fixed')
@@ -685,7 +695,7 @@ const REPORT_TYPES = ['Wasser leer', 'Lange Schlange', 'WC defekt', 'Sehr voll',
 function Report({ poi }: { poi?: string }) {
   const { report, closeSheet, requireIdentity } = useApp()
   const [type, setType] = useState<string | null>(null)
-  const [where, setWhere] = useState(poi)
+  const [where, setWhere] = useState(poi && POIS.some((x) => x.id === poi) ? poi : undefined)
   const [text, setText] = useState('')
   const p = POIS.find((x) => x.id === where)
   return (
@@ -718,10 +728,11 @@ function Report({ poi }: { poi?: string }) {
       <button
         className="btn primary block"
         style={{ marginTop: 18 }}
-        disabled={!type || !where}
+        disabled={!type || !p}
         onClick={() =>
           requireIdentity('Meldungen brauchen einen Namen, damit Missbrauch erkennbar bleibt.', () => {
-            report({ title: type === 'Sonstiges' && text ? text : `${type}: ${p?.name ?? POIS.find((x) => x.id === where)!.name}`, place: POIS.find((x) => x.id === where)!.name, poi: where, severity: 'info' })
+            if (!p) return
+            report({ title: type === 'Sonstiges' && text ? text : `${type}: ${p.name}`, place: p.name, poi: p.id, severity: 'info' })
             closeSheet()
           })
         }
@@ -1036,7 +1047,10 @@ function Chat() {
   const [text, setText] = useState('')
   const [active, setActive] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null)
-  useEffect(() => end.current?.scrollIntoView({ behavior: 'smooth' }), [chat.length])
+  // braces matter: newer browsers return a Promise from scrollIntoView, and React would call it as cleanup
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chat.length])
   return (
     <>
       <div className="sheet-head" style={{ marginBottom: 10 }}>

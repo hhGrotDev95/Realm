@@ -523,6 +523,67 @@ try {
     assert.equal((await api('GET', `${base}`, A, undefined, null)).data.length, 0)
   })
 
+  await test('map editor: stage positions, places and ground; validated and tenant-bound', async () => {
+    const A = 'test-admin-token'
+    const N = 'nordlicht'
+    const put = (body) => api('PUT', `/api/admin/festivals/${N}/map`, A, body, null)
+    // stages are always markers at their own position (no separate stage POIs)
+    let doc = (await api('GET', `/api/festivals/${N}`, null, undefined, null)).data
+    assert.deepEqual(doc.pois.filter((p) => p.cat === 'stage').map((p) => p.id).sort(), ['stage-pier', 'stage-werft'])
+    assert.deepEqual(doc.festival.map, {})
+    assert.equal((await api('GET', '/api/festivals/realm-open-air', null, undefined, null)).data.festival.map.art, 'demo')
+    // only admins
+    assert.equal((await api('PUT', `/api/admin/festivals/${N}/map`, lea.token, { pois: [] }, null)).status, 401)
+    const place = { id: 'wasser-kai', cat: 'water', name: 'Wasser am Kai', x: 480, y: 380, detail: 'Trinkwasser', status: 'open', important: true }
+    // validation
+    assert.equal((await put({ pois: [{ ...place, x: 1200 }] })).status, 400)
+    assert.equal((await put({ pois: [{ ...place, cat: 'stage' }] })).status, 400)
+    assert.equal((await put({ pois: [{ ...place, id: 'stage-x' }] })).status, 400)
+    assert.equal((await put({ pois: [place, place] })).status, 400)
+    assert.equal((await put({ pois: [{ ...place, status: 'kaputt' }] })).status, 400)
+    assert.equal((await put({ pois: [], stages: [{ id: 'generator', x: 1, y: 1 }] })).status, 400) // other festival's stage
+    assert.equal((await put({ pois: [], image: 'https://example.com/plan.png' })).status, 400)
+    assert.equal((await put({ pois: [], image: 'data:image/jpeg;base64,' + 'A'.repeat(600_001) })).status, 400)
+    assert.equal((await put({ pois: [], art: 'satellite' })).status, 400)
+    // save: stage moved, places replaced, uploaded ground
+    const img = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const before = doc.festival.updatedAt
+    const ok = await put({ stages: [{ id: 'pier', x: 111.4, y: 222 }], pois: [place, { id: 'wc-1', cat: 'wc', name: 'WC Hafen', x: 0, y: 940 }], image: img })
+    assert.equal(ok.status, 200)
+    assert.deepEqual(ok.data, { map: { image: true }, stages: 1, pois: 2 })
+    doc = (await api('GET', `/api/festivals/${N}`, null, undefined, null)).data
+    assert.ok(doc.festival.updatedAt > before)
+    assert.equal(doc.festival.map.image, img)
+    assert.deepEqual(doc.stages.find((s) => s.id === 'pier'), { ...doc.stages.find((s) => s.id === 'pier'), x: 111, y: 222 })
+    assert.deepEqual(doc.pois.find((p) => p.id === 'stage-pier'), { id: 'stage-pier', cat: 'stage', name: 'Pier', x: 111, y: 222, detail: 'Electronic · Waterfront', important: true })
+    assert.deepEqual(doc.pois.filter((p) => p.cat !== 'stage').map((p) => p.id).sort(), ['wasser-kai', 'wc-1'])
+    assert.equal(doc.pois.find((p) => p.id === 'wc-1').status, undefined)
+    assert.equal(doc.pois.find((p) => p.id === 'wc-1').important, false)
+    const adminView = (await api('GET', `/api/admin/festivals/${N}/map`, A, undefined, null)).data
+    assert.equal(adminView.pois.length, 2)
+    assert.equal(adminView.stages.length, 2)
+    // the other festival is untouched
+    const realm = (await api('GET', '/api/festivals/realm-open-air', null, undefined, null)).data
+    assert.ok(realm.pois.some((p) => p.id === 'w1'))
+    assert.ok(!realm.pois.some((p) => p.id === 'wasser-kai'))
+    // removing the image goes back to the neutral ground; dropped places disappear
+    assert.equal((await put({ pois: [place], art: 'plain' })).status, 200)
+    doc = (await api('GET', `/api/festivals/${N}`, null, undefined, null)).data
+    assert.deepEqual(doc.festival.map, { art: 'plain' })
+    assert.ok(!doc.pois.some((p) => p.id === 'wc-1'))
+  })
+
+  await test('festivals created in the console show their stages on the map', async () => {
+    const A = 'test-admin-token'
+    const slug = 'kartentest'
+    assert.equal((await api('POST', '/api/admin/festivals', A, { name: 'Kartentest', slug, startDate: '2027-08-06', days: 1 }, null)).status, 201)
+    await api('PUT', `/api/admin/festivals/${slug}/stages`, A, { stages: [{ name: 'Wiese' }, { name: 'Zelt' }] }, null)
+    const doc = (await api('GET', `/api/festivals/${slug}`, A, undefined, null)).data
+    const markers = doc.pois.filter((p) => p.cat === 'stage')
+    assert.deepEqual(markers.map((p) => p.id).sort(), ['stage-wiese', 'stage-zelt'])
+    assert.ok(markers.every((p) => p.x >= 0 && p.x <= 1000 && p.y >= 0 && p.y <= 940))
+  })
+
   await test('CORS preflight is answered', async () => {
     const r = await fetch(BASE + '/api/me', { method: 'OPTIONS', headers: { Origin: 'https://realm.app', 'Access-Control-Request-Method': 'GET' } })
     assert.equal(r.headers.get('access-control-allow-origin'), 'https://realm.app')

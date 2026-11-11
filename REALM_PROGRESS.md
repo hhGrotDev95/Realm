@@ -1,6 +1,6 @@
 # Realm – Fortschritt
 
-Stand: 19.10.2026
+Stand: 11.11.2026
 
 - Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
 - Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`, gemergt als PR #5
@@ -265,7 +265,7 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 | `npm run test:e2e` · `npm run test:a11y` | 10 Abläufe (neu: Bot) · 14 Ansichten ohne Befund (neu: FAQ mit Bot-Antwort) |
 | `npm run test:live` | 17 Szenarien; Festival-Ablauf: FAQ-Entwurf unsichtbar, nach Freigabe beantwortet der Bot die Frage – auch offline |
 
-## Nächste Schritte
+## Nächste Schritte (Stand P5 – erledigt bzw. überholt)
 
 1. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen) – der Build warnt.
 2. P6: Karteneditor (eigener Geländeplan, Marker mit relativen Koordinaten).
@@ -277,3 +277,34 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - `LazyBoundary`: ein fehlgeschlagener Chunk-Load zeigt „Erneut versuchen“ statt die App abstürzen zu lassen.
 - Smoke-Test prüft Offline jetzt ehrlich (Server wird beendet, da `setOffline` Service-Worker-Fetches nicht abdeckt).
 - Geprüft: typecheck, test:import, build, test:e2e, test:a11y, test:live – alles grün.
+
+## P6 · Karteneditor — erledigt (Branch `ccr-c4b0523e-rihs9d`, 11.11.2026)
+
+Ausgangslage (beim Prüfen gefunden): Festivals aus der Konsole hatten **keine Bühnen-Marker** auf der Karte (Stage-POIs gab es nur in den Seed-Daten), „Route zur Bühne“ lief ins Leere, und jedes Festival zeigte das Demo-Gelände mit „SEE“ und „WALD“.
+
+- `src/map.ts` (gemeinsam für App, Konsole, Worker): Kartenfläche 1000 × 940, Kategorien, Status, Limits (300 Orte, Plan ≤ 600 000 Zeichen Data-URL ≈ 450 kB).
+- Migration `0009_festival_map.sql`: Spalte `festivals.map` (`{ image? , art? }`), Demo-Festival behält `art: demo`; Stage-POIs entfernt – Bühnen-Marker werden jetzt immer aus `stages` (x/y) abgeleitet.
+- Worker: `GET/PUT /api/admin/festivals/:slug/map` – Bühnenpositionen (nur eigene Bühnen), komplette Ortsliste (ersetzt), Geländeplan oder `art`; Validierung von Koordinaten, Kategorie, Status, doppelten/reservierten IDs, Bildformat/-größe. Festivaldokument liefert `festival.map`.
+- Konsole: Tab „Karte“ (`src/admin/MapEditor.tsx`) – Ziehen, Pfeiltasten, X/Y-Felder, Orte hinzufügen/bearbeiten/entfernen, Liste aller Orte, Gelände (Neutral / Demo / eigener Plan mit Einpassen + Komprimieren), „ungespeichert“-Hinweis, Warnung beim Verlassen, Verwerfen.
+- App: `src/screens/MapGround.tsx` zeigt eigenen Plan, Demo-Illustration oder neutrales Raster mit Bühnen-Schein; POI-Sheet, Meldungsformular und Karten-Meldungen stürzen bei entfernten Orten nicht mehr ab.
+
+Nebenbei gefundener **echter Fehler** (Smoke-Test war auch auf `main` rot): Neuere Chromium-Versionen geben bei `scrollIntoView()` ein Promise zurück; der Chat-Effekt gab es als „Cleanup“ an React zurück → **Crew-Chat stürzte beim Senden ab**. Behoben in `src/sheets.tsx` (Effekt mit Block-Body); keine weitere Stelle mit diesem Muster.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler, Haupt-Chunk unverändert 299 kB |
+| `npm run test:import` | 8 Parser, 9 Kontrast, 7 Module, 19 FAQ-Bot |
+| `cd worker && npm test` | 29 API-Tests (neu: Karteneditor-Validierung/Mandantentrennung; Bühnen-Marker für Konsolen-Festivals) + Migrationstest (9 Migrationen, prüft 0009) |
+| `npm run test:e2e` | 10 Abläufe (vorher Chat-Absturz, jetzt grün) |
+| `npm run test:a11y` | 14 Ansichten ohne schwerwiegende Befunde |
+| `npm run test:live` | 17 Szenarien; Festival-Ablauf jetzt mit Karteneditor: Bühne ziehen + Pfeiltaste, Wasserstelle setzen, speichern, Position per API geprüft, Besucher sieht Bühnen-Marker und Ort; axe-Prüfung des Editors ohne Befund |
+
+Lokal: Playwright braucht hier `CHROMIUM_PATH=/opt/pw-browsers/chromium` (vorinstallierter Browser passt nicht zur Playwright-Version im Projekt). CI unbeeinflusst.
+
+Bekannte Grenzen: Wegeführung („Route“) ist weiterhin eine Kurve zwischen Standort und Ziel, keine echten Wege; der eigene Standort ist simuliert (`ME`). Geländeplan nur als Bild, kein PDF (Hinweis in der Konsole).
+
+## Nächste Schritte (Stand 11.11.2026)
+
+1. P7: Sprachen DE/EN – Texte der Besucher-App zentralisieren (`src/i18n.ts`), Sprachwahl im Profil, Festivalinhalte bleiben wie gepflegt. Zuerst Inventur der festen Strings (`grep -rn "'[A-ZÄÖÜ][a-zäöü]" src/screens src/sheets.tsx`).
+2. Optional zu P6: Orte per CSV importieren (Parser aus `src/import/parse.ts` wiederverwenden); Wege zeichnen für realistischere Routen.
+3. P8 Push bleibt blockiert (VAPID-Schlüssel + Deployment/Cloudflare-Konto).

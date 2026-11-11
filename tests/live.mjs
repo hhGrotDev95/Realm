@@ -1,6 +1,7 @@
 // Two-user end-to-end test against the real worker (wrangler dev, local D1) and the Vite dev server.
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { chromium } from 'playwright'
 
 const API = 'http://127.0.0.1:8798'
@@ -399,6 +400,45 @@ try {
     await visitor.getByRole('button', { name: 'Fragen' }).click()
     await visitor.getByText('Quelle: Service-Infos').waitFor()
     await visitor.context().setOffline(false)
+
+    // map editor: drag a stage, place a water point, save – visitors see both on their map
+    await org.getByRole('tab', { name: 'Karte' }).click()
+    const stage = org.getByRole('button', { name: /^Bühne Wiese/ })
+    const box = await stage.boundingBox()
+    await org.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await org.mouse.down()
+    await org.mouse.move(box.x + box.width / 2 + 60, box.y + box.height / 2 + 40, { steps: 6 })
+    await org.mouse.up()
+    await stage.press('ArrowRight') // keyboard nudge (+5) for people without a mouse
+    await org.getByLabel('Neuen Ort setzen: Kategorie').selectOption('water')
+    const canvas = await org.getByTestId('map-canvas').boundingBox()
+    await org.mouse.click(canvas.x + canvas.width * 0.8, canvas.y + canvas.height * 0.25)
+    await org.getByLabel('Name', { exact: true }).fill('Trinkwasser Wiese')
+    await org.getByLabel('Beschreibung').fill('Kostenlos auffüllen')
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/map-editor.png`, fullPage: true })
+    // the editor is checked with axe like the visitor screens (tests/a11y.mjs runs without a server)
+    await org.addScriptTag({ path: createRequire(import.meta.url).resolve('axe-core/axe.min.js') })
+    const axe = await org.evaluate(async () => {
+      // @ts-ignore
+      const r = await window.axe.run(document, { resultTypes: ['violations'], runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } })
+      return r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(' | ')}`)
+    })
+    if (axe.length) throw new Error('map editor a11y: ' + axe.join('; '))
+    await org.getByRole('button', { name: 'Karte speichern' }).click()
+    await org.getByText('Karte gespeichert').waitFor()
+    const saved = await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()
+    const wiese = saved.pois.find((p) => p.id === 'stage-wiese')
+    const water = saved.pois.find((p) => p.name === 'Trinkwasser Wiese')
+    if (!wiese || !water) throw new Error('map not saved: ' + JSON.stringify(saved.pois))
+    if (Math.abs(water.x - 800) > 6 || Math.abs(water.y - 235) > 6) throw new Error('water placed at the wrong spot: ' + JSON.stringify(water))
+    await visitor.reload()
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await nav(visitor, 'Map')
+    await visitor.getByRole('button', { name: 'Wiese', exact: true }).waitFor() // stage marker of a console-made festival
+    await visitor.getByRole('button', { name: 'Wasser', exact: true }).click()
+    await visitor.getByRole('button', { name: 'Trinkwasser Wiese' }).click()
+    await visitor.locator('.sheet').getByText('Kostenlos auffüllen').waitFor()
+    await visitor.keyboard.press('Escape')
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

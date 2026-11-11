@@ -38,5 +38,9 @@ assert.deepEqual(q(`SELECT festival_id FROM reports WHERE id = 'r_old'`), [{ fes
 assert.deepEqual(q(`SELECT festival_id FROM announcements WHERE id = 'a_old'`), [{ festival_id: 'realm' }])
 assert.deepEqual(q(`SELECT festival_id, act_id, cancelled FROM timetable_changes`), [{ festival_id: 'realm', act_id: '1-arcturus', cancelled: 1 }])
 assert.equal(q(`SELECT COUNT(*) AS n FROM acts WHERE festival_id = 'realm'`)[0].n, 59)
+// 0009: stage markers come from `stages`; the demo festival keeps its illustrated grounds
+assert.equal(q(`SELECT COUNT(*) AS n FROM pois WHERE cat = 'stage'`)[0].n, 0)
+assert.ok(q(`SELECT COUNT(*) AS n FROM pois WHERE festival_id = 'realm'`)[0].n > 10)
+assert.deepEqual(q(`SELECT map FROM festivals WHERE id = 'realm'`), [{ map: '{"art":"demo"}' }])
 console.log(`✓ ${before.length} alte + ${after.length} neue Migrationen: alle Altdaten erhalten und dem Festival 'realm' zugeordnet`)
 rmSync(persist, { recursive: true, force: true })

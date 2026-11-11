@@ -1,5 +1,6 @@
 // Thin client for the Realm API (worker/). Without VITE_API_URL the app runs in demo mode.
 import type { FestivalBundle, TimetableChange } from './data'
+import type { MapSettings, PlaceCat } from './map'
 
 export const API_URL: string | undefined = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || undefined
 export const online = !!API_URL
@@ -179,6 +180,23 @@ export function execute(op: OutboxOp): Promise<unknown> {
 const rand = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('')
 export const opId = (prefix: string) => `${prefix}_${rand()}`
 
+/** The map as the console edits it (GET/PUT /api/admin/festivals/:slug/map). */
+export interface AdminPlace {
+  id: string
+  cat: PlaceCat
+  name: string
+  x: number
+  y: number
+  detail: string
+  status?: 'open' | 'busy' | 'closed'
+  important?: boolean
+}
+export interface AdminMap {
+  map: MapSettings
+  stages: { id: string; name: string; color: string; x: number; y: number }[]
+  pois: AdminPlace[]
+}
+
 export interface AdminFaq {
   id: string
   question: string
@@ -234,6 +252,9 @@ export const adminApi = (adminToken: string) => {
     deleteFaq: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/faq/${id}`),
     setModules: (slug: string, modules: Record<string, boolean>) => req<Record<string, boolean>>('PUT', `/api/admin/festivals/${slug}/modules`, modules),
     setTheme: (slug: string, theme: { brand?: string; font?: string; logo?: string }) => req<Record<string, string>>('PUT', `/api/admin/festivals/${slug}/theme`, theme),
+    map: (slug: string) => req<AdminMap>('GET', `/api/admin/festivals/${slug}/map`),
+    saveMap: (slug: string, m: { stages: { id: string; x: number; y: number }[]; pois: AdminPlace[]; image: string | null; art: 'demo' | 'plain' | null }) =>
+      req<{ stages: number; pois: number }>('PUT', `/api/admin/festivals/${slug}/map`, m),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
     restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),
     announce: (a: { title: string; body?: string; place?: string; severity: Announcement['severity']; validMin?: number }) => req<Announcement>('POST', '/api/admin/announcements', a),
