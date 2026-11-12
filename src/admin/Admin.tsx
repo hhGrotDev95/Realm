@@ -1,5 +1,5 @@
 import { BarChart3, KeyRound, Scale, MessagesSquare, CalendarClock, Map as MapIcon, CircleHelp, FileUp, LayoutGrid, Palette, ToggleRight, LogOut, Megaphone, Plus, RotateCcw, Settings2, Trash2, Wand2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import { adminApi, ApiError, online, setFestival, type Announcement } from '../api'
 import { Branding } from './Branding'
 import { Modules } from './Modules'
@@ -13,9 +13,10 @@ import { CommunityReports } from './CommunityReports'
 import { announcementDraft, type AnnouncementDraft } from './announcementDraft'
 import { CreateFestival, ImportPanel, Settings, SetupWizard, StagesEditor } from './Setup'
 import { currentSlug } from '../festival'
+import { matchPlace } from '../updatePoi'
 import { night } from '../festivalTime'
 import type { ModuleKey } from '../modules'
-import { ACTS, actById, DAYS, FESTIVAL, fmt, loadFestivalBundle, on, STAGES, stageById, type Act, type StageId, type TimetableChange, actTime } from '../data'
+import { ACTS, actById, DAYS, FESTIVAL, fmt, loadFestivalBundle, on, POIS, STAGES, stageById, type Act, type StageId, type TimetableChange, actTime } from '../data'
 
 const KEY = 'realm.admin'
 type Tab = 'legal' | 'access' | 'setup' | 'announcements' | 'timetable' | 'import' | 'stages' | 'map' | 'faq' | 'analytics' | 'chat' | 'branding' | 'modules' | 'settings'
@@ -314,6 +315,10 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
     load()
   }, [load])
   const validMin = form.valid ? Number(form.valid) : undefined
+  // the app links an announcement to the map only when its place names exactly one point – show that here
+  const placeMatch = matchPlace(form.place, POIS)
+  const placeNames = useMemo(() => [...new Set(POIS.map((p) => p.name))].sort((a, b) => a.localeCompare(b, 'de')), [])
+  const placeId = useId()
   const invalid = form.title.trim().length < 3 || (!!form.titleEn.trim() && form.titleEn.trim().length < 3) || (!!form.bodyEn.trim() && !form.titleEn.trim()) || (validMin !== undefined && (!Number.isInteger(validMin) || validMin < 1))
   return (
     <div className="admin-grid">
@@ -323,7 +328,7 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
           e.preventDefault()
           setBusy(true)
           try {
-            await admin.announce({ title: form.title.trim(), body: form.body.trim() || undefined, titleEn: form.titleEn.trim() || undefined, bodyEn: form.bodyEn.trim() || undefined, place: form.place.trim() || undefined, severity: form.severity, validMin, actId: draft?.actId })
+            await admin.announce({ title: form.title.trim(), body: form.body.trim() || undefined, titleEn: form.titleEn.trim() || undefined, bodyEn: form.bodyEn.trim() || undefined, place: form.place.trim() || undefined, poi: placeMatch && 'point' in placeMatch ? placeMatch.point.id : undefined, severity: form.severity, validMin, actId: draft?.actId })
             setForm(EMPTY_FORM)
             onDraftDone?.()
             flash('ok', 'Meldung veröffentlicht')
@@ -370,10 +375,24 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
           </label>
         </details>
         <div className="admin-row">
-          <label className="admin-field">
-            <span>Ort (optional)</span>
-            <input className="field" value={form.place} maxLength={60} onChange={(e) => setForm({ ...form, place: e.target.value })} />
-          </label>
+          <div className="admin-field">
+            <label htmlFor={`${placeId}-in`}>Ort (optional)</label>
+            <input id={`${placeId}-in`} className="field" list={`${placeId}-list`} value={form.place} maxLength={60} aria-describedby={`${placeId}-hint`} onChange={(e) => setForm({ ...form, place: e.target.value })} placeholder="Kartenpunkt wählen oder frei eingeben" />
+            <datalist id={`${placeId}-list`}>
+              {placeNames.map((n) => (
+                <option key={n} value={n} />
+              ))}
+            </datalist>
+            <span id={`${placeId}-hint`} className={`tiny ${placeMatch && 'point' in placeMatch ? '' : 'faint'}`} aria-live="polite" data-testid="place-match">
+              {!form.place.trim()
+                ? 'Mit einem Kartenpunkt führt die Meldung in der App direkt dorthin.'
+                : placeMatch && 'point' in placeMatch
+                  ? `Wird auf der Karte verlinkt: ${placeMatch.point.name}`
+                  : placeMatch
+                    ? `${placeMatch.ambiguous.length} Kartenpunkte heißen so – die Meldung bekommt keinen Kartenlink.`
+                    : 'Kein Kartenpunkt mit diesem Namen – die Meldung erscheint ohne Kartenlink.'}
+            </span>
+          </div>
           <label className="admin-field">
             <span>Gültig (Min., leer = bis gelöscht)</span>
             <input className="field" inputMode="numeric" value={form.valid} onChange={(e) => setForm({ ...form, valid: e.target.value.replace(/\D/g, '') })} />
