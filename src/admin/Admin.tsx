@@ -13,7 +13,7 @@ import { CommunityReports } from './CommunityReports'
 import { announcementDraft, type AnnouncementDraft } from './announcementDraft'
 import { CreateFestival, ImportPanel, Settings, SetupWizard, StagesEditor } from './Setup'
 import { currentSlug } from '../festival'
-import { matchPlace } from '../updatePoi'
+import { matchPlace, poiForUpdate } from '../updatePoi'
 import { night } from '../festivalTime'
 import type { ModuleKey } from '../modules'
 import { ACTS, actById, DAYS, FESTIVAL, fmt, loadFestivalBundle, on, POIS, STAGES, stageById, type Act, type StageId, type TimetableChange, actTime } from '../data'
@@ -440,6 +440,7 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
                   <div style={{ fontWeight: 600, marginTop: 4 }}>{a.title}</div>
                   {a.body && <div className="small muted">{a.body}</div>}
                   {a.actId && actById[a.actId] && <div className="tiny faint">Zur Änderung an {actById[a.actId].artist} – wird beim Zurücksetzen zum Entfernen angeboten</div>}
+                  <MapLinkNote a={a} />
                 </div>
                 <button
                   className="icon-btn"
@@ -462,6 +463,17 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
           </div>
         )}
       </section>
+    </div>
+  )
+}
+
+// whether the app links this announcement to a map point – older ones carry no poi, so say it here
+function MapLinkNote({ a }: { a: Announcement }) {
+  if (!a.place && !a.poi) return null
+  const point = poiForUpdate({ poi: a.poi ?? undefined, place: a.place ?? undefined }, POIS)
+  return (
+    <div className={`tiny ${point ? '' : 'faint'}`} data-testid="announcement-map">
+      {point ? `Karte: ${point.name}` : `Ort „${a.place ?? a.poi}“ – kein Kartenlink`}
     </div>
   )
 }
