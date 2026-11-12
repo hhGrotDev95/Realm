@@ -558,6 +558,8 @@ try {
     await org.getByRole('button', { name: 'Veröffentlichen' }).click()
     await org.getByText('Meldung veröffentlicht').waitFor()
     await org.locator('.list-item', { hasText: 'Shuttle fährt ab 23 Uhr alle 5 Min.' }).waitFor()
+    // the active list says which map point it links to (backlog m)
+    await org.locator('.list-item', { hasText: 'Shuttle fährt ab 23 Uhr alle 5 Min.' }).getByTestId('announcement-map').getByText('Karte: Shuttle-Terminal').waitFor()
     {
       const pub = await (await fetch(`${API}/api/announcements`, { headers: { 'X-Festival': 'realm-open-air' } })).json()
       const shuttle = (Array.isArray(pub) ? pub : pub.announcements ?? []).find((a) => a.title === 'Shuttle fährt ab 23 Uhr alle 5 Min.')

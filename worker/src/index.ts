@@ -316,6 +316,10 @@ async function actExists(c: Context<App>, actId: string) {
   return !!(await c.env.DB.prepare('SELECT 1 FROM acts WHERE festival_id = ? AND id = ?').bind(c.get('festival').id, actId).first())
 }
 
+async function poiExists(c: Context<App>, poi: string) {
+  return !!(await c.env.DB.prepare('SELECT 1 FROM pois WHERE festival_id = ? AND id = ?').bind(c.get('festival').id, poi).first())
+}
+
 app.get('/api/health', (c) => c.json({ ok: true }))
 
 async function platformLegal(db: D1Database) {
@@ -1031,6 +1035,7 @@ function announcementInput(b: Record<string, unknown>, partial = false) {
 app.post('/api/admin/announcements', async (c) => {
   const a = announcementInput(await body(c))
   if (a.actId && !(await actExists(c, a.actId))) throw new HttpError(400, 'Act gehört nicht zu diesem Festival')
+  if (a.poi && !(await poiExists(c, a.poi))) throw new HttpError(400, 'Kartenpunkt gehört nicht zu diesem Festival')
   const now = Date.now()
   const row: AnnouncementRow = { id: randomId('a'), title: a.title!, body: a.body ?? null, place: a.place ?? null, poi: a.poi ?? null, severity: a.severity!, created_at: now, expires_at: a.validMin ? now + a.validMin * MIN : null, title_en: a.titleEn ?? null, body_en: a.titleEn ? (a.bodyEn ?? null) : null, act_id: a.actId }
   await c.env.DB.prepare('INSERT INTO announcements (id, festival_id, title, body, place, poi, severity, created_at, expires_at, title_en, body_en, act_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
@@ -1041,6 +1046,7 @@ app.post('/api/admin/announcements', async (c) => {
 
 app.patch('/api/admin/announcements/:id', async (c) => {
   const a = announcementInput(await body(c), true)
+  if (a.poi && !(await poiExists(c, a.poi))) throw new HttpError(400, 'Kartenpunkt gehört nicht zu diesem Festival')
   const now = Date.now()
   const cur = await c.env.DB.prepare('SELECT * FROM announcements WHERE id = ? AND festival_id = ?').bind(c.req.param('id'), c.get('festival').id).first<AnnouncementRow>()
   if (!cur) throw new HttpError(404, 'Meldung nicht gefunden')
