@@ -338,7 +338,10 @@ try {
     assert.equal(atPoi.status, 201)
     assert.equal((await api('GET', '/api/announcements')).data.find((x) => x.id === atPoi.data.id).poi, 'sh1')
     assert.equal((await api('PATCH', `/api/admin/announcements/${atPoi.data.id}`, 'test-admin-token', { poi: 'stage-pier' })).status, 400)
-    assert.equal((await api('PATCH', `/api/admin/announcements/${atPoi.data.id}`, 'test-admin-token', { severity: 'warning' })).data.poi, 'sh1')
+    // stage pins are derived from the stages ('stage-<id>'), not stored as points – they count too
+    assert.equal((await api('PATCH', `/api/admin/announcements/${atPoi.data.id}`, 'test-admin-token', { place: 'Lagoon', poi: 'stage-lagoon' })).data.poi, 'stage-lagoon')
+    assert.equal((await api('PATCH', `/api/admin/announcements/${atPoi.data.id}`, 'test-admin-token', { poi: 'stage-gibts-nicht' })).status, 400)
+    assert.equal((await api('PATCH', `/api/admin/announcements/${atPoi.data.id}`, 'test-admin-token', { severity: 'warning' })).data.poi, 'stage-lagoon')
     assert.equal((await api('DELETE', `/api/admin/announcements/${atPoi.data.id}`, 'test-admin-token')).status, 204)
   })
 

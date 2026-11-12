@@ -316,8 +316,11 @@ async function actExists(c: Context<App>, actId: string) {
   return !!(await c.env.DB.prepare('SELECT 1 FROM acts WHERE festival_id = ? AND id = ?').bind(c.get('festival').id, actId).first())
 }
 
+// map points as the festival document lists them: stored points plus one pin per stage ('stage-<id>')
 async function poiExists(c: Context<App>, poi: string) {
-  return !!(await c.env.DB.prepare('SELECT 1 FROM pois WHERE festival_id = ? AND id = ?').bind(c.get('festival').id, poi).first())
+  const fid = c.get('festival').id
+  const stage = poi.startsWith('stage-') ? poi.slice(6) : null
+  return !!(await c.env.DB.prepare('SELECT 1 FROM pois WHERE festival_id = ?1 AND id = ?2 UNION ALL SELECT 1 FROM stages WHERE festival_id = ?1 AND id = ?3 LIMIT 1').bind(fid, poi, stage).first())
 }
 
 app.get('/api/health', (c) => c.json({ ok: true }))
