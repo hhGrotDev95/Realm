@@ -67,14 +67,22 @@ Veranstalter pflegen die FAQ in der Konsole (**FAQ**): Frage, Antwort, Kategorie
 
 Der Bot (`src/faq/match.ts`) läuft auf dem Gerät und **schreibt keine eigenen Texte**: Er sucht die passende freigegebene Antwort (Synonyme wie „Klo“ → „WC“, Umlaute, einfache Wortstämme) und zeigt sie mit **Quelle und Stand**. Ist er nicht sicher, bietet er Vorschläge an; findet er nichts, sagt er das und verweist aufs Info-Zelt. Ein Treffer nur im Antworttext reicht nie für eine Antwort. Module „FAQ & Infos“ und „FAQ-Bot“ sind abschaltbar.
 
+### Karte und Geländeplan
+
+Konsole → **Karte**: Kategorie wählen (Wasser, WC, Essen, Sanitäter, Bar, Eingang, Camping, Info, Shuttle) und auf die Karte klicken; Marker per Ziehen oder Pfeiltasten verschieben (Umschalt = 25 Einheiten), Name, Beschreibung, Status und „immer zeigen“ setzen, entfernen, alles auf einmal speichern. Bühnen erscheinen automatisch als Marker an ihrer Position (Quelle ist die Tabelle `stages`, nicht mehr `pois`) und lassen sich ebenfalls verschieben.
+
+- Koordinaten in Karteneinheiten: Breite immer 1000, Höhe folgt dem Seitenverhältnis des Plans (ohne Plan 940). Ein neuer Plan mit anderem Seitenverhältnis skaliert alle y-Werte mit – Marker bleiben relativ an ihrer Stelle. Gemeinsames Modell: `src/mapModel.ts`.
+- Geländeplan: PNG/JPEG/WebP, im Browser auf 2400 px verkleinert und unter 1 MB komprimiert, Seitenverhältnis höchstens 3:1. Er liegt getrennt vom Festivaldokument (`GET /api/festivals/:slug/map-image?v=<hash>`, mit passender Version ein Jahr `immutable` cachebar); der Service Worker hält ihn offline vor, die App lädt ihn beim Start vorab.
+- Ohne Plan: neutrales Raster oder (für das Demo-Festival) das illustrierte Gelände.
+
 ## Backend (`worker/`)
 
 Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt eine pseudonyme ID und ein Bearer-Token (gespeichert wird nur der SHA-256-Hash).
 
 | Bereich | Endpunkte |
 | --- | --- |
-| Festivals | `GET /api/festivals` (veröffentlichte), `GET /api/festivals/:slug` (Festivaldokument), `GET /api/admin/festivals` (alle, Admin) |
-| Einrichtung (Admin) | `GET/PUT/DELETE /api/admin/festivals/:slug/faq[/:id]`, `PUT /api/admin/festivals/:slug/modules`, `PUT /api/admin/festivals/:slug/theme` (Farbe, Schrift, Logo), `POST /api/admin/festivals`, `PATCH /api/admin/festivals/:slug` (Name, Ort, Status), `PUT …/:slug/stages`, `POST …/:slug/import` (`mode`, `dryRun`, `rows`), `GET …/:slug/snapshots`, `POST …/:slug/snapshots/:id/restore` |
+| Festivals | `GET /api/festivals` (veröffentlichte), `GET /api/festivals/:slug` (Festivaldokument), `GET /api/festivals/:slug/map-image` (Geländeplan), `GET /api/admin/festivals` (alle, Admin) |
+| Einrichtung (Admin) | `GET/PUT/DELETE /api/admin/festivals/:slug/faq[/:id]`, `PUT /api/admin/festivals/:slug/modules`, `PUT /api/admin/festivals/:slug/theme` (Farbe, Schrift, Logo), `POST /api/admin/festivals`, `PATCH /api/admin/festivals/:slug` (Name, Ort, Status), `PUT …/:slug/stages`, `PUT …/:slug/pois` (Marker + Bühnenpositionen), `PUT …/:slug/map` (Geländeplan, Hintergrund), `POST …/:slug/import` (`mode`, `dryRun`, `rows`), `GET …/:slug/snapshots`, `POST …/:slug/snapshots/:id/restore` |
 | Profil | `POST /api/guests`, `GET/PATCH/DELETE /api/me`, `POST /api/me/recovery`, `POST /api/restore`, `PUT /api/me/plan`, `PUT/DELETE /api/me/steps` |
 | Crew | `POST /api/crews`, `POST /api/crews/join`, `GET /api/crews/:id` (Snapshot), `POST /api/crews/:id/leave`, `PUT /api/crews/:id/location`, `POST /api/crews/:id/messages`, `POST /api/crews/:id/meetups` |
 | Moderation | `DELETE /api/crews/:id/messages/:msgId` (eigene / Gründer:in), `POST /api/crews/:id/messages/:msgId/flag` (ab 2 Meldungen ausgeblendet), `DELETE /api/crews/:id/members/:guestId` (Gründer:in, sperrt Wiederbeitritt) |

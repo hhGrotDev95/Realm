@@ -40,6 +40,11 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url)
   const sameOrigin = url.origin === self.location.origin
   const fonts = url.hostname.endsWith('fonts.googleapis.com') || url.hostname.endsWith('fonts.gstatic.com')
+  // the festival's ground plan: versioned and immutable, kept offline (one version per festival)
+  if (/\/api\/festivals\/[^/]+\/map-image$/.test(url.pathname) && url.searchParams.has('v')) {
+    e.respondWith(mapImage(url))
+    return
+  }
   if (!sameOrigin && !fonts) return // API and everything else: straight to the network
   if (req.mode === 'navigate') {
     e.respondWith(
@@ -68,6 +73,20 @@ self.addEventListener('fetch', (e) => {
     ),
   )
 })
+
+// Not under PREFIX, so new app versions do not throw the downloaded plans away.
+const MAP_CACHE = 'realmmap'
+async function mapImage(url) {
+  const cache = await caches.open(MAP_CACHE)
+  const hit = await cache.match(url.href)
+  if (hit) return hit
+  const res = await fetch(url.href, { mode: 'cors', credentials: 'omit' })
+  if (res.ok) {
+    for (const old of await cache.keys()) if (new URL(old.url).pathname === url.pathname) await cache.delete(old)
+    await cache.put(url.href, res.clone())
+  }
+  return res
+}
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close()

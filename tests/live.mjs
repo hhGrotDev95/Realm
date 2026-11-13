@@ -1,6 +1,7 @@
 // Two-user end-to-end test against the real worker (wrangler dev, local D1) and the Vite dev server.
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import zlib from 'node:zlib'
 import { chromium } from 'playwright'
 
 const API = 'http://127.0.0.1:8798'
@@ -50,6 +51,34 @@ const nav = (p, t) => p.locator('nav').getByText(t).click()
 const name = async (p, n) => {
   await p.getByPlaceholder('Spitzname').fill(n)
   await p.getByRole('button', { name: 'Weiter' }).click()
+}
+
+/** A solid-colour PNG of the given size (stand-in for an organizer's ground plan). */
+const pngFile = (w, h) => {
+  const { deflateSync, crc32 } = zlib
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4)
+    len.writeUInt32BE(data.length)
+    const td = Buffer.concat([Buffer.from(type), data])
+    const crc = Buffer.alloc(4)
+    crc.writeUInt32BE(crc32(td))
+    return Buffer.concat([len, td, crc])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(w, 0)
+  ihdr.writeUInt32BE(h, 4)
+  ihdr.set([8, 2, 0, 0, 0], 8) // 8 bit, RGB
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3, Buffer.from([40, 70, 50]))])
+  const raw = Buffer.concat(Array.from({ length: h }, () => row))
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))])
+}
+
+/** axe-core on a live page (the a11y suite runs without a server and cannot reach the editor). */
+const axeCheck = async (page, label) => {
+  await page.addScriptTag({ path: 'node_modules/axe-core/axe.min.js' })
+  const res = await page.evaluate(() => window.axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice'] } }))
+  const bad = res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
+  if (bad.length) throw new Error(`${label}: ${bad.map((v) => `${v.id} (${v.nodes.length}): ${v.nodes[0].target}`).join('; ')}`)
 }
 
 try {
@@ -399,6 +428,35 @@ try {
     await visitor.getByRole('button', { name: 'Fragen' }).click()
     await visitor.getByText('Quelle: Service-Infos').waitFor()
     await visitor.context().setOffline(false)
+
+    // map editor: place a marker, upload a ground plan – both reach the visitor
+    await org.getByRole('tab', { name: /Karte/ }).click()
+    await org.getByRole('group', { name: 'Neuen Marker setzen' }).getByRole('button', { name: 'Wasser' }).click()
+    await org.locator('.map-editor-canvas').click({ position: { x: 120, y: 90 } })
+    await org.getByLabel('Name', { exact: true }).fill('Wasser am Teich')
+    await org.getByLabel('Beschreibung').fill('Trinkwasser · kostenlos')
+    // keyboard: the selected marker moves with the arrow keys
+    const pos = async () => (await org.getByText(/^Position \d+ \/ \d+$/).textContent()).match(/\d+/g).map(Number)
+    const [x0, y0] = await pos()
+    await org.getByRole('button', { name: /^Wasser am Teich \(Wasser\)/ }).focus()
+    await org.keyboard.press('Shift+ArrowRight')
+    await org.getByText(`Position ${x0 + 25} / ${y0}`).waitFor()
+    await org.getByRole('button', { name: 'Karte speichern' }).click()
+    await org.getByText(/Karte gespeichert – 1 Marker/).waitFor()
+    await axeCheck(org, 'Konsole · Karteneditor')
+    await org.getByLabel('Geländeplan wählen').setInputFiles({ name: 'plan.png', mimeType: 'image/png', buffer: pngFile(800, 400) })
+    await org.getByText('Geländeplan gespeichert').waitFor()
+    await org.getByText('Kartengröße 1000 × 500 Einheiten').waitFor()
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/map-editor.png` })
+    await visitor.reload()
+    await nav(visitor, 'Map')
+    await visitor.getByRole('button', { name: 'Wasser am Teich' }).waitFor()
+    const plan = await visitor.locator('main img[src*="map-image?v="]').getAttribute('src')
+    if (!plan) throw new Error('ground plan missing on the visitor map')
+    await visitor.getByLabel('Karte durchsuchen').fill('Teich')
+    await visitor.locator('.tile', { hasText: 'Wasser am Teich' }).click()
+    await visitor.locator('.sheet').getByText('Trinkwasser · kostenlos').waitFor()
+    await visitor.keyboard.press('Escape')
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

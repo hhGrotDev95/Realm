@@ -1,5 +1,6 @@
 // Thin client for the Realm API (worker/). Without VITE_API_URL the app runs in demo mode.
-import type { FestivalBundle, TimetableChange } from './data'
+import type { FestivalBundle, Poi, TimetableChange } from './data'
+import type { MapInfo } from './mapModel'
 
 export const API_URL: string | undefined = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || undefined
 export const online = !!API_URL
@@ -234,6 +235,8 @@ export const adminApi = (adminToken: string) => {
     deleteFaq: (slug: string, id: string) => req<void>('DELETE', `/api/admin/festivals/${slug}/faq/${id}`),
     setModules: (slug: string, modules: Record<string, boolean>) => req<Record<string, boolean>>('PUT', `/api/admin/festivals/${slug}/modules`, modules),
     setTheme: (slug: string, theme: { brand?: string; font?: string; logo?: string }) => req<Record<string, string>>('PUT', `/api/admin/festivals/${slug}/theme`, theme),
+    setMap: (slug: string, m: { image: string | null; width?: number; height?: number; ground?: 'demo' | 'plain' }) => req<{ map: MapInfo; height: number }>('PUT', `/api/admin/festivals/${slug}/map`, m),
+    setPois: (slug: string, b: { pois: Omit<Poi, 'confirmedMin'>[]; stages: { id: string; x: number; y: number }[] }) => req<{ pois: number; stages: number }>('PUT', `/api/admin/festivals/${slug}/pois`, b),
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
     restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),
     announce: (a: { title: string; body?: string; place?: string; severity: Announcement['severity']; validMin?: number }) => req<Announcement>('POST', '/api/admin/announcements', a),

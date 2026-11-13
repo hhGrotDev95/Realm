@@ -1,6 +1,7 @@
 import type { Theme } from './theme/apply'
 import { isEnabled, type ModuleKey, type ModuleState } from './modules.ts'
 import type { Faq } from './faq/match'
+import { mapHeight, MAP_W, type MapInfo } from './mapModel.ts'
 // Realm — demo dataset for "Realm Open Air 2027".
 // Times are minutes after midnight of the festival day (values > 1440 = after midnight).
 
@@ -306,7 +307,11 @@ export const FESTIVAL = {
   status: 'published' as 'draft' | 'published' | 'archived',
   theme: {} as Theme,
   modules: {} as ModuleState,
+  map: { ground: 'demo' } as MapInfo,
 }
+
+/** Size of the festival map in map units (always MAP_W wide). */
+export const mapSize = () => ({ w: MAP_W, h: mapHeight(FESTIVAL.map) })
 
 /** Is an optional module available at this festival? (all on in the demo) */
 export const on = (key: ModuleKey) => isEnabled(FESTIVAL.modules, key)
@@ -378,7 +383,7 @@ export function applyTimetableChanges(changes: TimetableChange[]) {
 
 /** The public festival document served by GET /api/festivals/:slug. */
 export interface FestivalBundle {
-  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; updatedAt: number }
+  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; map?: MapInfo; updatedAt: number }
   days: FestivalDay[]
   stages: Stage[]
   acts: Omit<Act, 'change'>[]
@@ -397,7 +402,9 @@ const refill = <T,>(map: Record<string, T>, entries: [string, T][]) => {
  * lookup maps are updated in place so every module keeps working with the same references.
  */
 export function loadFestivalBundle(b: FestivalBundle) {
-  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {}, modules: b.festival.modules ?? {} })
+  Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {}, modules: b.festival.modules ?? {}, map: b.festival.map ?? {} })
+  // the simulated own position stays on the grounds of smaller maps
+  Object.assign(ME, { x: 440, y: Math.min(420, Math.round(mapHeight(FESTIVAL.map) * 0.45)) })
   replace(DAYS, b.days)
   replace(STAGES, b.stages)
   refill(stageById, STAGES.map((st) => [st.id, st]))

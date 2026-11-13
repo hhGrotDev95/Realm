@@ -523,6 +523,71 @@ try {
     assert.equal((await api('GET', `${base}`, A, undefined, null)).data.length, 0)
   })
 
+  await test('map editor: validated markers, stage positions, ground plan with rescaling', async () => {
+    const A = 'test-admin-token'
+    const N = 'nordlicht'
+    const bundle = async () => (await api('GET', '/api/festivals/nordlicht', null, undefined, null)).data
+    const before = await bundle()
+    // stage markers come from the stages table, no duplicates
+    assert.deepEqual(before.pois.filter((p) => p.cat === 'stage').map((p) => p.id).sort(), ['stage-pier', 'stage-werft'])
+    assert.deepEqual(before.festival.map, {})
+    const demo = (await api('GET', '/api/festivals/realm-open-air', null, undefined, null)).data
+    assert.equal(demo.festival.map.ground, 'demo')
+    assert.equal(demo.pois.filter((p) => p.cat === 'stage').length, demo.stages.length)
+
+    const put = (body) => api('PUT', `/api/admin/festivals/${N}/pois`, A, body, null)
+    const water = { id: 'w1', cat: 'water', name: 'Wasser am Kai', x: 480, y: 380, detail: 'Trinkwasser', status: 'open', important: true }
+    assert.equal((await api('PUT', `/api/admin/festivals/${N}/pois`, lea.token, { pois: [] }, null)).status, 401)
+    assert.equal((await put({ pois: [{ ...water, cat: 'stage' }] })).status, 400) // stages are not markers
+    assert.equal((await put({ pois: [{ ...water, id: 'stage-x' }] })).status, 400)
+    assert.equal((await put({ pois: [{ ...water, x: 1200 }] })).status, 400)
+    assert.equal((await put({ pois: [{ ...water, y: 941 }] })).status, 400)
+    assert.equal((await put({ pois: [water, water] })).status, 400)
+    assert.equal((await put({ pois: [{ ...water, name: '' }] })).status, 400)
+    assert.equal((await put({ pois: [water], stages: [{ id: 'generator', x: 1, y: 1 }] })).status, 400) // other festival's stage
+    const ok = await put({ pois: [water, { id: 'wc-kai', cat: 'wc', name: 'WC Kai', x: 200.4, y: 700, important: false }], stages: [{ id: 'pier', x: 100, y: 200 }] })
+    assert.equal(ok.status, 200)
+    const after = await bundle()
+    assert.deepEqual(after.pois.find((p) => p.id === 'wc-kai'), { id: 'wc-kai', cat: 'wc', name: 'WC Kai', x: 200, y: 700, detail: '', important: false })
+    assert.equal(after.pois.some((p) => p.id === 'en1'), false) // replaced
+    assert.deepEqual(after.pois.find((p) => p.id === 'stage-pier'), { id: 'stage-pier', cat: 'stage', name: 'Pier', x: 100, y: 200, detail: 'Electronic · Waterfront', important: true })
+    assert.ok(after.festival.updatedAt > before.festival.updatedAt)
+    // the other festival is untouched
+    assert.equal((await api('GET', '/api/festivals/realm-open-air', null, undefined, null)).data.pois.length, demo.pois.length)
+
+    // ground plan: 1x1 PNG declared as 2000x1000 → map is 1000 x 500, y halves (940 → 500)
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const map = (body) => api('PUT', `/api/admin/festivals/${N}/map`, A, body, null)
+    assert.equal((await map({ image: 'https://example.com/plan.png', width: 2000, height: 1000 })).status, 400)
+    assert.equal((await map({ image: 'data:image/svg+xml;base64,PHN2Zz4=', width: 2000, height: 1000 })).status, 400)
+    assert.equal((await map({ image: png, width: 4000, height: 1000 })).status, 400) // 4:1
+    assert.equal((await map({ image: 'data:image/png;base64,' + 'A'.repeat(1_400_000), width: 2000, height: 1000 })).status, 400)
+    const up = await map({ image: png, width: 2000, height: 1000 })
+    assert.equal(up.status, 200)
+    assert.equal(up.data.height, 500)
+    const withPlan = await bundle()
+    const v = withPlan.festival.map.image.v
+    assert.match(v, /^[0-9a-f]{16}$/)
+    assert.equal(withPlan.pois.find((p) => p.id === 'wc-kai').y, Math.round(700 * 500 / 940))
+    assert.equal(withPlan.stages.find((s) => s.id === 'pier').y, Math.round(200 * 500 / 940))
+    const img = await fetch(`${BASE}/api/festivals/${N}/map-image?v=${v}`)
+    assert.equal(img.status, 200)
+    assert.equal(img.headers.get('content-type'), 'image/png')
+    assert.match(img.headers.get('cache-control'), /immutable/)
+    assert.equal(Buffer.from(await img.arrayBuffer()).subarray(1, 4).toString(), 'PNG')
+    assert.match((await fetch(`${BASE}/api/festivals/${N}/map-image?v=old`)).headers.get('cache-control'), /no-cache/)
+    assert.equal((await fetch(`${BASE}/api/festivals/realm-open-air/map-image`)).status, 404)
+    // markers must now fit the smaller map
+    assert.equal((await put({ pois: [{ ...water, y: 600 }] })).status, 400)
+    // removing the plan restores the default height and scales back
+    const down = await map({ image: null })
+    assert.equal(down.data.height, 940)
+    const plain = await bundle()
+    assert.equal(plain.festival.map.image, undefined)
+    assert.equal((await fetch(`${BASE}/api/festivals/${N}/map-image?v=${v}`)).status, 404)
+    assert.equal((await map({ image: null, ground: 'forest' })).status, 400)
+  })
+
   await test('CORS preflight is answered', async () => {
     const r = await fetch(BASE + '/api/me', { method: 'OPTIONS', headers: { Origin: 'https://realm.app', 'Access-Control-Request-Method': 'GET' } })
     assert.equal(r.headers.get('access-control-allow-origin'), 'https://realm.app')

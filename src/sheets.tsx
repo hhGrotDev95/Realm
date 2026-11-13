@@ -234,7 +234,9 @@ function ActSheet({ id }: { id: string }) {
 function PoiSheet({ id }: { id: string }) {
   const app = useApp()
   const { openSheet, requireIdentity, now, updates, votes, vote, plan } = app
-  const p = POIS.find((x) => x.id === id)!
+  const p = POIS.find((x) => x.id === id)
+  // the organizer may have removed this marker since the link was made
+  if (!p) return <p className="muted">Dieser Ort ist nicht mehr auf der Karte.</p>
   const I = CAT_ICON[p.cat]
   const walk = walkMinutes(ME.x, ME.y, p.x, p.y)
   const reports = updates.filter((u) => u.poi === id && votes[u.id] !== 'fixed')
@@ -1036,7 +1038,11 @@ function Chat() {
   const [text, setText] = useState('')
   const [active, setActive] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null)
-  useEffect(() => end.current?.scrollIntoView({ behavior: 'smooth' }), [chat.length])
+  // braces matter: current browsers return a Promise from scrollIntoView, which React would
+  // otherwise call as the effect's cleanup and crash the chat
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chat.length])
   return (
     <>
       <div className="sheet-head" style={{ marginBottom: 10 }}>

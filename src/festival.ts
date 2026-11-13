@@ -1,12 +1,17 @@
 // Which festival this app shows, and loading its data from the API (with an offline copy).
-import { adminApi, api, online, setFestival } from './api'
+import { adminApi, API_URL, api, online, setFestival } from './api'
 import { FESTIVAL, loadFestivalBundle as loadBundle, type FestivalBundle } from './data'
 import { applyTheme } from './theme/apply'
+import { mapImageUrl } from './mapModel'
 
 /** Loads the data and applies the festival's branding in one go. */
 const loadFestivalBundle = (b: FestivalBundle) => {
   loadBundle(b)
   applyTheme(FESTIVAL.theme)
+  // fetch the ground plan now (the service worker keeps it), so the map also works offline
+  // for visitors who open it for the first time without network
+  const plan = mapImageUrl(API_URL, FESTIVAL.slug, FESTIVAL.map)
+  if (plan && navigator.onLine) fetch(plan).catch(() => {})
 }
 
 export const DEFAULT_FESTIVAL = (import.meta.env.VITE_FESTIVAL as string | undefined) || 'realm-open-air'

@@ -1,6 +1,6 @@
 # Realm – Fortschritt
 
-Stand: 19.10.2026
+Stand: 13.11.2026
 
 - Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
 - Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`, gemergt als PR #5
@@ -265,7 +265,7 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 | `npm run test:e2e` · `npm run test:a11y` | 10 Abläufe (neu: Bot) · 14 Ansichten ohne Befund (neu: FAQ mit Bot-Antwort) |
 | `npm run test:live` | 17 Szenarien; Festival-Ablauf: FAQ-Entwurf unsichtbar, nach Freigabe beantwortet der Bot die Frage – auch offline |
 
-## Nächste Schritte
+## Nächste Schritte (Stand P5 – Punkte 1 und 2 inzwischen erledigt, aktuelle Liste ganz unten)
 
 1. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen) – der Build warnt.
 2. P6: Karteneditor (eigener Geländeplan, Marker mit relativen Koordinaten).
@@ -277,3 +277,32 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - `LazyBoundary`: ein fehlgeschlagener Chunk-Load zeigt „Erneut versuchen“ statt die App abstürzen zu lassen.
 - Smoke-Test prüft Offline jetzt ehrlich (Server wird beendet, da `setOffline` Service-Worker-Fetches nicht abdeckt).
 - Geprüft: typecheck, test:import, build, test:e2e, test:a11y, test:live – alles grün.
+
+## P6 · Karteneditor — erledigt (Branch `ccr-c4b0523e-frymjz`, 13.11.2026)
+
+- Migration `0009_map.sql`: `festivals.map` (JSON: Hintergrund `demo`/`plain`, Plan-Version und Pixelgröße), Tabelle `map_images` (Base64, Hash), doppelte Bühnen-Marker aus `pois` entfernt.
+- Bühnen-Marker kommen jetzt aus `stages` – vorher hatten importierte/neue Festivals **gar keine Bühnen auf der Karte** (und „Route zur Bühne“ lief ins Leere), weil nur die Demo-Seeds Bühnen-POIs hatten.
+- Worker: `PUT /api/admin/festivals/:slug/pois` (Marker ersetzen + Bühnenpositionen; Kategorie, id, Name, Grenzen der Karte, Dubletten, fremde Bühnen geprüft), `PUT …/map` (Plan hochladen/entfernen, Hintergrund; anderes Seitenverhältnis skaliert alle y-Werte), öffentlich `GET /api/festivals/:slug/map-image?v=` (immutable bei passender Version, Entwürfe nur mit Version/Admin).
+- Konsole: Tab „Karte“ (`src/admin/MapEditor.tsx`): Marker setzen, ziehen, per Pfeiltasten verschieben, bearbeiten, löschen, verwerfen; Plan-Upload mit Verkleinerung/Kompression im Browser; Warnung beim Schließen mit ungespeicherten Änderungen.
+- App: Karte nutzt Größe und Hintergrund des Festivals (`src/screens/MapGround.tsx`), Satellit-Ebene entfällt bei eigenem Plan, Plan wird vorab geladen und vom Service Worker in eigenem Cache (`realmmap`, überlebt App-Updates) offline gehalten. Gelöschte Marker, auf die alte Meldungen oder Links verweisen, lassen die Karte bzw. das Ort-Sheet nicht mehr abstürzen.
+- Entscheidung: Koordinaten bleiben Karteneinheiten (Breite 1000) statt 0–1-Werten – keine Datenmigration nötig, relative Lage bleibt durch das Mitskalieren erhalten.
+
+Nebenbei gefundener echter Fehler (auch auf `main`): **Crew-Chat stürzte beim Senden ab** in aktuellen Chromium-Versionen – `scrollIntoView` gibt dort ein Promise zurück, das ein Kurzschreib-`useEffect` als Cleanup an React zurückgab („destroy is not a function“). Behoben in `src/sheets.tsx`.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler |
+| `npm run test:import` | 8 Parser, 9 Kontrast, 7 Module, 19 FAQ-Bot |
+| `cd worker && npm test` | 28 API-Tests (neu: Karteneditor inkl. Validierung, Bild, Skalierung) + Migrationstest (9 Migrationen) |
+| `npm run test:e2e` | 11 Abläufe bestanden (vor dem Chat-Fix scheiterte „crew chat sends a message“) |
+| `npm run test:a11y` | 14 Ansichten, 0 Befunde |
+| `npm run test:live` | 17 Szenarien; Festival-Ablauf jetzt mit Karteneditor: Marker setzen, per Tastatur verschieben, speichern, axe-Prüfung des Editors (0 schwere Befunde), Plan hochladen (Karte 1000 × 500), Besucher sieht Plan und Marker samt Beschreibung |
+
+Hinweis lokal: Playwright 1.56 findet den vorinstallierten Browser nicht; Tests mit `CHROMIUM_PATH=/opt/pw-browsers/chromium` starten.
+Nicht geprüft: Drag & Drop per Maus/Touch im Editor ist nur manuell angelegt, automatisiert geprüft sind Klick-Setzen und Tastatur-Verschieben; Offline-Cache des Plans im Service Worker nur im Produktionsbuild wirksam und nicht automatisiert getestet.
+
+## Nächste Schritte
+
+1. P7: Sprachen DE/EN (Texte zentral sammeln, Sprachwahl im Profil, Festivaldaten bleiben einsprachig).
+2. Smoke-Test um Offline-Abruf des Geländeplans erweitern (Produktionsbuild + Worker), dann P8 Push (blockiert: VAPID-Schlüssel/Deployment).
+3. Karteneditor-Ausbau bei Bedarf: Wege/Flächen zeichnen, Marker-Import aus CSV.
