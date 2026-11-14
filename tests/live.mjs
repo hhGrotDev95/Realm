@@ -258,6 +258,8 @@ try {
     await lea.reload()
     await nav(lea, 'Crew')
     await lea.getByRole('button', { name: /^Crew-Chat/ }).click()
+    // after a reload the chat first shows the offline copy; the server's newer messages follow with the first sync
+    await lea.locator('.bubble.them', { hasText: 'Und danach' }).waitFor({ timeout: 15000 })
     const texts = await lea.locator('.bubble.them').allInnerTexts()
     const a = texts.findIndex((x) => x.includes('Hängt das?'))
     const b = texts.findIndex((x) => x.includes('Und danach'))
