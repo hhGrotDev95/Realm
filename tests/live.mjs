@@ -633,10 +633,16 @@ try {
     await org.getByTestId('announcement-draft').getByRole('button', { name: 'Verwerfen' }).click()
     if (await org.getByPlaceholder('z. B. Gewitterwarnung ab 22:30').inputValue()) throw new Error('discarding the draft left the form filled')
     // publish a linked announcement; reverting the change then offers to remove it (backlog 5g)
+    // slow network: the published changes arrive late; a shift typed before that must not be overwritten by them (CI #53)
+    await org.route('**/api/timetable/changes', async (route) => {
+      await new Promise((r) => setTimeout(r, 1500))
+      await route.continue().catch(() => {}) // already let through by unroute below
+    })
     await org.getByRole('tab', { name: /Live-Änderungen/ }).click()
     await org.getByRole('button', { name: 'Freitag' }).click()
     await org.locator('.list-item', { hasText: 'Ruby Kade' }).click()
     await org.getByRole('button', { name: '+30 Min.' }).click()
+    await org.unroute('**/api/timetable/changes')
     await org.getByRole('button', { name: 'Änderung veröffentlichen' }).click()
     await org.locator('.list-item', { hasText: 'Ruby Kade' }).getByText('→ 18:45').waitFor()
     await org.getByTestId('offer-announcement').getByRole('button', { name: 'Meldung vorbereiten' }).click()

@@ -559,7 +559,14 @@ function Timetable({ token, flash, slug, onDraft }: { token: string; flash: (k: 
   // how many synced plans hold each act, so a cancellation or move says whom it reaches;
   // the same aggregates as the analytics tab (groups below minGroup withheld). Optional: on failure the list stays as is.
   const [interest, setInterest] = useState<PlanInterest | null>(null)
-  const load = useCallback(() => admin.timetableChanges().then(setChanges, (e) => flash('err', errText(e))), [admin, flash])
+  const load = useCallback(
+    () =>
+      admin.timetableChanges().then(setChanges, (e) => {
+        flash('err', errText(e))
+        setChanges((c) => c ?? []) // as before: the form still opens, starting from the line-up
+      }),
+    [admin, flash],
+  )
   useEffect(() => {
     load()
   }, [load])
@@ -618,7 +625,12 @@ function Timetable({ token, flash, slug, onDraft }: { token: string; flash: (k: 
         </div>
       </section>
       <section className="card">
-        {edit ? (
+        {edit && changes === null ? (
+          // the form starts from the published change – opening it before that loaded would silently drop what is typed when it arrives
+          <p className="muted small" role="status">
+            Lade Änderungen …
+          </p>
+        ) : edit ? (
           <ChangeForm
             key={edit.id + (byId.get(edit.id)?.note ?? '') + JSON.stringify(byId.get(edit.id) ?? null)}
             act={edit}
