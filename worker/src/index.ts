@@ -1062,7 +1062,8 @@ app.patch('/api/admin/announcements/:id', async (c) => {
     severity: a.severity ?? cur.severity,
     expires_at: a.validMin === undefined ? cur.expires_at : a.validMin === null ? null : now + a.validMin * MIN,
     title_en: a.titleEn === undefined ? cur.title_en : a.titleEn,
-    body_en: a.bodyEn === undefined ? cur.body_en : a.bodyEn,
+    // like POST: no English text without an English title
+    body_en: a.titleEn === null ? null : a.bodyEn === undefined ? cur.body_en : a.bodyEn,
   }
   await c.env.DB.prepare('UPDATE announcements SET title = ?, body = ?, place = ?, poi = ?, severity = ?, expires_at = ?, title_en = ?, body_en = ? WHERE id = ?')
     .bind(next.title, next.body, next.place, next.poi, next.severity, next.expires_at, next.title_en, next.body_en, next.id)
