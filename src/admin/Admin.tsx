@@ -1,5 +1,5 @@
-import { BarChart3, KeyRound, Scale, MessagesSquare, CalendarClock, Map as MapIcon, CircleHelp, FileUp, LayoutGrid, Palette, ToggleRight, LogOut, Megaphone, Plus, RotateCcw, Settings2, Trash2, Wand2 } from 'lucide-react'
-import { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import { BarChart3, KeyRound, Scale, MessagesSquare, CalendarClock, Map as MapIcon, CircleHelp, FileUp, LayoutGrid, Palette, ToggleRight, LogOut, Megaphone, Pencil, Plus, RotateCcw, Settings2, Trash2, Wand2 } from 'lucide-react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { adminApi, ApiError, online, setFestival, type Announcement } from '../api'
 import { Branding } from './Branding'
 import { Modules } from './Modules'
@@ -10,7 +10,7 @@ import { ChatModeration } from './ChatModeration'
 import { LegalEditor } from './Legal'
 import { AccessPanel, inviteFromUrl, SignIn, sessionState } from './Access'
 import { CommunityReports } from './CommunityReports'
-import { announcementDraft, type AnnouncementDraft } from './announcementDraft'
+import { announcementDraft, announcementForm, announcementPatch, type AnnouncementDraft, type AnnouncementForm } from './announcementDraft'
 import { CreateFestival, ImportPanel, Settings, SetupWizard, StagesEditor } from './Setup'
 import { currentSlug } from '../festival'
 import { matchPlace, poiForUpdate } from '../updatePoi'
@@ -303,13 +303,20 @@ function ConsoleTabs({ slug, tab, setTab, token, flash, reload }: { slug: string
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : 'Fehler')
 
-const EMPTY_FORM = { title: '', body: '', titleEn: '', bodyEn: '', place: '', severity: 'info' as Announcement['severity'], valid: '' }
+const EMPTY_FORM: AnnouncementForm = { title: '', body: '', titleEn: '', bodyEn: '', place: '', severity: 'info', valid: '' }
 
 function Announcements({ token, flash, draft, onDraftDone }: { token: string; flash: (k: 'ok' | 'err', t: string) => void; draft?: AnnouncementDraft | null; onDraftDone?: () => void }) {
   const admin = useMemo(() => adminApi(token), [token])
   const [items, setItems] = useState<Announcement[] | null>(null)
   const [form, setForm] = useState(() => (draft ? { title: draft.title, body: draft.body, titleEn: draft.titleEn, bodyEn: draft.bodyEn, place: draft.place, severity: draft.severity as Announcement['severity'], valid: draft.valid } : EMPTY_FORM))
   const [busy, setBusy] = useState(false)
+  // editing an active announcement borrows the form; what was typed before (a new one, a prepared draft) comes back afterwards
+  const [editing, setEditing] = useState<{ a: Announcement; before: AnnouncementForm; stash: AnnouncementForm } | null>(null)
+  const titleRef = useRef<HTMLInputElement>(null)
+  const stopEditing = () => {
+    if (editing) setForm(editing.stash)
+    setEditing(null)
+  }
   const load = useCallback(() => admin.announcements().then(setItems, (e) => flash('err', errText(e))), [admin, flash])
   useEffect(() => {
     load()
@@ -319,6 +326,8 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
   const placeMatch = matchPlace(form.place, POIS)
   const placeNames = useMemo(() => [...new Set(POIS.map((p) => p.name))].sort((a, b) => a.localeCompare(b, 'de')), [])
   const placeId = useId()
+  const poiId = placeMatch && 'point' in placeMatch ? placeMatch.point.id : null
+  const patch = editing ? announcementPatch(editing.before, form, poiId) : null
   const invalid = form.title.trim().length < 3 || (!!form.titleEn.trim() && form.titleEn.trim().length < 3) || (!!form.bodyEn.trim() && !form.titleEn.trim()) || (validMin !== undefined && (!Number.isInteger(validMin) || validMin < 1))
   return (
     <div className="admin-grid">
@@ -327,6 +336,22 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
         onSubmit={async (e) => {
           e.preventDefault()
           setBusy(true)
+          if (editing) {
+            try {
+              await admin.updateAnnouncement(editing.a.id, patch!)
+              stopEditing()
+              flash('ok', 'Meldung geändert – die App zeigt sie beim nächsten Abruf (spätestens nach 1 Min.)')
+            } catch (e) {
+              // removed in the meantime (another tab, expiry): nothing left to edit
+              if (e instanceof ApiError && e.status === 404) {
+                stopEditing()
+                flash('err', 'Diese Meldung gibt es nicht mehr – sie wurde entfernt oder ist abgelaufen.')
+              } else flash('err', errText(e))
+            }
+            load()
+            setBusy(false)
+            return
+          }
           try {
             await admin.announce({ title: form.title.trim(), body: form.body.trim() || undefined, titleEn: form.titleEn.trim() || undefined, bodyEn: form.bodyEn.trim() || undefined, place: form.place.trim() || undefined, poi: placeMatch && 'point' in placeMatch ? placeMatch.point.id : undefined, severity: form.severity, validMin, actId: draft?.actId })
             setForm(EMPTY_FORM)
@@ -339,8 +364,13 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
           setBusy(false)
         }}
       >
-        <h2 className="admin-h">Neue Meldung</h2>
-        {draft && (
+        <h2 className="admin-h">{editing ? 'Meldung bearbeiten' : 'Neue Meldung'}</h2>
+        {editing && (
+          <p className="tiny faint" style={{ marginTop: -4 }}>
+            Alter und Verknüpfungen bleiben erhalten. Eine geänderte Gültigkeit zählt ab dem Speichern.
+          </p>
+        )}
+        {draft && !editing && (
           <div className="admin-draft small" role="status" data-testid="announcement-draft">
             <span className="grow">Vorausgefüllt aus der Änderung an {draft.source}. Bitte prüfen, dann veröffentlichen.</span>
             <button
@@ -357,7 +387,7 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
         )}
         <label className="admin-field">
           <span>Titel</span>
-          <input className="field" value={form.title} maxLength={120} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="z. B. Gewitterwarnung ab 22:30" />
+          <input ref={titleRef} className="field" value={form.title} maxLength={120} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="z. B. Gewitterwarnung ab 22:30" />
         </label>
         <label className="admin-field">
           <span>Text (optional)</span>
@@ -415,9 +445,20 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
           </div>
           <span className="tiny faint">Warnung und Kritisch erscheinen in jeder Festivalphase ganz oben auf dem Home-Screen aller Besucher – Info nur in der Update-Liste.</span>
         </fieldset>
-        <button className="btn primary block" disabled={busy || invalid}>
-          {busy ? 'Veröffentliche …' : 'Veröffentlichen'}
-        </button>
+        {editing ? (
+          <div className="row" style={{ gap: 8 }}>
+            <button type="button" className="btn secondary" disabled={busy} onClick={stopEditing}>
+              Abbrechen
+            </button>
+            <button className="btn primary grow" disabled={busy || invalid || !Object.keys(patch!).length}>
+              {busy ? 'Speichere …' : 'Änderungen speichern'}
+            </button>
+          </div>
+        ) : (
+          <button className="btn primary block" disabled={busy || invalid}>
+            {busy ? 'Veröffentliche …' : 'Veröffentlichen'}
+          </button>
+        )}
       </form>
 
       <section className="card">
@@ -429,7 +470,7 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
         ) : (
           <div className="list">
             {items.map((a) => (
-              <div key={a.id} className="list-item" style={{ alignItems: 'flex-start' }}>
+              <div key={a.id} className="list-item" style={{ alignItems: 'flex-start', ...(editing?.a.id === a.id ? { outline: '2px solid var(--brand)', outlineOffset: -2 } : {}) }} aria-current={editing?.a.id === a.id ? 'true' : undefined}>
                 <div className="grow">
                   <div className="row" style={{ gap: 8 }}>
                     <span className={`tag ${a.severity === 'critical' ? 'crit' : a.severity === 'warning' ? 'warn' : 'official'}`}>{a.severity === 'critical' ? 'Kritisch' : a.severity === 'warning' ? 'Warnung' : 'Info'}</span>
@@ -444,11 +485,26 @@ function Announcements({ token, flash, draft, onDraftDone }: { token: string; fl
                 </div>
                 <button
                   className="icon-btn"
+                  aria-label={`„${a.title}“ bearbeiten`}
+                  aria-pressed={editing?.a.id === a.id}
+                  onClick={() => {
+                    const before = announcementForm(a)
+                    setEditing({ a, before, stash: editing ? editing.stash : form })
+                    setForm(before)
+                    titleRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+                    titleRef.current?.focus({ preventScroll: true })
+                  }}
+                >
+                  <Pencil size={18} />
+                </button>
+                <button
+                  className="icon-btn"
                   aria-label={`„${a.title}“ entfernen`}
                   onClick={async () => {
                     if (!confirm(`„${a.title}“ entfernen?`)) return
                     try {
                       await admin.removeAnnouncement(a.id)
+                      if (editing?.a.id === a.id) stopEditing()
                       flash('ok', 'Meldung entfernt')
                       load()
                     } catch (e) {

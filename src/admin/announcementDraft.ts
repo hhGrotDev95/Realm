@@ -90,3 +90,44 @@ export function announcementDraft(c: ChangeSummary, now: number): AnnouncementDr
     source: c.artist,
   }
 }
+
+/* ---------- editing an active announcement (backlog 5n) ---------- */
+
+type Severity = 'info' | 'warning' | 'critical'
+/** The console's announcement form; all text fields as typed, validity in minutes ('' = until removed). */
+export type AnnouncementForm = { title: string; body: string; titleEn: string; bodyEn: string; place: string; severity: Severity; valid: string }
+export type AnnouncementPatch = { title?: string; body?: string | null; titleEn?: string | null; bodyEn?: string | null; place?: string | null; poi?: string | null; severity?: Severity; validMin?: number | null }
+
+/** The form prefilled from an active announcement; the validity shows the minutes left. */
+export const announcementForm = (a: { title: string; body: string | null; place: string | null; severity: Severity; validMin: number | null; en?: { title: string; body: string | null } }): AnnouncementForm => ({
+  title: a.title,
+  body: a.body ?? '',
+  titleEn: a.en?.title ?? '',
+  bodyEn: a.en?.body ?? '',
+  place: a.place ?? '',
+  severity: a.severity,
+  valid: a.validMin === null ? '' : String(a.validMin),
+})
+
+/**
+ * Only what the organizer changed goes out: an untouched validity keeps its expiry instead of restarting it,
+ * an untouched place keeps its map point. Cleared fields are sent as null. `poiId` is the map point the
+ * (possibly new) place names, or null.
+ */
+export function announcementPatch(before: AnnouncementForm, after: AnnouncementForm, poiId: string | null): AnnouncementPatch {
+  const p: AnnouncementPatch = {}
+  const b = (k: keyof AnnouncementForm) => before[k].trim()
+  const a = (k: keyof AnnouncementForm) => after[k].trim()
+  if (a('title') !== b('title')) p.title = a('title')
+  if (a('body') !== b('body')) p.body = a('body') || null
+  if (a('titleEn') !== b('titleEn')) p.titleEn = a('titleEn') || null
+  // English text only with an English title (the worker drops it otherwise)
+  if (a('bodyEn') !== b('bodyEn') && a('titleEn')) p.bodyEn = a('bodyEn') || null
+  if (a('place') !== b('place')) {
+    p.place = a('place') || null
+    p.poi = a('place') ? poiId : null
+  }
+  if (after.severity !== before.severity) p.severity = after.severity
+  if (after.valid !== before.valid) p.validMin = after.valid ? Number(after.valid) : null
+  return p
+}

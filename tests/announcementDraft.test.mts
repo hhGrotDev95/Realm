@@ -1,6 +1,6 @@
 // After a cancellation or move the console prepares an announcement for everyone (src/admin/announcementDraft.ts).
 import assert from 'node:assert/strict'
-import { announcementDraft, type ChangeSummary } from '../src/admin/announcementDraft.ts'
+import { announcementDraft, announcementForm, announcementPatch, type ChangeSummary } from '../src/admin/announcementDraft.ts'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -53,6 +53,32 @@ check('long names are clipped to the API limits', () => {
   const d = announcementDraft({ ...base, cancelled: true, artist: 'X'.repeat(200) }, NOW)!
   assert.ok(d.title.length <= 120 && d.title.endsWith('…'))
   assert.ok(d.titleEn.length <= 120)
+})
+
+const active = { title: 'Shuttle ab 23 Uhr', body: 'Alle 5 Min.', place: 'Shuttle-Terminal', severity: 'info' as const, validMin: 42, en: { title: 'Shuttle from 11 pm', body: 'Every 5 min.' } }
+
+check('editing: the form is prefilled with the minutes left; nothing changed means nothing to save', () => {
+  const f = announcementForm(active)
+  assert.deepEqual(f, { title: 'Shuttle ab 23 Uhr', body: 'Alle 5 Min.', titleEn: 'Shuttle from 11 pm', bodyEn: 'Every 5 min.', place: 'Shuttle-Terminal', severity: 'info', valid: '42' })
+  assert.deepEqual(announcementPatch(f, f, 'poi-x'), {})
+  assert.deepEqual(announcementPatch(f, { ...f, title: ' Shuttle ab 23 Uhr  ' }, 'poi-x'), {}, 'whitespace alone is no change')
+  assert.equal(announcementForm({ ...active, validMin: null, body: null, place: null, en: undefined }).valid, '')
+})
+
+check('editing: only changed fields go out, so the expiry and map point are kept', () => {
+  const f = announcementForm(active)
+  assert.deepEqual(announcementPatch(f, { ...f, severity: 'warning', title: 'Shuttle ab 23 Uhr alle 10 Min.' }, 'poi-x'), { severity: 'warning', title: 'Shuttle ab 23 Uhr alle 10 Min.' })
+  assert.deepEqual(announcementPatch(f, { ...f, valid: '30' }, null), { validMin: 30 })
+  assert.deepEqual(announcementPatch(f, { ...f, valid: '' }, null), { validMin: null }, 'cleared validity = until removed')
+})
+
+check('editing: cleared texts are sent as null; a new place carries its map point or none', () => {
+  const f = announcementForm(active)
+  assert.deepEqual(announcementPatch(f, { ...f, body: '  ' }, null), { body: null })
+  assert.deepEqual(announcementPatch(f, { ...f, titleEn: '', bodyEn: '' }, null), { titleEn: null })
+  assert.deepEqual(announcementPatch(f, { ...f, place: 'Lagoon' }, 'stage-lagoon'), { place: 'Lagoon', poi: 'stage-lagoon' })
+  assert.deepEqual(announcementPatch(f, { ...f, place: 'Parkplatz' }, null), { place: 'Parkplatz', poi: null })
+  assert.deepEqual(announcementPatch(f, { ...f, place: '' }, 'stale'), { place: null, poi: null })
 })
 
 console.log(`announcement drafts: ${passed} checks passed`)
