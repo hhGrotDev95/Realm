@@ -1,7 +1,7 @@
 import { Archive, Check, Eye, FileUp, Plus, RotateCcw, Rocket, Trash2, Upload } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { adminApi, ApiError, type ImportResult } from '../api'
-import { ACTS, DAYS, FESTIVAL, STAGES, fmt } from '../data'
+import { ACTS, DAYS, FESTIVAL, MAP, POIS, STAGES, fmt } from '../data'
 import { parseCsv, parseFile, parseTable, type ParseResult } from '../import/parse'
 
 type Flash = (k: 'ok' | 'err', t: string) => void
@@ -437,6 +437,8 @@ export function Settings({ token, flash, slug, reload }: { token: string; flash:
     { ok: STAGES.length > 0, text: `${STAGES.length} Bühnen` },
     { ok: ACTS.length > 0, text: `${ACTS.length} Acts` },
     { ok: DAYS.length > 0, text: `${DAYS.length} Tage (${DAYS[0]?.date ?? '–'} bis ${DAYS[DAYS.length - 1]?.date ?? '–'})` },
+    // optional: without a plan the app shows a neutral area with the markers
+    { ok: !!MAP.plan || MAP.terrain === 'demo', optional: true, text: MAP.plan || MAP.terrain === 'demo' ? `Geländeplan mit ${POIS.filter((p) => p.cat !== 'stage').length} weiteren Punkten` : 'Kein Geländeplan (optional, Tab „Karte“)' },
   ]
   return (
     <div>
@@ -447,7 +449,7 @@ export function Settings({ token, flash, slug, reload }: { token: string; flash:
       <ul className="list" style={{ margin: '8px 0 14px', padding: 0, listStyle: 'none' }}>
         {checks.map((c) => (
           <li key={c.text} className="list-item small">
-            {c.ok ? <Check size={16} style={{ color: 'var(--ok)' }} /> : <span style={{ color: 'var(--crit)' }}>✕</span>} {c.text}
+            {c.ok ? <Check size={16} style={{ color: 'var(--ok)' }} /> : 'optional' in c ? <span className="muted">–</span> : <span style={{ color: 'var(--crit)' }}>✕</span>} {c.text}
           </li>
         ))}
       </ul>
@@ -462,7 +464,7 @@ export function Settings({ token, flash, slug, reload }: { token: string; flash:
           <Eye size={17} /> Vorschau öffnen
         </button>
         {status !== 'published' && (
-          <button className="btn primary" disabled={busy || !checks.every((c) => c.ok)} onClick={() => set('published', 'Festival ist veröffentlicht')}>
+          <button className="btn primary" disabled={busy || !checks.every((c) => c.ok || 'optional' in c)} onClick={() => set('published', 'Festival ist veröffentlicht')}>
             <Rocket size={17} /> {status === 'archived' ? 'Reaktivieren' : 'Veröffentlichen'}
           </button>
         )}

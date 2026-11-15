@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { isEnabled, MODULE_KEYS, moduleConflicts, MODULES, type ModuleKey, type ModuleState } from '../../src/modules'
 import { checkBrand, HEX } from '../../src/theme/contrast'
+import { DEFAULT_MAP_H, MAP_W, mapHeight, PLAN_MAX, PLAN_TYPES, checkPos, validatePois, type MapInfo } from '../../src/map'
 import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v } from './util'
 
 export interface Env {
@@ -152,22 +153,46 @@ app.get('/api/festivals/:slug', async (c) => {
   const f = await c.env.DB.prepare('SELECT * FROM festivals WHERE slug = ?').bind(c.req.param('slug')).first<FestivalRow>()
   if (!f || (f.status === 'draft' && !(await isAdminRequest(c)))) throw new HttpError(404, 'Festival nicht gefunden')
   const db = c.env.DB
-  const [days, stages, acts, pois, faqs] = await db.batch([
+  const [days, stages, acts, pois, faqs, map] = await db.batch([
     db.prepare('SELECT idx, date, label, short FROM festival_days WHERE festival_id = ? ORDER BY idx').bind(f.id),
     db.prepare('SELECT id, name, color, x, y, vibe FROM stages WHERE festival_id = ? ORDER BY sort, name').bind(f.id),
     db.prepare('SELECT id, day, stage_id AS stage, artist, start_min AS start, end_min AS "end", genre, bio, popularity FROM acts WHERE festival_id = ? ORDER BY day, start_min').bind(f.id),
-    db.prepare('SELECT id, cat, name, x, y, detail, status, important FROM pois WHERE festival_id = ?').bind(f.id),
+    db.prepare("SELECT id, cat, name, x, y, detail, status, important FROM pois WHERE festival_id = ? AND cat <> 'stage' ORDER BY rowid").bind(f.id),
     db.prepare("SELECT id, question, answer, category, keywords, source, updated_at AS updatedAt FROM faqs WHERE festival_id = ? AND status = 'published' ORDER BY sort, category, question").bind(f.id),
+    db.prepare('SELECT height, plan_id, terrain FROM festival_maps WHERE festival_id = ?').bind(f.id),
   ])
+  const m = map.results[0] as { height: number; plan_id: string | null; terrain: MapInfo['terrain'] } | undefined
+  const stageRows = stages.results as { id: string; name: string; x: number; y: number; vibe: string }[]
   return c.json({
     festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), updatedAt: f.updated_at },
     days: days.results,
-    stages: stages.results,
+    stages: stageRows,
     acts: acts.results,
-    pois: (pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+    // stage markers come from the stage list, so a stage has exactly one position
+    pois: [
+      ...stageRows.map((s) => ({ id: 'stage-' + s.id, cat: 'stage', name: s.name, x: s.x, y: s.y, detail: s.vibe, important: true })),
+      ...(pois.results as Record<string, unknown>[]).map((p) => ({ ...p, status: p.status ?? undefined, important: !!p.important })),
+    ],
+    map: { w: MAP_W, h: m?.height ?? DEFAULT_MAP_H, plan: m?.plan_id ?? null, terrain: m?.terrain ?? 'plain' } satisfies MapInfo,
     // published answers travel with the festival document, so FAQ and bot work offline
     faq: isEnabled(JSON.parse(f.modules) as ModuleState, 'faq') ? faqs.results : [],
   })
+})
+
+/**
+ * The ground plan image. The URL contains the plan's random id, so it can be cached forever
+ * (a new upload gets a new id) and a draft's plan is only reachable via its festival document.
+ */
+app.get('/api/festivals/:slug/plan/:planId', async (c) => {
+  const row = await c.env.DB.prepare('SELECT m.plan FROM festival_maps m JOIN festivals f ON f.id = m.festival_id WHERE f.slug = ? AND m.plan_id = ?')
+    .bind(c.req.param('slug'), c.req.param('planId'))
+    .first<{ plan: string | null }>()
+  const match = row?.plan?.match(PLAN_TYPES)
+  if (!match) throw new HttpError(404, 'Plan nicht gefunden')
+  const bin = atob(match[2])
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return c.body(bytes, 200, { 'Content-Type': 'image/' + match[1], 'Cache-Control': 'public, max-age=31536000, immutable' })
 })
 
 /* ---------- Guest identity ---------- */
@@ -694,6 +719,78 @@ app.put('/api/admin/festivals/:slug/stages', async (c) => {
     touch(c.env.DB, f.id),
   ])
   return c.json({ stages })
+})
+
+/* Map editor (P6): ground plan and marker positions. */
+async function mapRow(db: D1Database, festivalId: string) {
+  return (await db.prepare('SELECT height, plan_id, terrain FROM festival_maps WHERE festival_id = ?').bind(festivalId).first<{ height: number; plan_id: string | null; terrain: MapInfo['terrain'] }>()) ?? { height: DEFAULT_MAP_H, plan_id: null, terrain: 'plain' as const }
+}
+
+/**
+ * Uploads (plan = data: URL with its pixel size) or removes (plan = null) the ground plan.
+ * When the aspect ratio changes, all markers are rescaled so they keep their spot on the plan.
+ */
+app.put('/api/admin/festivals/:slug/map', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  const cur = await mapRow(c.env.DB, f.id)
+  let plan: string | null = null
+  let height = DEFAULT_MAP_H
+  let terrain = cur.terrain
+  if (b.plan !== null) {
+    if (typeof b.plan !== 'string' || !PLAN_TYPES.test(b.plan)) throw new HttpError(400, 'Plan muss ein PNG-, WebP- oder JPEG-Bild sein')
+    if (b.plan.length > PLAN_MAX) throw new HttpError(400, 'Plan ist zu groß (max. ca. 1 MB)')
+    const w = v.int(b.width, 'Bildbreite', 100, 10000)
+    const h = v.int(b.height, 'Bildhöhe', 100, 10000)
+    plan = b.plan
+    height = mapHeight(w, h)
+    terrain = 'plain'
+  } else if (cur.terrain === 'demo') height = cur.height
+  const planId = plan ? randomId('plan') : null
+  const k = height / cur.height
+  const db = c.env.DB
+  await db.batch([
+    db.prepare(
+      `INSERT INTO festival_maps (festival_id, height, plan_id, plan, terrain, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(festival_id) DO UPDATE SET height = excluded.height, plan_id = excluded.plan_id, plan = excluded.plan, terrain = excluded.terrain, updated_at = excluded.updated_at`,
+    ).bind(f.id, height, planId, plan, terrain, Date.now()),
+    ...(k !== 1
+      ? [
+          db.prepare('UPDATE stages SET y = MIN(?, ROUND(y * ?, 1)) WHERE festival_id = ?').bind(height, k, f.id),
+          db.prepare('UPDATE pois SET y = MIN(?, ROUND(y * ?, 1)) WHERE festival_id = ?').bind(height, k, f.id),
+        ]
+      : []),
+    touch(db, f.id),
+  ])
+  return c.json({ w: MAP_W, h: height, plan: planId, terrain } satisfies MapInfo)
+})
+
+/** Replaces the map's markers and moves the stages; positions are relative (see src/map.ts). */
+app.put('/api/admin/festivals/:slug/pois', async (c) => {
+  const f = await festivalBySlug(c)
+  const b = await body(c)
+  const { height } = await mapRow(c.env.DB, f.id)
+  const checked = validatePois(b.pois, height)
+  if (!checked.ok) throw new HttpError(400, checked.errors.slice(0, 3).join('; '))
+  const known = new Set((await c.env.DB.prepare('SELECT id FROM stages WHERE festival_id = ?').bind(f.id).all<{ id: string }>()).results.map((r) => r.id))
+  if (b.stages !== undefined && !Array.isArray(b.stages)) throw new HttpError(400, 'stages muss eine Liste sein')
+  const stages = ((b.stages as unknown[] | undefined) ?? []).map((raw) => {
+    const s = (raw ?? {}) as { id?: unknown; x?: unknown; y?: unknown }
+    if (typeof s.id !== 'string' || !known.has(s.id)) throw new HttpError(400, `Unbekannte Bühne „${String(s.id)}“`)
+    const pos = checkPos(s.x, s.y, height)
+    if (typeof pos === 'string') throw new HttpError(400, `Bühne „${s.id}“: ${pos}`)
+    return { id: s.id, ...pos }
+  })
+  const db = c.env.DB
+  await db.batch([
+    db.prepare('DELETE FROM pois WHERE festival_id = ?').bind(f.id),
+    ...checked.pois.map((p) =>
+      db.prepare('INSERT INTO pois (festival_id, id, cat, name, x, y, detail, status, important) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, p.id, p.cat, p.name, p.x, p.y, p.detail, p.status, p.important ? 1 : 0),
+    ),
+    ...stages.map((s) => db.prepare('UPDATE stages SET x = ?, y = ? WHERE festival_id = ? AND id = ?').bind(s.x, s.y, f.id, s.id)),
+    touch(db, f.id),
+  ])
+  return c.json({ pois: checked.pois, stages })
 })
 
 /** Turns optional modules on or off; dependencies must be consistent. */

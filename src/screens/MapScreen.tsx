@@ -1,7 +1,8 @@
 import { AnimatePresence, m as motion } from 'framer-motion'
 import { Check, Layers, LocateFixed, Search, X, MapPin, TriangleAlert, Users, Satellite, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { on, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { on, FESTIVAL, MAP, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { planUrl } from '../api'
 import { useApp } from '../store'
 import { CAT_ICON } from './mapIcons'
 import { AppBar } from '../App'
@@ -14,12 +15,12 @@ const CATS: { id: PoiCat; label: string }[] = [
   { id: 'medical', label: 'Medical' },
   { id: 'bar', label: 'Bars' },
 ]
-const W = 1000
-const H = 940
+const W = MAP.w
 
 type View = { x: number; y: number; k: number }
 
 export function MapScreen() {
+  const H = MAP.h
   const { crew } = useApp()
   const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, updates, votes, sheet, set, toast, requireIdentity } = useApp()
   const wrap = useRef<HTMLDivElement>(null)
@@ -170,6 +171,7 @@ export function MapScreen() {
           }}
         >
           <Ground satellite={layers.satellite} />
+          {MAP.plan && <img className="map-plan" src={planUrl(FESTIVAL.slug, MAP.plan)} width={W} height={H} alt="" draggable={false} />}
           {routePoi && (
             <svg width={W} height={H} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
               <motion.path
@@ -383,6 +385,24 @@ function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: 
 }
 
 function Ground({ satellite }: { satellite: boolean }) {
+  const H = MAP.h
+  if (MAP.terrain !== 'demo')
+    // own plan (drawn on top) or none yet: a neutral area with the stage glows
+    return (
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ position: 'absolute', inset: 0 }} aria-hidden>
+        <defs>
+          {STAGES.map((s) => (
+            <radialGradient key={s.id} id={'g-' + s.id}>
+              <stop offset="0" stopColor={s.color} stopOpacity=".28" />
+              <stop offset="1" stopColor={s.color} stopOpacity="0" />
+            </radialGradient>
+          ))}
+        </defs>
+        <rect width={W} height={H} fill="#14171c" />
+        <rect x="12" y="12" width={W - 24} height={H - 24} rx="28" fill="#191d23" stroke="#232830" strokeWidth="3" strokeDasharray="10 8" />
+        {!MAP.plan && STAGES.map((s) => <circle key={s.id} cx={s.x} cy={s.y} r="120" fill={`url(#g-${s.id})`} />)}
+      </svg>
+    )
   const grass = satellite ? '#1b2a1a' : '#14171c'
   const field = satellite ? '#243620' : '#191d23'
   const path = satellite ? '#4a4535' : '#262b33'

@@ -1,6 +1,7 @@
 // Two-user end-to-end test against the real worker (wrangler dev, local D1) and the Vite dev server.
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { chromium } from 'playwright'
 
 const API = 'http://127.0.0.1:8798'
@@ -399,6 +400,74 @@ try {
     await visitor.getByRole('button', { name: 'Fragen' }).click()
     await visitor.getByText('Quelle: Service-Infos').waitFor()
     await visitor.context().setOffline(false)
+  })
+
+  await step('map editor: organizer uploads a ground plan and places a point; visitors see plan, stage and point', async () => {
+    const org = await user()
+    await org.setViewportSize({ width: 1200, height: 900 })
+    await org.goto(`${WEB}/#admin`)
+    await org.getByLabel('Admin-Token').fill('e2e-admin')
+    await org.getByRole('button', { name: 'Anmelden' }).click()
+    await org.locator('label.admin-field', { hasText: 'Festival' }).locator('select').first().selectOption('testwiese-festival')
+    await org.getByRole('tab', { name: 'Karte' }).click()
+    // a 1600×800 plan (2:1) drawn in the browser → map height 500
+    const plan = Buffer.from(
+      await org.evaluate(() => {
+        const c = document.createElement('canvas')
+        c.width = 1600
+        c.height = 800
+        const g = c.getContext('2d')
+        g.fillStyle = '#2d5a27'
+        g.fillRect(0, 0, 1600, 800)
+        g.fillStyle = '#8a7a5a'
+        g.fillRect(0, 380, 1600, 40)
+        return c.toDataURL('image/png').split(',')[1]
+      }),
+      'base64',
+    )
+    await org.getByLabel('Geländeplan auswählen').setInputFiles({ name: 'plan.png', mimeType: 'image/png', buffer: plan })
+    await org.getByText('Geländeplan gespeichert').waitFor()
+    await org.getByAltText(/Geländeplan Testwiese/).waitFor()
+    // add a water point, move it by tapping the map, rename it, nudge it with the keyboard
+    await org.getByLabel('Kategorie').selectOption('water')
+    await org.getByRole('button', { name: 'Hinzufügen' }).click()
+    const canvas = org.locator('.map-ed-canvas')
+    const box = await canvas.boundingBox()
+    await canvas.click({ position: { x: box.width * 0.25, y: box.height * 0.75 } })
+    await org.getByLabel('Name').fill('Wasser am Tor')
+    await org.getByRole('button', { name: /^Wasser am Tor – Position/ }).press('ArrowRight')
+    await org.getByText('Ungespeicherte Änderungen').waitFor()
+    // the marker is drawn where it was placed (relative to the plan)
+    const mb = await org.getByRole('button', { name: /^Wasser am Tor – Position/ }).boundingBox()
+    const fx = (mb.x + mb.width / 2 - box.x) / box.width
+    const fy = (mb.y + mb.height / 2 - box.y) / box.height
+    if (Math.abs(fx - 0.255) > 0.02 || Math.abs(fy - 0.75) > 0.02) throw new Error(`marker drawn at ${fx.toFixed(3)}/${fy.toFixed(3)}`)
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/map-editor.png`, fullPage: true })
+    // accessibility of the editor (the a11y suite runs without a server and cannot open the console)
+    await org.addScriptTag({ path: createRequire(import.meta.url).resolve('axe-core/axe.min.js') })
+    const axe = await org.evaluate(async () => {
+      const res = await window.axe.run('.map-ed', { resultTypes: ['violations'], runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } })
+      return res.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).slice(0, 3).join(', ')}`)
+    })
+    if (axe.length) throw new Error('map editor a11y: ' + axe.join('; '))
+    await org.getByRole('button', { name: 'Karte speichern' }).click()
+    await org.getByText('Karte gespeichert').waitFor()
+    const doc = await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()
+    if (doc.map.h !== 500 || !doc.map.plan) throw new Error('plan not stored: ' + JSON.stringify(doc.map))
+    const water = doc.pois.find((p) => p.name === 'Wasser am Tor')
+    if (!water || Math.abs(water.x - 255) > 6 || Math.abs(water.y - 375) > 6) throw new Error('point not where it was placed: ' + JSON.stringify(water))
+    // visitor: plan image, the stage from the wizard and the new point are on the map
+    const visitor = await user()
+    await visitor.goto(`${WEB}/?f=testwiese-festival`)
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await nav(visitor, 'Map')
+    await visitor.locator(`img.map-plan[src*="/plan/${doc.map.plan}"]`).waitFor()
+    await visitor.getByRole('button', { name: 'Wiese', exact: true }).waitFor()
+    await visitor.getByRole('button', { name: 'Wasser am Tor' }).waitFor({ state: 'attached' })
+    await visitor.getByLabel('Karte durchsuchen').fill('am Tor')
+    await visitor.locator('.tile', { hasText: 'Wasser am Tor' }).click()
+    await visitor.locator('.sheet').getByText('Wasser am Tor').first().waitFor()
+    if (process.env.SHOTS) await visitor.screenshot({ path: `${process.env.SHOTS}/map-visitor.png` })
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

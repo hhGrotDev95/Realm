@@ -1,6 +1,6 @@
 # Realm – Fortschritt
 
-Stand: 19.10.2026
+Stand: 15.11.2026
 
 - Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
 - Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`, gemergt als PR #5
@@ -277,3 +277,35 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - `LazyBoundary`: ein fehlgeschlagener Chunk-Load zeigt „Erneut versuchen“ statt die App abstürzen zu lassen.
 - Smoke-Test prüft Offline jetzt ehrlich (Server wird beendet, da `setOffline` Service-Worker-Fetches nicht abdeckt).
 - Geprüft: typecheck, test:import, build, test:e2e, test:a11y, test:live – alles grün.
+
+## P6 · Karteneditor — erledigt (Branch `ccr-c4b0523e-k82v9a`, 15.11.2026)
+
+- `src/map.ts` (neu, geteilt von App, Konsole und Worker): Koordinatensystem relativ zum Plan (x 0–1000, y 0–Höhe), Kategorien, Status, `validatePois` mit nummerierten Fehlern, `mapHeight`, Größenlimits.
+- Migration `0009_maps.sql`: `festival_maps` (Höhe, Plan als Data-URL, Plan-ID, Gelände `demo`/`plain`); Demo-Festival behält sein gezeichnetes Gelände; doppelte Bühnen-POIs gelöscht.
+- Worker: Bühnen-Marker werden aus der Bühnenliste erzeugt (eine Position pro Bühne – **behebt: neu angelegte Festivals hatten gar keine Bühnen auf der Karte**). Festivaldokument liefert `map`. `PUT /api/admin/festivals/:slug/map` (Plan hochladen/entfernen, Punkte werden bei anderem Seitenverhältnis mitskaliert), `PUT …/pois` (Punkte ersetzen, Bühnen verschieben), `GET /api/festivals/:slug/plan/:id` (Bild, `immutable`; ohne passende ID 404 → Entwurfspläne nicht erratbar).
+- App: Karte nutzt Höhe und Planbild des Festivals; ohne Plan neutrale Fläche statt des Demo-Geländes. Service Worker cacht Planbilder (eigener Cache `plans-v1`, max. 6), Plan wird beim Laden vorab geholt.
+- Konsole: Tab „Karte“ (`src/admin/MapEditor.tsx`) mit Plan-Upload (Verkleinerung auf 2400 px/≈1 MB, WebP/JPEG), Ziehen, Tippen-zum-Setzen, Pfeiltasten (Umschalt = große Schritte), Punkt-Formular, Liste, Warnung bei ungespeicherten Änderungen. Einrichtungs-Checkliste zeigt den Plan als optionalen Punkt.
+
+Nebenbei gefunden und behoben:
+- **Crew-Chat stürzte beim Senden ab** (schwarzer Bildschirm, „destroy is not a function“): `useEffect(() => el.scrollIntoView(...))` gab den Rückgabewert zurück; aktuelle Chromium-Versionen liefern dort ein Promise, das React als Aufräumfunktion aufruft. Der Smoke-Test schlug deshalb auch auf `main` fehl.
+- Erster Entwurf: optionaler Plan-Prüfpunkt sperrte „Veröffentlichen“; Marker-Position als „20 %“ (Leerzeichen, ungültiges CSS) – beides durch die Tests gefunden und behoben; der Live-Test prüft jetzt auch die gezeichnete Marker-Position.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler, keine Größenwarnung |
+| `npm run test:import` | Parser, Kontrast, Module, FAQ-Bot + 5 neue Karten-Prüfungen |
+| `cd worker && npm test` | 28 API-Tests (neu: Plan, Mitskalieren, Punkte-Validierung, Bühnen-Marker) + Migrationstest (9 Migrationen) |
+| `npm run test:e2e` | 11 Abläufe (Crew-Chat wieder grün) |
+| `npm run test:a11y` | ohne schwerwiegende Befunde; Editor zusätzlich per axe im Live-Test |
+| `npm run test:live` | 18 Szenarien (neu: Plan hochladen, Punkt setzen/benennen/verschieben, Besucher sieht Plan, Bühne und Punkt) |
+
+Hinweis lokal: Playwright findet hier seinen Browser nicht; Tests laufen mit `CHROMIUM_PATH=/opt/pw-browsers/chromium`. Abgebrochene `test:live`-Läufe hinterlassen `wrangler dev`/`vite` auf den Ports 8798/5199 – vor dem nächsten Lauf beenden, sonst scheitert schon das erste Szenario.
+
+Offen / nicht geprüft: Verhalten mit echtem Cloudflare-D1 (2-MB-Wertlimit, Plan max. 1,5 Mio. Zeichen) nur lokal mit wrangler getestet. Kein PR angelegt (braucht Freigabe).
+
+## Nächste Schritte
+
+1. PR für P6 anlegen und mergen lassen (Freigabe Inhaber:in).
+2. P7: Sprachen DE/EN (UI-Texte zentralisieren; Festival-Inhalte bleiben einsprachig).
+3. Karte, klein: Ungespeicherte Editor-Änderungen gehen beim Tab-Wechsel in der Konsole verloren (nur Schließen des Tabs ist abgesichert) – Zustand anheben oder Rückfrage.
+4. Karte, klein: Mehrere Punkte gleichzeitig verschieben, Bühnen-Platzhalterpositionen im Assistenten sinnvoller verteilen.

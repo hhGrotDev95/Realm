@@ -1036,7 +1036,10 @@ function Chat() {
   const [text, setText] = useState('')
   const [active, setActive] = useState<string | null>(null)
   const end = useRef<HTMLDivElement>(null)
-  useEffect(() => end.current?.scrollIntoView({ behavior: 'smooth' }), [chat.length])
+  // braces matter: newer browsers return a Promise from scrollIntoView, and React would call it as clean-up
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chat.length])
   return (
     <>
       <div className="sheet-head" style={{ marginBottom: 10 }}>

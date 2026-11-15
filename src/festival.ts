@@ -1,12 +1,14 @@
 // Which festival this app shows, and loading its data from the API (with an offline copy).
-import { adminApi, api, online, setFestival } from './api'
-import { FESTIVAL, loadFestivalBundle as loadBundle, type FestivalBundle } from './data'
+import { adminApi, api, online, planUrl, setFestival } from './api'
+import { FESTIVAL, MAP, loadFestivalBundle as loadBundle, type FestivalBundle } from './data'
 import { applyTheme } from './theme/apply'
 
 /** Loads the data and applies the festival's branding in one go. */
 const loadFestivalBundle = (b: FestivalBundle) => {
   loadBundle(b)
   applyTheme(FESTIVAL.theme)
+  // fetch the ground plan once now, so the service worker has it for offline use
+  if (MAP.plan && typeof fetch === 'function') fetch(planUrl(FESTIVAL.slug, MAP.plan), { mode: 'no-cors' }).catch(() => {})
 }
 
 export const DEFAULT_FESTIVAL = (import.meta.env.VITE_FESTIVAL as string | undefined) || 'realm-open-air'

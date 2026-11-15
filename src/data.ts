@@ -1,6 +1,8 @@
 import type { Theme } from './theme/apply'
 import { isEnabled, type ModuleKey, type ModuleState } from './modules.ts'
 import type { Faq } from './faq/match'
+import { DEFAULT_MAP_H, MAP_W, type MapInfo, type PoiCat } from './map.ts'
+export type { PoiCat } from './map.ts'
 // Realm — demo dataset for "Realm Open Air 2027".
 // Times are minutes after midnight of the festival day (values > 1440 = after midnight).
 
@@ -186,8 +188,6 @@ export function friendsFor(actId: string): string[] {
   return FRIENDS.filter((f) => hash(f.id + actId) < 0.1 + a.popularity * 0.6).map((f) => f.id)
 }
 
-export type PoiCat = 'stage' | 'water' | 'wc' | 'food' | 'medical' | 'bar' | 'entrance' | 'camping' | 'info' | 'shuttle'
-
 export interface Poi {
   id: string
   cat: PoiCat
@@ -222,6 +222,9 @@ export const POIS: Poi[] = [
 
 /** Your simulated position on the grounds. */
 export const ME = { x: 440, y: 420 }
+
+/** Size and plan of the grounds (demo: the drawn Realm Open Air grounds). */
+export const MAP: MapInfo = { w: MAP_W, h: DEFAULT_MAP_H, plan: null, terrain: 'demo' }
 
 export function walkMinutes(ax: number, ay: number, bx: number, by: number) {
   return Math.max(1, Math.round(Math.hypot(ax - bx, ay - by) / 38))
@@ -384,6 +387,8 @@ export interface FestivalBundle {
   acts: Omit<Act, 'change'>[]
   pois: Poi[]
   faq?: Faq[]
+  /** missing in documents cached before the map editor existed */
+  map?: MapInfo
 }
 
 const replace = <T,>(arr: T[], items: T[]) => arr.splice(0, arr.length, ...items)
@@ -404,6 +409,9 @@ export function loadFestivalBundle(b: FestivalBundle) {
   replace(ACTS, b.acts.map((a) => ({ ...a })))
   refill(actById, ACTS.map((a) => [a.id, a]))
   replace(POIS, b.pois)
+  Object.assign(MAP, b.map ?? { w: MAP_W, h: DEFAULT_MAP_H, plan: null, terrain: 'demo' })
+  // the simulated visitor position stays on the grounds of smaller plans
+  Object.assign(ME, { x: Math.min(440, MAP.w / 2), y: Math.min(420, MAP.h / 2) })
   replace(FAQS, b.faq ?? [])
   ORIGINAL.clear()
   for (const a of ACTS) ORIGINAL.set(a.id, { start: a.start, end: a.end, stage: a.stage })

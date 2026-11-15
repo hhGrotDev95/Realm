@@ -67,6 +67,12 @@ Veranstalter pflegen die FAQ in der Konsole (**FAQ**): Frage, Antwort, Kategorie
 
 Der Bot (`src/faq/match.ts`) läuft auf dem Gerät und **schreibt keine eigenen Texte**: Er sucht die passende freigegebene Antwort (Synonyme wie „Klo“ → „WC“, Umlaute, einfache Wortstämme) und zeigt sie mit **Quelle und Stand**. Ist er nicht sicher, bietet er Vorschläge an; findet er nichts, sagt er das und verweist aufs Info-Zelt. Ein Treffer nur im Antworttext reicht nie für eine Antwort. Module „FAQ & Infos“ und „FAQ-Bot“ sind abschaltbar.
 
+### Karte und Geländeplan
+
+In der Konsole unter **Karte**: eigenen Geländeplan hochladen (PNG/JPEG/WebP, z. B. ein exportierter Lageplan; wird auf max. 2400 px und ca. 1 MB verkleinert), Punkte anlegen (Wasser, WC, Essen, Bar, Sanitäter, Eingang, Camping, Info, Shuttle), per Ziehen, Tippen auf die Karte oder Pfeiltasten platzieren, Name, Beschreibung, Status und „immer zeigen“ pflegen. Bühnen erscheinen automatisch als Marker (Name/Farbe im Tab „Bühnen“), ihre Position wird hier gesetzt.
+
+Koordinaten sind **relativ zum Plan** (x 0–1000, y 0–Höhe, Höhe = 1000 × Seitenverhältnis; siehe `src/map.ts`). Wird der Plan durch einen mit anderem Seitenverhältnis ersetzt oder entfernt, skaliert der Worker alle Punkte mit, sodass sie an derselben Stelle bleiben. Die Prüfregeln gelten gleich in Konsole und Worker. Das Planbild hat eine unveränderliche URL (`/api/festivals/:slug/plan/:id`, neue ID bei jedem Upload) und wird vom Service Worker für den Offline-Betrieb zwischengespeichert. Festivals ohne Plan zeigen eine neutrale Fläche mit den Markern; das Demo-Festival behält sein gezeichnetes Gelände.
+
 ## Backend (`worker/`)
 
 Cloudflare Worker (Hono) + D1 (SQLite). Kein Login: `POST /api/guests` erzeugt eine pseudonyme ID und ein Bearer-Token (gespeichert wird nur der SHA-256-Hash).

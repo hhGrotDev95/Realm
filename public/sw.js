@@ -3,8 +3,26 @@
 // app – including lazily loaded screens – works offline after the first visit.
 // Navigations: network first, cached app shell as fallback. Assets: cache first.
 // API responses (other origin) are never cached here; the app keeps its own offline copy.
+// Exception: ground plan images (/api/festivals/<slug>/plan/<id>) are immutable and kept in their
+// own cache, so the festival map works offline too.
 
 const PREFIX = 'realm-'
+const PLANS = 'plans-v1'
+const PLAN_PATH = /^\/api\/festivals\/[^/]+\/plan\/[^/]+$/
+const PLANS_KEPT = 6
+
+async function plan(req) {
+  const cache = await caches.open(PLANS)
+  const hit = await cache.match(req, { ignoreVary: true })
+  if (hit) return hit
+  const res = await fetch(req)
+  if (res.ok || res.type === 'opaque') {
+    await cache.put(req, res.clone())
+    const keys = await cache.keys()
+    await Promise.all(keys.slice(0, Math.max(0, keys.length - PLANS_KEPT)).map((k) => cache.delete(k)))
+  }
+  return res
+}
 let current = null
 
 async function manifest() {
@@ -40,6 +58,10 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url)
   const sameOrigin = url.origin === self.location.origin
   const fonts = url.hostname.endsWith('fonts.googleapis.com') || url.hostname.endsWith('fonts.gstatic.com')
+  if (PLAN_PATH.test(url.pathname)) {
+    e.respondWith(plan(req))
+    return
+  }
   if (!sameOrigin && !fonts) return // API and everything else: straight to the network
   if (req.mode === 'navigate') {
     e.respondWith(
