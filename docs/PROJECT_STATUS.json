@@ -1,7 +1,7 @@
 {
   "projectName": "Realm · Winter 2027",
   "reviewedAt": "2026-11-16",
-  "reviewedHandoff": "## Projektportal: automatische Veröffentlichung nachgewiesen (16.11.2026, Codex)",
+  "reviewedHandoff": "## A2b: Keychain und sichere Sitzungswechsel (16.11.2026, Codex)",
   "releaseDate": "2027-01-22",
   "reviewedGateStates": {
     "A1": false,
@@ -29,7 +29,7 @@
   "foundation": [
     {
       "title": "Gemeinsame Codebasis",
-      "text": "Realm bleibt die Basis für iPhone und Web. Der gemeinsame main-Stand f228d353 enthält die iPhone-Hülle sowie Web-, API-, Outbox- und Profilgrenzen; Build 4 vom 13. November ist der zuletzt am iPhone geprüfte Stand."
+      "text": "Realm bleibt die gemeinsame Basis für iPhone und Web. Die Keychain-Integration und sichere Sitzungswechsel sind umgesetzt; Build 5 ist auf dem iPhone installiert. Der vorhandene Name, die Crew und Favoriten sind laut Hannes erhalten."
     },
     {
       "title": "Web und Betrieb",
@@ -37,18 +37,18 @@
     },
     {
       "title": "Releasegrenzen",
-      "text": "A2b, sichere native Keychain-Sitzung, Store-Freigabe und die vollständige iPhone-/Web-Abnahme bleiben offen. Kein Winterprogramm oder Veranstalterbezug wird ohne bestätigte Quelle behauptet."
+      "text": "A2b, vollständige iPhone-/Web-Abnahme und Store-Freigabe bleiben offen. Die Keychain-Geräteprüfung läuft; bestätigte Ergebnisse werden getrennt von Browser- und Buildnachweisen dokumentiert."
     }
   ],
   "nextActions": [
     {
-      "title": "Sitzung und Keychain schließen",
-      "text": "Sichere native Tokenablage sowie Logout, Profilwechsel und Neustart gezielt prüfen und die Keychain-Lücke schließen.",
+      "title": "Sitzungsprüfung auf dem iPhone abschließen",
+      "text": "Build 5: Offline-Neustart, Abmelden, Wiederherstellen und Profilwechsel auf dem Gerät abgleichen. Anschließend Teilen/Clipboard, Kalenderexport, Universal Links und Erinnerungen bearbeiten.",
       "owner": "Entwicklung"
     },
     {
       "title": "Apple-Konto, Identität und Rechtstexte klären",
-      "text": "Apple-Entwicklerkonto, sichtbare Betreiberidentität, Datenschutzrollen, Impressum, Support und Rechtefragen entscheiden. Die kostenpflichtige Apple-Developer-Mitgliedschaft ist laut Hannes am 16. November noch nicht eingerichtet.",
+      "text": "Apple-Mitgliedschaft laut Hannes eingerichtet. App Store Connect verlangt noch die Bestätigung aktualisierter Bedingungen durch den Kontoinhaber; anschließend Zugang, Team und öffentliche Betreiberidentität verifizieren.",
       "owner": "Hannes"
     },
     {
@@ -60,7 +60,7 @@
   "ownerTasks": [
     {
       "title": "Apple-Konto und Betreiberidentität verifizieren",
-      "text": "Kontoart, Store-Zugang, sichtbare Betreiberangabe und erforderliche Identitätsnachweise klären; die kostenpflichtige Apple-Developer-Mitgliedschaft ist laut Hannes noch nicht eingerichtet."
+      "text": "Apple-Mitgliedschaft laut Hannes eingerichtet. App Store Connect verlangt noch die Bestätigung aktualisierter Bedingungen durch den Kontoinhaber; anschließend Zugang, Team und öffentliche Betreiberidentität verifizieren."
     },
     {
       "title": "Beta-Tester:innen und Support benennen",
@@ -181,9 +181,26 @@
       "url": "https://github.com/hhGrotDev95/Realm/actions/workflows/owner-portal.yml",
       "description": "Automatische Prüfungen und Veröffentlichungen dieser Projektübersicht.",
       "group": "Code"
+    },
+    {
+      "label": "Apple Developer Account",
+      "url": "https://developer.apple.com/account/",
+      "description": "Ausstehende Bedingungen als Kontoinhaber prüfen und bestätigen.",
+      "group": "Betrieb"
+    },
+    {
+      "label": "App Store Connect",
+      "url": "https://appstoreconnect.apple.com/",
+      "description": "Nach Bestätigung der Bedingungen Kontozugang und TestFlight vorbereiten.",
+      "group": "Betrieb"
     }
   ],
   "recent": [
+    {
+      "date": "2026-11-16",
+      "title": "Keychain und Sitzungswechsel integriert",
+      "summary": "Native Keychain integriert; Build 5 erhält Profil/Crew/Favoriten auch nach Offline-Prozessneustart. 30 lokale Live-Szenarien und simulierte native Sitzungsabläufe bestehen; Geräte-Logout folgt."
+    },
     {
       "date": "2026-11-16",
       "title": "Private Projektübersicht eingerichtet",
@@ -201,8 +218,8 @@
     }
   ],
   "device": {
-    "label": "iPhone Build 4 · geprüft am 13.11.2026",
-    "summary": "Interner Build wurde signiert, installiert und teilweise auf dem iPhone 17 Pro Max mit iOS 27.2 geprüft. Keine vollständige A2b-/B4-Abnahme belegt."
+    "label": "iPhone Build 5 · Prüfung am 16.11.2026",
+    "summary": "Build 5 installiert. Keychain-Lesezugriff und null Web-Tokens/-Recovery-Codes vor und nach Offline-Neustart beobachtet. Hannes bestätigt vorhandenes Profil, Crew, Favoriten und Bedienbarkeit. Logout/Profilwechsel folgen nach Serververöffentlichung."
   },
   "web": {
     "label": "Web zuletzt geprüft · 16.11.2026",
@@ -213,12 +230,12 @@
     "A1": {
       "state": "blocked",
       "owner": "Hannes",
-      "note": "Hannes bestätigt am 16. November: kostenpflichtige Apple-Developer-Mitgliedschaft noch nicht eingerichtet; Store-Identität ebenfalls offen."
+      "note": "Apple-Mitgliedschaft laut Hannes eingerichtet. App Store Connect verlangt noch die Bestätigung aktualisierter Bedingungen durch den Kontoinhaber; anschließend Zugang, Team und öffentliche Betreiberidentität verifizieren."
     },
     "A2b": {
       "state": "in-progress",
       "owner": "Entwicklung",
-      "note": "Build 4 wurde am 13. November auf dem iPhone geprüft; Keychain-Sitzung und weitere A2b-Abnahme bleiben offen."
+      "note": "Build 5 installiert. Keychain-Lesezugriff und null Web-Tokens/-Recovery-Codes vor und nach Offline-Neustart beobachtet. Hannes bestätigt vorhandenes Profil, Crew, Favoriten und Bedienbarkeit. Logout/Profilwechsel folgen nach Serververöffentlichung."
     },
     "A3": {
       "state": "blocked",

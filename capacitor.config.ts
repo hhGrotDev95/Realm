@@ -1,6 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
 const config: CapacitorConfig = {
+  // Never log native bridge responses: secure-session values cross this bridge.
+  loggingBehavior: 'none',
   // Development identity; reserve/confirm the store identity before distribution.
   appId: 'app.realm.festival',
   appName: 'Realm',

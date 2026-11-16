@@ -391,9 +391,11 @@ app.post('/api/guests', async (c) => {
 app.post('/api/restore', async (c) => {
   const ip = c.req.header('CF-Connecting-IP') ?? 'local'
   await rateLimit(c.env.DB, 'restore:' + ip, 10, 60 * MIN)
-  const code = normalizeCode(v.str((await body(c)).code, 'Code', { max: 40 })!)
+  const b = await body(c)
+  const code = normalizeCode(v.str(b.code, 'Code', { max: 40 })!)
   const g = await c.env.DB.prepare('SELECT id, nickname, color FROM guests WHERE recovery_hash = ?').bind(await sha256(code)).first<Guest>()
   if (!g) throw new HttpError(404, 'Code nicht gefunden')
+  if (b.expectedId !== undefined && b.expectedId !== g.id) throw new HttpError(409, 'Mit wartenden Änderungen kannst du nur dasselbe Profil wiederherstellen.')
   const token = randomToken()
   await c.env.DB.prepare('UPDATE guests SET token_hash = ? WHERE id = ?').bind(await sha256(token), g.id).run()
   return c.json({ ...g, token })
@@ -430,6 +432,17 @@ app.patch('/api/me', async (c) => {
   const color = v.color(b.color) ?? g.color
   await c.env.DB.prepare('UPDATE guests SET nickname = ?, color = ? WHERE id = ?').bind(nickname, color, g.id).run()
   return c.json({ ...g, nickname, color })
+})
+
+// Guest logout revokes the shared bearer, preserving recovery and profile data.
+// Compare the authenticated token again: a concurrent restore must not be revoked.
+app.post('/api/me/logout', async (c) => {
+  const g = c.get('guest')
+  const row = await c.env.DB.prepare('SELECT recovery_hash FROM guests WHERE id = ?').bind(g.id).first<{ recovery_hash: string | null }>()
+  if (!row?.recovery_hash) throw new HttpError(409, 'Sichere zuerst dein Profil mit einem Wiederherstellungscode')
+  await c.env.DB.prepare('UPDATE guests SET token_hash = ? WHERE id = ? AND token_hash = ?')
+    .bind(await sha256(randomToken()), g.id, await sha256(bearer(c))).run()
+  return c.body(null, 204)
 })
 
 // Right to erasure: removes the guest and everything that cascades from it.

@@ -40,3 +40,7 @@ Quellen im Repository: [store.tsx](../src/store.tsx) (`Persisted`, `load`, Persi
 2. Lokale Aufbewahrungsfristen und eine verständliche Steuerung für Offline-Kopien festlegen. Derzeit löscht „Profil löschen“ weder Sprache/Festivalauswahl noch App-Cache/Konsolensitzung; ein frischer App-Zustand entsteht erneut.
 3. Veröffentlichte Hinweise mit Betreiberidentität, konkreter Konfiguration, Zwecken, DSGVO-Rechtsgrundlagen, Serverlöschfristen, Backup-Nachlauf und Auskunftsweg vervollständigen. Das technische Inventar ersetzt diese Angaben nicht.
 4. Bei neuem Tracking, eingebetteten Diensten, neuen Speicherfeldern oder anderem API-Hosting dieses Inventar und die Zugriffsvoraussetzungen erneut prüfen.
+
+## Native Ergänzung · 16.11.2026
+
+Die Browser-Tabelle oben bleibt für die Website gültig. In der iPhone-App wandern Besucher-Token und ggf. Wiederherstellungscode in die gerätegebundene, nicht synchronisierte Keychain. `realm.v2*` enthält dort nur die Sitzungskennung; Favoriten, Crew-Snapshot und Outbox bleiben im WebView-Speicher. Geheimnisfreie Übergangs-/Löschjournale sichern Abbruch und Wiederholung. Abmelden behält lokale Profildaten, entfernt die nutzbare Credential und versucht den serverseitigen Widerruf; eine reine Gerätebereinigung bestätigt keine Serverlöschung. Speicherattribute, Journalschlüssel, Fehlerfälle und Prüfumfang: [NATIVE_SESSION.md](NATIVE_SESSION.md). Dies ersetzt keine Betreiberentscheidung zur rechtlichen Einordnung.

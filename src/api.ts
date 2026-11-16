@@ -18,7 +18,9 @@ export class ApiError extends Error {
 }
 
 let token: string | null = null
+const requests = new Map<AbortController, string>()
 export const setToken = (t: string | null) => {
+  if (token !== t) for (const [controller, owner] of requests) if (owner === token) controller.abort()
   token = t
 }
 
@@ -32,19 +34,29 @@ const festivalHeader = (): Record<string, string> => (festival ? { 'X-Festival':
 async function call<T>(method: string, path: string, body?: unknown, authToken = token): Promise<T> {
   if (!API_URL) throw new ApiError(0, 'Kein Server konfiguriert')
   let res: Response
+  const controller = new AbortController()
+  let timedOut = false
+  const timeout = setTimeout(() => { timedOut = true; controller.abort() }, REQUEST_TIMEOUT_MS)
+  if (authToken) requests.set(controller, authToken)
   try {
     res = await fetch(API_URL + path, {
       method,
       headers: { ...festivalHeader(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(authToken ? { Authorization: 'Bearer ' + authToken } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       // a hanging request gives up and counts as a network error, so it is retried and never blocks the outbox
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: controller.signal,
     })
+    if (res.status === 204) return undefined as T
+    const data = await readJson<T>(res)
+    if (controller.signal.aborted) throw new ApiError(0, 'Sitzung gewechselt')
+    return data
   } catch (e) {
-    throw new ApiError(0, e instanceof DOMException && e.name === 'TimeoutError' ? 'Server antwortet nicht – wird später erneut versucht' : 'Keine Verbindung – bitte später erneut versuchen')
+    if (e instanceof ApiError) throw e
+    throw new ApiError(0, timedOut ? 'Server antwortet nicht – wird später erneut versucht' : 'Keine Verbindung – bitte später erneut versuchen')
+  } finally {
+    clearTimeout(timeout)
+    requests.delete(controller)
   }
-  if (res.status === 204) return undefined as T
-  return readJson<T>(res)
 }
 
 /** A body that cannot be read (e.g. cut off by a lost connection) is a network error, never an empty success. */
@@ -170,8 +182,9 @@ export const api = {
   me: (authToken?: string) => call<{ id: string; nickname: string | null; color: string; secured: boolean; crews: CrewRef[]; plan: string[] }>('GET', '/api/me', undefined, authToken),
   updateMe: (nickname: string, color: string) => call('PATCH', '/api/me', { nickname, color }),
   deleteMe: (authToken?: string) => call<void>('DELETE', '/api/me', undefined, authToken),
+  logout: (authToken: string) => call<void>('POST', '/api/me/logout', undefined, authToken),
   recovery: () => call<{ code: string }>('POST', '/api/me/recovery'),
-  restore: (code: string) => call<Session>('POST', '/api/restore', { code }),
+  restore: (code: string, expectedId?: string) => call<Session>('POST', '/api/restore', { code, expectedId }, null),
   setPlan: (acts: string[]) => call('PUT', '/api/me/plan', { acts }),
   deleteSteps: () => call<void>('DELETE', '/api/me/steps'),
   createCrew: (name: string) => call<CrewRef>('POST', '/api/crews', { name }),

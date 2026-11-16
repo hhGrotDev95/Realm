@@ -74,4 +74,5 @@ jobs:
       - run: npm ci
         working-directory: worker
       - run: npx playwright install --with-deps chromium
+      - run: npm run test:session:browser
       - run: npm run test:live
