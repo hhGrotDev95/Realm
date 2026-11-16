@@ -6,3 +6,5 @@ worker/.wrangler
 *.tsbuildinfo
 .dev.vars*
 worker/.dev.vars*
+owner-portal/generated/
+owner-portal/.wrangler/

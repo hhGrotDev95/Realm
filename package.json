@@ -19,7 +19,11 @@
     "ios:sync": "npm run build:ios && cap sync ios",
     "ios:open": "cap open ios",
     "test:native": "node --experimental-strip-types --no-warnings tests/native.test.mts",
-    "test:chat-keyboard": "node tests/chat-keyboard.mjs"
+    "test:chat-keyboard": "node tests/chat-keyboard.mjs",
+    "build:owner": "node owner-portal/build.mjs",
+    "test:owner": "node --test owner-portal/test/*.test.mjs",
+    "test:owner:ui": "node owner-portal/test/ui.mjs",
+    "check:owner": "node owner-portal/check-access.mjs"
   },
   "dependencies": {
     "@capacitor/core": "8.5.3",

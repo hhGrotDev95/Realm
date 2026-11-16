@@ -1,0 +1,13 @@
+name = "realm-project-status"
+main = "src/worker.mjs"
+compatibility_date = "2026-11-01"
+account_id = "f18ed22dbd7c2e62aec7e68cb0d1eeb7"
+workers_dev = true
+preview_urls = false
+
+# OWNER_EMAIL is a Cloudflare secret, never a public asset or repository setting.
+# Cloudflare Worker-level Access protects all traffic. The handler also fails
+# closed without a runtime-verified Access identity matching that owner.
+# Do not add Static Assets: their router does not forward ctx.access.
+[observability]
+enabled = false
