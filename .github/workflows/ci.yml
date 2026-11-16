@@ -15,9 +15,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:import
+      - run: npm run build:ios
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - run: npm run test:chat-keyboard
       - run: npm run test:a11y
 
   # the visitor app in the other engines visitors use (audit F07 surfaced in one browser only)
@@ -37,6 +39,9 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps ${{ matrix.browser }}
       - run: npm run test:e2e
+        env:
+          BROWSER: ${{ matrix.browser }}
+      - run: npm run test:chat-keyboard
         env:
           BROWSER: ${{ matrix.browser }}
 

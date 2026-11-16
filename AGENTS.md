@@ -9,3 +9,5 @@
 - Record each completed change, checks, limitations, and the next concrete step in `REALM_PROGRESS.md`.
 - Staging instructions are in `docs/STAGING.md`. Use the explicit `staging` environment; do not deploy the placeholder default configuration.
 - Keep tokens and `.dev.vars` files out of Git. Staging contains test data; production and legal/product decisions remain separate.
+- When present, read the owner's local `../DOKU/README.md` and relevant notes. Keep explanations of changed costs, services, operator tasks and configuration understandable there; this folder is outside the public repository and must not be copied into it. Record only publishable implementation facts in repository docs.
+- End each work package with a dated handover in `REALM_PROGRESS.md`: outcome, actual checks, limitations, changed files/branch, local versus committed/merged/deployed status, open decisions and next concrete step. Update `docs/WINTER_RELEASE_PLAN.md` only where supported by evidence. Never substitute the web build status for native-device or store-release verification.

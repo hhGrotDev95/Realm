@@ -43,7 +43,7 @@ body {
   overscroll-behavior: none;
 }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
-input, textarea { font: inherit; color: inherit; }
+input, textarea { font: inherit; font-size: max(1em, 16px); color: inherit; }
 :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 8px; }
 ::selection { background: var(--brand); color: var(--brand-ink); }
 
@@ -398,6 +398,19 @@ textarea.field { height: 88px; padding: 12px 14px; resize: none; }
 .bubble.me { background: var(--brand); color: var(--brand-ink); margin-left: auto; border-bottom-right-radius: 6px; }
 .bubble.them { border-bottom-left-radius: 6px; }
 .chat-input { display: flex; gap: 8px; align-items: center; padding-top: 10px; }
+.crew-chat-sheet .sheet-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.crew-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.crew-chat > .sheet-head, .crew-chat > .chat-input { flex: none; }
+.crew-chat-history { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 6px; }
+.crew-chat-history > * { flex: none; }
+.crew-chat-history .bubble { overflow-wrap: anywhere; }
+.crew-chat .chat-input .field { flex: 1; min-width: 0; }
+.crew-chat-sheet.keyboard-fit {
+  top: calc(var(--chat-visible-top) + max(12px, env(safe-area-inset-top, 0px)));
+  bottom: var(--chat-visible-bottom);
+  height: auto; max-height: none;
+}
+.crew-chat-sheet.keyboard-fit .sheet-body { padding-bottom: 8px; }
 
 /* ---------- Wrapped ---------- */
 .wrapped { position: absolute; inset: 0; z-index: 80; display: flex; flex-direction: column; color: #fff; overflow: hidden; }

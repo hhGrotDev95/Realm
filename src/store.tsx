@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { mergeOutbox } from './outboxMerge'
 import { api, ApiError, execute, online, opId, privacyKey, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
 import { lang, t } from './i18n'
+import { publicAppUrl } from './platform'
 import { ageSince } from './aging'
 import { pollDelay, POLL_ACTIVE_MS } from './sync'
 import { reminderPlan } from './reminders'
@@ -798,7 +799,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       crew,
       updates,
       // the link names the festival, so it opens the right one on any phone (audit F11)
-      inviteLink: () => (s.crewRef && !s.crewRef.pending && s.crewRef.code ? `${location.origin}/?f=${encodeURIComponent(FESTIVAL.slug)}&join=${s.crewRef.code}` : null),
+      inviteLink: () => (s.crewRef && !s.crewRef.pending && s.crewRef.code ? `${publicAppUrl()}/?f=${encodeURIComponent(FESTIVAL.slug)}&join=${s.crewRef.code}` : null),
       deleteMessage: (id) => {
         const mark = () => setS((p) => ({ ...p, chat: p.chat.map((m) => (m.id === id ? { ...m, deleted: true, text: '' } : m)) }))
         if (!online) return mark()

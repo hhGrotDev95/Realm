@@ -20,7 +20,7 @@ await run([
   'd1', 'execute', 'realm', '--local', '--persist-to', persist, '--command',
   "INSERT INTO festivals (id, slug, name, status, created_at, updated_at) VALUES ('fdraft', 'geheim', 'Geheimfestival', 'draft', 0, 0), ('farch', 'vorbei', 'Vorbei Fest', 'archived', 0, 0)",
 ])
-const server = spawn('npx', ['wrangler', 'dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', 'ADMIN_TOKEN:test-admin-token', '--test-scheduled'], { stdio: 'ignore', detached: true })
+const server = spawn('npx', ['wrangler', 'dev', '--local', '--port', String(PORT), '--persist-to', persist, '--var', 'ADMIN_TOKEN:test-admin-token', '--var', 'ALLOWED_ORIGINS:https://realm.app,capacitor://localhost', '--test-scheduled'], { stdio: 'ignore', detached: true })
 
 for (let i = 0; ; i++) {
   try {
@@ -30,14 +30,14 @@ for (let i = 0; ; i++) {
   await new Promise((r) => setTimeout(r, 200))
 }
 
-async function api(method, path, token, body, festival = 'realm-open-air') {
+async function api(method, path, token, body, festival = 'realm-open-air', origin) {
   const res = await fetch(BASE + path, {
     method,
-    headers: { 'Content-Type': 'application/json', ...(festival ? { 'X-Festival': festival } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(festival ? { 'X-Festival': festival } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(origin ? { Origin: origin } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   const text = await res.text()
-  return { status: res.status, data: text ? JSON.parse(text) : null }
+  return { status: res.status, data: text ? JSON.parse(text) : null, headers: res.headers }
 }
 
 /** join by code and have the crew owner approve the request (new crews ask before anyone joins) */
@@ -318,6 +318,21 @@ try {
     assert.equal(p.data.severity, 'critical')
     assert.equal(p.data.validMin, null)
     assert.equal(p.data.title, draft.title)
+    const expired = await api('POST', '/api/admin/announcements', 'test-admin-token', { title: 'Läuft gerade ab', validMin: 10 })
+    assert.equal(expired.status, 201)
+    await run(['d1', 'execute', 'realm', '--local', '--persist-to', persist, '--command', `UPDATE announcements SET expires_at = 0 WHERE id = '${expired.data.id}'`])
+    assert.equal((await api('PATCH', `/api/admin/announcements/${expired.data.id}`, 'test-admin-token', { validMin: null })).status, 404, 'an expired row cannot be edited or revived')
+    assert.equal((await api('PATCH', `/api/admin/announcements/${expired.data.id}`, 'test-admin-token', { title: 'Warnung aktualisiert', severity: 'critical' })).status, 404, 'an expired row cannot be changed without a validity update')
+    assert.ok(!(await api('GET', '/api/announcements')).data.some((x) => x.id === expired.data.id), 'expired announcement stays hidden publicly')
+    // editing in the console: an English version can be added and removed again, without leftover English text
+    const en = await api('PATCH', `/api/admin/announcements/${a.data.id}`, 'test-admin-token', { titleEn: 'Thunderstorm warning', bodyEn: 'Stages pause.' })
+    assert.deepEqual(en.data.en, { title: 'Thunderstorm warning', body: 'Stages pause.' })
+    assert.equal(en.data.ageMin, p.data.ageMin, 'editing keeps the age')
+    const noEn = await api('PATCH', `/api/admin/announcements/${a.data.id}`, 'test-admin-token', { titleEn: null })
+    assert.equal(noEn.data.en, undefined)
+    const reEn = await api('PATCH', `/api/admin/announcements/${a.data.id}`, 'test-admin-token', { titleEn: 'Thunderstorm warning' })
+    assert.deepEqual(reEn.data.en, { title: 'Thunderstorm warning', body: null }, 'old English text came back')
+    assert.equal((await api('PATCH', '/api/admin/announcements/a-gibts-nicht', 'test-admin-token', { severity: 'info' })).status, 404)
     assert.equal((await api('DELETE', `/api/admin/announcements/${a.data.id}`, 'test-admin-token')).status, 204)
     assert.ok(!(await api('GET', '/api/announcements')).data.some((x) => x.id === a.data.id))
     assert.equal((await api('DELETE', `/api/admin/announcements/${a.data.id}`, 'test-admin-token')).status, 404)
@@ -1148,9 +1163,36 @@ try {
     assert.equal((await api('GET', `${base}`, A, undefined, null)).data.length, 0)
   })
 
-  await test('CORS preflight is answered', async () => {
-    const r = await fetch(BASE + '/api/me', { method: 'OPTIONS', headers: { Origin: 'https://realm.app', 'Access-Control-Request-Method': 'GET' } })
-    assert.equal(r.headers.get('access-control-allow-origin'), 'https://realm.app')
+  await test('CORS allows the web and Capacitor origins for preflight, success and errors only', async () => {
+    const native = 'capacitor://localhost'
+    const preflight = await fetch(BASE + '/api/me', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: native,
+        'Access-Control-Request-Method': 'GET',
+        'Access-Control-Request-Headers': 'authorization,content-type,x-festival',
+      },
+    })
+    assert.equal(preflight.headers.get('access-control-allow-origin'), native)
+    assert.match(preflight.headers.get('access-control-allow-headers') ?? '', /authorization/i)
+    assert.match(preflight.headers.get('access-control-allow-headers') ?? '', /content-type/i)
+    assert.match(preflight.headers.get('access-control-allow-headers') ?? '', /x-festival/i)
+
+    const web = await api('GET', '/api/festivals/nordlicht', null, undefined, null, 'https://realm.app')
+    assert.equal(web.status, 200)
+    assert.equal(web.headers.get('access-control-allow-origin'), 'https://realm.app')
+
+    const festival = await api('GET', '/api/festivals/nordlicht', null, undefined, null, native)
+    assert.equal(festival.status, 200)
+    assert.equal(festival.headers.get('access-control-allow-origin'), native)
+
+    const unauthorized = await api('GET', '/api/me', null, undefined, null, native)
+    assert.equal(unauthorized.status, 401)
+    assert.equal(unauthorized.headers.get('access-control-allow-origin'), native)
+
+    const untrusted = await api('GET', '/api/festivals/nordlicht', null, undefined, null, 'https://untrusted.example')
+    assert.equal(untrusted.status, 200)
+    assert.equal(untrusted.headers.get('access-control-allow-origin'), null)
   })
 
   console.log(`\n${passed} API tests passed`)

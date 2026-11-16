@@ -355,6 +355,8 @@ export const adminApi = (adminToken: string) => {
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
     restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),
     announce: (a: { title: string; body?: string; titleEn?: string; bodyEn?: string; place?: string; poi?: string; severity: Announcement['severity']; validMin?: number; actId?: string }) => req<Announcement>('POST', '/api/admin/announcements', a),
+    /** changes an active announcement; null clears a field, a left-out field stays as it is (validMin counts from now) */
+    updateAnnouncement: (id: string, a: { title?: string; body?: string | null; titleEn?: string | null; bodyEn?: string | null; place?: string | null; poi?: string | null; severity?: Announcement['severity']; validMin?: number | null }) => req<Announcement>('PATCH', `/api/admin/announcements/${id}`, a),
     removeAnnouncement: (id: string) => req<void>('DELETE', `/api/admin/announcements/${id}`),
     setChange: (actId: string, c: { start?: number; end?: number; stage?: string; cancelled?: boolean; note?: string }) => req<TimetableChange>('PUT', `/api/admin/timetable/${actId}`, c),
     revertChange: (actId: string) => req<void>('DELETE', `/api/admin/timetable/${actId}`),

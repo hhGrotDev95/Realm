@@ -85,7 +85,7 @@ export function ago(min: number) {
   return t('vor {n} T.', { n: Math.round(min / 1440) })
 }
 
-export function Sheet({ open, onClose, children, full, label }: { open: boolean; onClose: () => void; children: ReactNode; full?: boolean; label: string }) {
+export function Sheet({ open, onClose, children, full, label, className = '' }: { open: boolean; onClose: () => void; children: ReactNode; full?: boolean; label: string; className?: string }) {
   const controls = useDragControls()
   const ref = useRef<HTMLDivElement>(null)
   // move focus into the sheet and restore it on close
@@ -118,7 +118,7 @@ export function Sheet({ open, onClose, children, full, label }: { open: boolean;
         <>
           <motion.div className="scrim" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} />
           <motion.div
-            className={`sheet ${full ? 'full' : ''}`}
+            className={`sheet ${full ? 'full' : ''} ${className}`}
             ref={ref}
             tabIndex={-1}
             role="dialog"

@@ -5,6 +5,7 @@ import { on, dateRange, FESTIVAL, ACTS, actById, DAYS, fmt, POIS, stageById, wal
 import { conflictClusters, isMeetupActive, useApp } from '../store'
 import { poiForUpdate } from '../updatePoi'
 import { t } from '../i18n'
+import { publicAppUrl } from '../platform'
 import { nowNext, planFor, status, untilLabel } from '../time'
 import { AvatarStack, SourceTag, StageDot, ago, stagger } from '../ui'
 
@@ -448,7 +449,7 @@ function Before() {
           style={{ marginTop: 14 }}
           onClick={() =>
             requireIdentity(t('Damit deine Freunde wissen, von wem die Einladung kommt.'), () => {
-              const link = online ? inviteLink() : `${location.origin}/?join=DEMO-CREW`
+              const link = online ? inviteLink() : `${publicAppUrl()}/?join=DEMO-CREW`
               if (!link) return setTab('crew')
               navigator.clipboard?.writeText(link).catch(() => {})
               toast(t('Einladungslink kopiert'))

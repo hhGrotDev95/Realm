@@ -1,6 +1,7 @@
 import { KeyRound, LogOut, MailPlus, RefreshCw, ShieldCheck, UserMinus } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { adminApi, ApiError, authApi, type AdminMe } from '../api'
+import { publicAppUrl } from '../platform'
 
 type Flash = (k: 'ok' | 'err', t: string) => void
 const errText = (e: unknown) => (e instanceof Error ? e.message : 'Fehler')
@@ -318,7 +319,7 @@ export function AccessPanel({ token, flash, slug }: { token: string; flash: Flas
             e.preventDefault()
             act(async () => {
               const inv = await admin.invite(email.trim(), slug)
-              setLink(`${location.origin}${location.pathname}#admin?invite=${inv.token}`)
+              setLink(`${publicAppUrl()}${location.pathname}#admin?invite=${inv.token}`)
               setEmail('')
             }, 'Einladung erstellt')
           }}
