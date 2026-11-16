@@ -1,7 +1,7 @@
 {
   "projectName": "Realm · Winter 2027",
   "reviewedAt": "2026-11-16",
-  "reviewedHandoff": "## A2b: Keychain und sichere Sitzungswechsel (16.11.2026, Codex)",
+  "reviewedHandoff": "## A2b-Sitzungsprüfung abgeschlossen und veröffentlicht (16.11.2026, Codex)",
   "releaseDate": "2027-01-22",
   "reviewedGateStates": {
     "A1": false,
@@ -24,12 +24,12 @@
   },
   "schedule": {
     "label": "Zeitplan unter Druck",
-    "summary": "Der 6.-November-Prüfpunkt ist verstrichen; A1, A2b und A3 sind offen. Ein signierter und installierter interner iPhone-Build 4 liegt seit dem 13. November vor. Installierbarer interner Build und responsive Zielgeräteprüfungen sind bis zum 20. November vorgesehen; TestFlight und Web-Beta bis zum 27. November. Beide Termine sind gefährdet und keine Zusage."
+    "summary": "Der 6.-November-Prüfpunkt ist verstrichen; A1, A2b und A3 sind offen. Build 5 ist seit dem 16. November installiert; das Sitzungs-Teilpaket ist am iPhone geprüft. Installierbarer interner Build und responsive Zielgeräteprüfungen sind bis zum 20. November vorgesehen; TestFlight und Web-Beta bis zum 27. November. Beide Termine sind gefährdet und keine Zusage."
   },
   "foundation": [
     {
       "title": "Gemeinsame Codebasis",
-      "text": "Realm bleibt die gemeinsame Basis für iPhone und Web. Die Keychain-Integration und sichere Sitzungswechsel sind umgesetzt; Build 5 ist auf dem iPhone installiert. Der vorhandene Name, die Crew und Favoriten sind laut Hannes erhalten."
+      "text": "Realm bleibt die gemeinsame Basis für iPhone und Web. PR #57 mit Keychain und sicheren Sitzungswechseln ist zusammengeführt. Build 5 wurde auf dem iPhone einschließlich Logout, Profilwechsel und Neustart geprüft."
     },
     {
       "title": "Web und Betrieb",
@@ -37,13 +37,13 @@
     },
     {
       "title": "Releasegrenzen",
-      "text": "A2b, vollständige iPhone-/Web-Abnahme und Store-Freigabe bleiben offen. Die Keychain-Geräteprüfung läuft; bestätigte Ergebnisse werden getrennt von Browser- und Buildnachweisen dokumentiert."
+      "text": "Das Sitzungs-Teilpaket ist abgeschlossen; A2b, vollständige Geräte-/Web-Abnahme und Store-Freigabe bleiben offen. Teilen, Kalenderexport, Universal Links und native Erinnerungen sind die nächsten Integrationspunkte."
     }
   ],
   "nextActions": [
     {
-      "title": "Sitzungsprüfung auf dem iPhone abschließen",
-      "text": "Build 5: Offline-Neustart, Abmelden, Wiederherstellen und Profilwechsel auf dem Gerät abgleichen. Anschließend Teilen/Clipboard, Kalenderexport, Universal Links und Erinnerungen bearbeiten.",
+      "title": "Teilen und Clipboard auf dem iPhone prüfen",
+      "text": "Native Teilen-/Clipboard-Abläufe gezielt prüfen; anschließend Kalenderexport, Universal Links und Erinnerungen. Das abgeschlossene Keychain-/Sitzungspaket auf Build 5 nicht erneut beginnen.",
       "owner": "Entwicklung"
     },
     {
@@ -82,7 +82,7 @@
       "date": "2026-11-20",
       "title": "Installierbarer interner iPhone-Build und responsive Zielgeräteprüfung",
       "state": "at-risk",
-      "note": "Build 4 wurde intern signiert und auf dem iPhone installiert. Responsive Prüfungen auf den vereinbarten Zielgeräten und der für diesen Termin vorgesehene interne Build sind noch nicht vollständig belegt."
+      "note": "Build 5 ist signiert, installiert und für Sitzung/Keychain geprüft. Die gesamte native Integration und responsive Prüfung auf den vereinbarten Zielgeräten sind noch nicht vollständig belegt."
     },
     {
       "date": "2026-11-27",
@@ -138,6 +138,12 @@
       "label": "GitHub · PR #54",
       "url": "https://github.com/hhGrotDev95/Realm/pull/54",
       "description": "Integrations-PR mit dem gemeinsamen Quellstand.",
+      "group": "Code"
+    },
+    {
+      "label": "GitHub · PR #57",
+      "url": "https://github.com/hhGrotDev95/Realm/pull/57",
+      "description": "Zusammengeführte native Keychain- und Sitzungskorrektur.",
       "group": "Code"
     },
     {
@@ -198,8 +204,8 @@
   "recent": [
     {
       "date": "2026-11-16",
-      "title": "Keychain und Sitzungswechsel integriert",
-      "summary": "Native Keychain integriert; Build 5 erhält Profil/Crew/Favoriten auch nach Offline-Prozessneustart. 30 lokale Live-Szenarien und simulierte native Sitzungsabläufe bestehen; Geräte-Logout folgt."
+      "title": "Keychain und Sitzungspaket am iPhone bestanden",
+      "summary": "PR #57 gemergt, Staging aktualisiert. Build 5 besteht Offline-Neustart, Profiltrennung und Logout/Wiederherstellung; das ursprüngliche Profil ist wieder aktiv."
     },
     {
       "date": "2026-11-16",
@@ -218,12 +224,12 @@
     }
   ],
   "device": {
-    "label": "iPhone Build 5 · Prüfung am 16.11.2026",
-    "summary": "Build 5 installiert. Keychain-Lesezugriff und null Web-Tokens/-Recovery-Codes vor und nach Offline-Neustart beobachtet. Hannes bestätigt vorhandenes Profil, Crew, Favoriten und Bedienbarkeit. Logout/Profilwechsel folgen nach Serververöffentlichung."
+    "label": "iPhone Build 5 · Sitzungspaket geprüft",
+    "summary": "16.11.: vorhandenes Profil nach Upgrade und Offline-Neustart erhalten; separates Profil B bleibt getrennt; Abmeldung übersteht Neustart; Code stellt Profil A samt Crew/Favoriten wieder her. Keine Zugangsdaten im Webspeicher beobachtet. Weitere A2b-/B4-Fälle offen."
   },
   "web": {
     "label": "Web zuletzt geprüft · 16.11.2026",
-    "summary": "Zuletzt nachgewiesen: f228d353. Die verlinkte Buildseite zeigt den jeweils tatsächlich ausgelieferten Web-Stand; iPhone Build 4 ist davon unabhängig.",
+    "summary": "Staging mit dem geprüften Sitzungs-Code aus PR #57 veröffentlicht; zuletzt separat beobachtet d89c643, sauberer Build. Die verlinkte Buildseite zeigt den jeweils ausgelieferten Commit; iPhone Build 5 ist ein eigenes Artefakt.",
     "url": "https://realm-staging.heidlhannes95.workers.dev/development"
   },
   "gateOverrides": {
@@ -235,7 +241,7 @@
     "A2b": {
       "state": "in-progress",
       "owner": "Entwicklung",
-      "note": "Build 5 installiert. Keychain-Lesezugriff und null Web-Tokens/-Recovery-Codes vor und nach Offline-Neustart beobachtet. Hannes bestätigt vorhandenes Profil, Crew, Favoriten und Bedienbarkeit. Logout/Profilwechsel folgen nach Serververöffentlichung."
+      "note": "Keychain, Logout, Profilwechsel und App-Neustart auf Build 5 geprüft. Teilen/Clipboard, Kalenderexport, Universal Links, Erinnerungen und weitere B4-Fälle bleiben offen."
     },
     "A3": {
       "state": "blocked",

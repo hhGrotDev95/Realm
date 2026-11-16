@@ -418,3 +418,11 @@ Dieser Build wurde nicht installiert. Build 4 vom 13.11. bleibt die letzte
 Geräteabnahme im oben beschriebenen Teilumfang. A2b/B4 bleiben offen;
 als Nächstes folgt die sichere native Sitzung/Keychain. Die laufenden und
 abgeschlossenen Remote-Prüfungen sind am Integrations-PR einsehbar.
+
+## Sitzungs-Teilpaket abgeschlossen · 16.11.2026
+
+Realm 1.0 Build 5 ist signiert über Build 4 installiert. [PR #57](https://github.com/hhGrotDev95/Realm/pull/57) ist zusammengeführt. Die iOS-Brücke registriert das eigene Keychain-Plugin explizit; Besucher-Bearer und Recovery-Code verlassen den WebView-Speicher. Vertrag, Migration, Fehlerpfade und lokale Debug-Zähler sind in [NATIVE_SESSION.md](NATIVE_SESSION.md) beschrieben.
+
+Gerät: Hannes bestätigt erhaltene Identität/Crew/beide Favoriten nach Upgrade und Offline-Prozessneustart. Testprofil B erscheint ohne die Daten von A und bleibt nach Neustart B; Code A bringt das Originalprofil zurück. Online-Abmeldung bewahrt die Favoriten, bleibt nach Neustart abgemeldet, anschließend stellt Code A alles wieder her. Die Zähler bestätigen null Klartext-Credentials, erfolgreiche Keychain-Zugriffe und passende An-/Abmeldemarker. Das ursprüngliche Profil ist abschließend aktiv. Codes wurden ausschließlich vom Nutzer privat gespeichert/eingegeben.
+
+Build 5 wurde vor dem Commit gebaut; seine Metadaten kennzeichnen Basis `95975e7` plus lokale Änderungen. Signatur, Team-/Bundle-Identität, alle 53 Webdateien und private Quellhashbelege binden das tatsächlich getestete Artefakt. Dokumentations-/Merge-Commits sind keine neu installierten Builds. Native Ausfall-/Crash-/Neuinstallationsfälle sind zusätzlich synthetisch geprüft, kein physischer Gerätewechsel. A2b/B4 bleiben offen. Nächster Arbeitsschritt: Teilen/Clipboard, danach Kalenderexport, Universal Links und native Erinnerungen.
