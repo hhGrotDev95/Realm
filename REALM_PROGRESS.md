@@ -794,3 +794,34 @@ Zuständigkeitslabel „Hannes + Entwicklung“ war zu breit. Es darf jetzt inne
 seiner Spalte umbrechen. Der UI-Test prüft zusätzlich diese Schrift-Fallback-
 Variante und nennt bei Überläufen die betroffenen Elemente. Das ist eine echte
 Darstellungskorrektur; der Test wurde nicht abgeschwächt.
+
+
+## Projektportal: automatische Veröffentlichung nachgewiesen (16.11.2026, Codex)
+
+[PR #55](https://github.com/hhGrotDev95/Realm/pull/55) ist nach vollständig grüner
+[PR-CI](https://github.com/hhGrotDev95/Realm/actions/runs/43889887632) und
+[Portal-Prüfung](https://github.com/hhGrotDev95/Realm/actions/runs/43889887693)
+in `main` übernommen (`0ab654d8`). Der folgende automatische
+[Portal-Lauf 43891577824](https://github.com/hhGrotDev95/Realm/actions/runs/43891577824)
+bestand einschließlich echter Veröffentlichung und sechs anonymen/gefälschten
+Zugriffsprüfungen. Cloudflare-Version `83352637-2e2a-42cf-9613-b396be513bc1`.
+Die Statusseite steht unter <https://realm-project-status.heidlhannes95.workers.dev>.
+Nach Neuladen zeigte Safari unter bestehender Eigentümeranmeldung ausdrücklich
+`Commit 0ab654d8`, keine lokale Vorschau; der automatische Inhalt ist damit im
+Browser beobachtet.
+Eigentümeranmeldung über Cloudflare ist belegt; Zugang ausschließlich für den
+Eigentümer, öffentliche Festival-App unabhängig davon.
+
+15 Portal-Unitprüfungen und vier UI-Varianten bestehen. Der Nachtrag ändert nur
+Dokumentation und kuratierte Statusdaten; Anwendung, Backend, Access-Code und
+Workflow bleiben unverändert. Er wird über einen geprüften Dokumentations-PR
+veröffentlicht und verwendet danach dieselbe automatische Portal-Pipeline.
+Quellcommit und Erzeugungsdatum sind auf der Seite ablesbar; das fachliche
+Prüfdatum bleibt getrennt. Persönliche Kontodaten und Gerätebelege bleiben in DOKU.
+
+Hannes bestätigt Claude-Zeitplan deaktiviert und bezahlte Apple-Mitgliedschaft
+noch nicht eingerichtet. Kein neuer täglicher KI-Lauf, keine neue API-Abrechnung,
+keine zusätzliche iPhone-Installation. 3/17 Freigabepunkte; Novembertermine
+gefährdet. Nächster Entwicklungsschritt: sichere native Sitzung/Keychain mit
+Logout, Profilwechsel und Neustart; Hannes klärt parallel Apple-Konto und
+Betreiber-/Rechtsangaben. A2b/B4 und Store-Freigabe bleiben offen.
