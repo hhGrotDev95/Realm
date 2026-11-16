@@ -1,0 +1,238 @@
+{
+  "projectName": "Realm · Winter 2027",
+  "reviewedAt": "2026-11-16",
+  "reviewedHandoff": "## Private Projektübersicht und Release-Abgleich (16.11.2026, Codex)",
+  "releaseDate": "2027-01-22",
+  "reviewedGateStates": {
+    "A1": false,
+    "A2a": true,
+    "A2b": false,
+    "A3": false,
+    "A4a": true,
+    "A4b": true,
+    "B1": false,
+    "B2": false,
+    "B3": false,
+    "B4": false,
+    "B5": false,
+    "C0": false,
+    "C1": false,
+    "C2": false,
+    "C3": false,
+    "C4": false,
+    "D1": false
+  },
+  "schedule": {
+    "label": "Zeitplan unter Druck",
+    "summary": "Der 6.-November-Prüfpunkt ist verstrichen; A1, A2b und A3 sind offen. Ein signierter und installierter interner iPhone-Build 4 liegt seit dem 13. November vor. Installierbarer interner Build und responsive Zielgeräteprüfungen sind bis zum 20. November vorgesehen; TestFlight und Web-Beta bis zum 27. November. Beide Termine sind gefährdet und keine Zusage."
+  },
+  "foundation": [
+    {
+      "title": "Gemeinsame Codebasis",
+      "text": "Realm bleibt die Basis für iPhone und Web. Der gemeinsame main-Stand f228d353 enthält die iPhone-Hülle sowie Web-, API-, Outbox- und Profilgrenzen; Build 4 vom 13. November ist der zuletzt am iPhone geprüfte Stand."
+    },
+    {
+      "title": "Web und Betrieb",
+      "text": "Staging ist erreichbar; die native CORS-Allowlist ist im gemeinsamen Quellstand enthalten. Der ausgelieferte Web-Stand wird separat unter /development ausgewiesen."
+    },
+    {
+      "title": "Releasegrenzen",
+      "text": "A2b, sichere native Keychain-Sitzung, Store-Freigabe und die vollständige iPhone-/Web-Abnahme bleiben offen. Kein Winterprogramm oder Veranstalterbezug wird ohne bestätigte Quelle behauptet."
+    }
+  ],
+  "nextActions": [
+    {
+      "title": "Sitzung und Keychain schließen",
+      "text": "Sichere native Tokenablage sowie Logout, Profilwechsel und Neustart gezielt prüfen und die Keychain-Lücke schließen.",
+      "owner": "Entwicklung"
+    },
+    {
+      "title": "Apple-Konto, Identität und Rechtstexte klären",
+      "text": "Apple-Entwicklerkonto, sichtbare Betreiberidentität, Datenschutzrollen, Impressum, Support und Rechtefragen entscheiden. Die kostenpflichtige Apple-Developer-Mitgliedschaft ist laut Hannes am 16. November noch nicht eingerichtet.",
+      "owner": "Hannes"
+    },
+    {
+      "title": "Bestätigte Winterdaten beschaffen",
+      "text": "Nur freigegebene Timetable- und Geländedaten übernehmen; unveröffentlichte Zeiten und ungeprüfte Orte klar als nicht verfügbar behandeln.",
+      "owner": "Hannes + Entwicklung"
+    }
+  ],
+  "ownerTasks": [
+    {
+      "title": "Apple-Konto und Betreiberidentität verifizieren",
+      "text": "Kontoart, Store-Zugang, sichtbare Betreiberangabe und erforderliche Identitätsnachweise klären; die kostenpflichtige Apple-Developer-Mitgliedschaft ist laut Hannes noch nicht eingerichtet."
+    },
+    {
+      "title": "Beta-Tester:innen und Support benennen",
+      "text": "Testpersonen, erreichbaren Support und Moderationszuständigkeit für die externe Beta verbindlich festlegen."
+    },
+    {
+      "title": "Betreiber- und Rechtsangaben freigeben",
+      "text": "Impressum, Datenschutz, Nutzungsregeln, Rechte und die öffentliche Community-Marke prüfen und freigeben."
+    }
+  ],
+  "milestones": [
+    {
+      "date": "2026-11-06",
+      "title": "A-Kontoprüfpunkt",
+      "state": "missed",
+      "note": "A1, A2b und A3 sind weiterhin offen."
+    },
+    {
+      "date": "2026-11-20",
+      "title": "Installierbarer interner iPhone-Build und responsive Zielgeräteprüfung",
+      "state": "at-risk",
+      "note": "Build 4 wurde intern signiert und auf dem iPhone installiert. Responsive Prüfungen auf den vereinbarten Zielgeräten und der für diesen Termin vorgesehene interne Build sind noch nicht vollständig belegt."
+    },
+    {
+      "date": "2026-11-27",
+      "title": "Feature-complete Beta",
+      "state": "at-risk",
+      "note": "TestFlight und Web-Beta sollen bis zu diesem Termin starten; Start und Verteilung sind nicht belegt und zeitlich gefährdet."
+    },
+    {
+      "date": "2026-12-14",
+      "title": "Erste iOS-Store-Einreichung",
+      "state": "planned",
+      "note": "Vorgesehen für den 14.–18. Dezember, sofern Store-Unterlagen und Freigabekriterien vollständig sind."
+    },
+    {
+      "date": "2027-01-11",
+      "title": "Angestrebte öffentliche Veröffentlichung",
+      "state": "planned",
+      "note": "Zielzeitraum 11.–15. Januar; abhängig von tatsächlicher Apple-Freigabe."
+    },
+    {
+      "date": "2027-01-18",
+      "title": "Funktionsfreeze",
+      "state": "planned",
+      "note": "Ab diesem Datum nur Sicherheits-, Datenverlust- oder Blockerfixes."
+    },
+    {
+      "date": "2027-01-22",
+      "title": "Releaseziel",
+      "state": "planned",
+      "note": "Arbeitsziel, keine Apple-Freigabe oder Veröffentlichung zugesagt."
+    }
+  ],
+  "links": [
+    {
+      "label": "Realm Staging",
+      "url": "https://realm-staging.heidlhannes95.workers.dev/",
+      "description": "Öffentliche Staging-Web-App.",
+      "group": "Betrieb"
+    },
+    {
+      "label": "Admin-Konsole",
+      "url": "https://realm-staging.heidlhannes95.workers.dev/#admin",
+      "description": "Realm-Login mit E-Mail, Passwort und TOTP. Danach „Neues Festival“ wählen; Entwürfe vor Veröffentlichung prüfen.",
+      "group": "Betrieb"
+    },
+    {
+      "label": "Ausgelieferter Web-Stand",
+      "url": "https://realm-staging.heidlhannes95.workers.dev/development",
+      "description": "Build- und Quellstand der ausgelieferten Website.",
+      "group": "Betrieb"
+    },
+    {
+      "label": "GitHub · PR #54",
+      "url": "https://github.com/hhGrotDev95/Realm/pull/54",
+      "description": "Integrations-PR mit dem gemeinsamen Quellstand.",
+      "group": "Code"
+    },
+    {
+      "label": "GitHub · CI",
+      "url": "https://github.com/hhGrotDev95/Realm/actions",
+      "description": "Workflow-Läufe und Prüfstatus.",
+      "group": "Code"
+    },
+    {
+      "label": "Winter Release Plan",
+      "url": "https://github.com/hhGrotDev95/Realm/blob/main/docs/WINTER_RELEASE_PLAN.md",
+      "description": "Kanonische Release-Gates und Termine.",
+      "group": "Dokumentation"
+    },
+    {
+      "label": "Realm Progress",
+      "url": "https://github.com/hhGrotDev95/Realm/blob/main/REALM_PROGRESS.md",
+      "description": "Datiertes Fortschritts- und Übergabeprotokoll.",
+      "group": "Dokumentation"
+    },
+    {
+      "label": "iPhone Integration",
+      "url": "https://github.com/hhGrotDev95/Realm/blob/main/docs/IPHONE_INTEGRATION.md",
+      "description": "Native Integration und Geräteprüfgrenzen.",
+      "group": "Dokumentation"
+    },
+    {
+      "label": "Cloudflare Dashboard",
+      "url": "https://dash.cloudflare.com/",
+      "description": "Account- und Worker-Verwaltung.",
+      "group": "Betrieb"
+    },
+    {
+      "label": "Portal-Pflege und Zugang",
+      "url": "https://github.com/hhGrotDev95/Realm/blob/main/docs/OWNER_DASHBOARD.md",
+      "description": "Wie die Übersicht aktualisiert wird und wie ihr privater Zugang funktioniert.",
+      "group": "Dokumentation"
+    }
+  ],
+  "recent": [
+    {
+      "date": "2026-11-16",
+      "title": "Private Projektübersicht eingerichtet",
+      "summary": "Cloudflare-Anmeldung als Eigentümer erfolgreich; anonyme Aufrufe gesperrt. Die automatische Veröffentlichung aus GitHub wird im zugehörigen Workflow nachgewiesen."
+    },
+    {
+      "date": "2026-11-16",
+      "title": "Claude-Zeitplan deaktiviert",
+      "summary": "Laut Nutzerangabe ist der zuvor für 06:00 beschriebene Claude-Lauf deaktiviert. Es wurde kein bezahlter oder neuer KI-Job eingerichtet."
+    },
+    {
+      "date": "2026-11-16",
+      "title": "Zwei-Tab-Outbox und Profilgrenzen nachgeprüft",
+      "summary": "CI und gezielte Regressionen bestehen; native Keychain-Integration und Geräteabnahme bleiben offen."
+    }
+  ],
+  "device": {
+    "label": "iPhone Build 4 · geprüft am 13.11.2026",
+    "summary": "Interner Build wurde signiert, installiert und teilweise auf dem iPhone 17 Pro Max mit iOS 27.2 geprüft. Keine vollständige A2b-/B4-Abnahme belegt."
+  },
+  "web": {
+    "label": "Web zuletzt geprüft · 16.11.2026",
+    "summary": "Zuletzt nachgewiesen: f228d353. Die verlinkte Buildseite zeigt den jeweils tatsächlich ausgelieferten Web-Stand; iPhone Build 4 ist davon unabhängig.",
+    "url": "https://realm-staging.heidlhannes95.workers.dev/development"
+  },
+  "gateOverrides": {
+    "A1": {
+      "state": "blocked",
+      "owner": "Hannes",
+      "note": "Hannes bestätigt am 16. November: kostenpflichtige Apple-Developer-Mitgliedschaft noch nicht eingerichtet; Store-Identität ebenfalls offen."
+    },
+    "A2b": {
+      "state": "in-progress",
+      "owner": "Entwicklung",
+      "note": "Build 4 wurde am 13. November auf dem iPhone geprüft; Keychain-Sitzung und weitere A2b-Abnahme bleiben offen."
+    },
+    "A3": {
+      "state": "blocked",
+      "owner": "Hannes + Entwicklung",
+      "note": "Betreiber-/Datenschutzrollen, Rechtstexte und Datenentscheidung sind offen."
+    },
+    "B1": {
+      "state": "blocked",
+      "owner": "Entwicklung",
+      "note": "Bestätigte Winter-Timetable- und Geländedaten liegen nicht vor."
+    },
+    "B5": {
+      "state": "upcoming",
+      "owner": "Hannes + Entwicklung",
+      "note": "Bis zum 20. November: installierbarer interner iPhone-Build und responsive Zielgeräteprüfungen. Build 4 liegt bereits signiert und installiert vor; die vereinbarten Zielgeräteprüfungen sind noch offen. TestFlight ist für den 27. November vorgesehen."
+    },
+    "C0": {
+      "state": "blocked",
+      "owner": "Hannes",
+      "note": "Betreiberidentität, Rechtstexte, Support und Moderationszuständigkeit müssen vor externer Beta geklärt sein."
+    }
+  }
+}

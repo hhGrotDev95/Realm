@@ -23,6 +23,22 @@ Wiederherstellung desselben Profils erhält sie. Unit- und verzögerte Live-Fäl
 sichern diese Grenzen ab. Dies ist keine sichere native Tokenablage:
 **Nächster A2b-Schritt bleibt Sitzung/Keychain samt Logout und Neustart.**
 
+## Aktuelle Einordnung · 16. November 2026
+
+Der Zeitplan ist **gefährdet**. Hannes bestätigt am 16.11., dass die bezahlte
+Apple-Developer-Mitgliedschaft noch nicht eingerichtet ist. A1, A2b und A3 sind weiterhin offen; damit ist der
+6.-November-Prüfpunkt nicht vollständig erfüllt. Der interne, signierte und
+installierte Build 4 existiert seit dem 13. November. Vollständige Zielgeräte-
+prüfungen, native Integration und die TestFlight-Beta am 27. November sind noch
+nicht belegt. Das Januarziel bleibt ein Arbeitsziel mit diesen offenen Grenzen.
+
+Die [private Projektübersicht](https://realm-project-status.heidlhannes95.workers.dev)
+fasst den Stand mobil zusammen; Einrichtung und tatsächlicher Zugangsnachweis
+stehen in [OWNER_DASHBOARD.md](OWNER_DASHBOARD.md). Ihr Balken zählt die folgenden
+A–D-Checkboxen: aktuell **3/17 (18 %)**, keine Schätzung des fertigen Codes.
+Neue Freigaben nur mit Nachweis abhaken und die geprüfte Zusammenfassung in
+`PROJECT_STATUS.json` samt jüngster Übergabe mitpflegen.
+
 ## Was bereits vorhanden ist
 
 - [x] **Realm-Webbasis:** React/Vite, Hono, Cloudflare Worker und D1 mit Veranstalterkonsole, Festival-/Timetable-Import, Offline-Outbox, Crew-Funktionen, Moderation und bestehenden automatisierten Web/API-Prüfungen. Detaillierter Prüfstand: [AUDIT.md](AUDIT.md), [STAGING.md](STAGING.md), [IMPORT.md](IMPORT.md).
@@ -69,7 +85,7 @@ Termine sind Arbeitsziele, keine Zusagen für Apple oder den Festivalveranstalte
   **Historischer Zwischenstand 30.10.2026:** Der [V2-Gerätebericht](NATIVE_BUILD_GATE.md) dokumentiert Xcode 27.2 und iPhone 17 Pro Max/iOS 27.2. V2 Build 1 war lokal signiert, installiert und gestartet, zeigte aber nur die eingebaute Vorschau und keine Staging-Daten. Build 2 endete mit `BUILD SUCCEEDED`, wurde nicht installiert oder am Gerät geprüft und erhielt keine abschließende Signaturprüfung. Im temporären V2-Patch-Snapshot bestanden zuletzt 33 Tests aus 6 Dateien, TypeScript-Prüfung, Web-Build und iOS-Sync. Der separate autorisierte CORS-Fix wurde nur auf V2-Staging veröffentlicht; Realm-Web-Staging blieb unverändert. Diese Angaben sind historische V2-Belege, keine Realm-Abnahme und keine Aufforderung, die pausierte V2-Prüfung fortzusetzen.
 
 - [ ] **A3 — Name, Datenschutzrollen und Datenentscheidung** · **Hannes + Entwicklung** · Produktname, Domains, App-ID, Betreiber/Verantwortliche, Zwecke, Rechtsgrundlagen, Einwilligungen, Aufbewahrung, Auskunft und Löschung festlegen. Für V1-Daten eine freiwillige, erklärbare Export-/Importmöglichkeit und Zuordnung der Inhalte entwerfen oder mit einem klar benannten neuen Winterprofil beginnen. **Nachweis:** Datenflussdiagramm, Dateninventar und getesteter Ablauf; keine pauschale Übernahme persönlicher Profile, Crew- oder Chatdaten. Rechtstexte sind Betreiberentscheidung, keine technische oder rechtliche Zertifizierung. Offene Punkte in [DEVICE_STORAGE.md](DEVICE_STORAGE.md), [DATA_RETENTION.md](DATA_RETENTION.md) und [MODERATION.md](MODERATION.md).
-- [x] **A4a — CI-Zugang und Deployment geprüft** · **Entwicklung** · Separater Cloudflare-CI-Token, `staging`-Environment mit Branch-Regel `main`, erster erfolgreicher GitHub-Deploy samt Commit-Verifikation. Token läuft am 28. Januar 2027 ab; Ersatz vor Ablauf einplanen. Automatikvariable aktiviert; der erste Folgelauf nach einem neuen main-CI-Ereignis steht noch aus. Details in [STAGING.md](STAGING.md).
+- [x] **A4a — CI-Zugang und Deployment geprüft** · **Entwicklung** · Separater Cloudflare-CI-Token, `staging`-Environment mit Branch-Regel `main`, erster erfolgreicher GitHub-Deploy samt Commit-Verifikation. Token läuft am 28. Januar 2027 ab; Ersatz vor Ablauf einplanen. Automatikvariable aktiviert; der automatische Folgelauf ist am 16.11.2026 durch main-CI [43881996394](https://github.com/hhGrotDev95/Realm/actions/runs/43881996394) und Staging [43883406147](https://github.com/hhGrotDev95/Realm/actions/runs/43883406147) für `f228d353` einschließlich Commit-/CORS-Prüfung belegt. Details in [STAGING.md](STAGING.md).
 - [x] **A4b — Persönlicher Admin-Zugang** · **Hannes** · Einladung angenommen und TOTP aktiviert; der Abschluss ist in der Staging-Datenbank bestätigt. Temporärer Bootstrap-Schlüssel wurde entfernt; keine Tokens in Git.
 
 

@@ -1,6 +1,6 @@
 # Realm – Fortschritt
 
-Letzter dokumentierter Stand: 13.11.2026. Aktuelle Übergaben stehen am Ende; ältere Abschnitte beschreiben den damaligen Stand.
+Letzter dokumentierter Stand: 16.11.2026. Aktuelle Übergaben stehen am Ende; ältere Abschnitte beschreiben den damaligen Stand.
 
 **Aktuelle Entscheidung (31.10.2026): Realm bleibt die Basis; seine iPhone-Integration und Geräteprüfung werden fortgesetzt. Nur das separate V2 bleibt pausiert. Vorhandene Änderungen erhalten. Maßgeblicher Ablauf: [Realm-iPhone-Integration](docs/IPHONE_INTEGRATION.md); Basisentscheidung: [Architekturvergleich](docs/ARCHITECTURE_OPTIONS.md).**
 
@@ -742,3 +742,55 @@ Die persönliche Abschlussübergabe hält den tatsächlich beobachteten
 main-/Staging-Stand und die öffentlichen CORS-Prüfungen fest.
 Diese Browser-Sitzungsgrenzen ersetzen weiterhin keine native Keychain-Integration
 oder Geräteabnahme; der nächste A2b-Schritt bleibt unverändert.
+
+
+## Private Projektübersicht und Release-Abgleich (16.11.2026, Codex)
+
+Auf Nutzerauftrag entsteht eine separate, mobile Projektübersicht auf Cloudflare.
+Sie fasst den dokumentierten Stand, nächste Schritte, persönliche Entscheidungen,
+Meilensteine und Test-/Adminlinks zusammen. Die öffentliche Realm-App und ihre
+Anmeldung werden dadurch nicht verändert. Hannes hat den täglichen Claude-Lauf
+laut eigener Angabe deaktiviert; kein neuer KI-Zeitplan wurde eingerichtet.
+
+Der Balken zählt ausschließlich die verpflichtenden A–D-Punkte im Winterplan:
+aktuell 3 von 17 abgeschlossen (18 %). Dies ist weder der Anteil fertigen Codes
+noch eine Zeit- oder Store-Reife-Schätzung. Der Zeitplan ist gefährdet: der
+6.-November-Prüfpunkt ist nicht vollständig erfüllt; Build 4 ist intern vorhanden,
+weitere Geräteprüfungen und die Beta-/TestFlight-Voraussetzungen bleiben offen.
+
+Die Zusammenfassung steht in `docs/PROJECT_STATUS.json`; der Build liest die
+Checkboxen aus `docs/WINTER_RELEASE_PLAN.md`. Ändern sich Freigabepunkte oder die
+jüngste datierte Übergabe, verlangt er eine erneute Prüfung der Zusammenfassung.
+Ein separater GitHub-Workflow prüft und veröffentlicht Änderungen nach Übernahme
+in `main`. Diese Veröffentlichung benötigt keinen eingeschalteten Laptop.
+Sie aktualisiert den Status; sie führt keine tägliche KI-Entwicklung aus.
+
+Der Status-Worker liefert HTML und JSON ausschließlich nach einer vom Cloudflare-
+Runtime bestätigten Access-Identität und genauem Eigentümerabgleich. Fehlende
+Konfiguration oder Identität sperrt die Auslieferung. Keine Static Assets,
+Datenbank, Besucherprofile oder private DOKU-Dateien werden eingebunden.
+Der separate Worker ist veröffentlicht. Access schützt sämtlichen Traffic mit
+einer Allow-Regel ausschließlich für den Eigentümer; der zusätzliche genaue
+Identitätsabgleich bleibt aktiv. Erfolgreiche Eigentümeranmeldung über Cloudflare
+und vollständige Anzeige in Safari beobachtet. Vor Access waren sechs anonyme/
+gefälschte Aufrufe mit 403 gesperrt, danach führten dieselben sechs zur Anmeldung
+(302). 15 Unit-/Daten-/Drift-/Zugangstests bestanden; UI bei 320/390/1280 px,
+verdoppelte Schrift, axe ohne schwere Befunde und Wrangler-Bundleprüfung bestanden.
+Luna-Implementierungen für Daten/Renderer und unabhängiger Astra-Review eingesetzt.
+Review-Funde behoben: Status-Driftkontrolle und main-Push-Trigger ohne Pfadfilter,
+damit ein neuerer fachfremder Commit die einzige Veröffentlichung nicht unterdrückt.
+Native A2b-/B4-Abnahme, Keychain und Store-Freigabe bleiben offen. Der neue
+GitHub-Ablauf und sein tatsächliches Ergebnis folgen nach Übernahme; die bisher
+veröffentlichte Erstausgabe ist noch als lokale Vorschau gekennzeichnet.
+
+Hannes bestätigt am 16.11.: Die kostenpflichtige Apple-Developer-Mitgliedschaft
+ist noch nicht eingerichtet. A1 bleibt offen; Personal-Team-Testbuilds sind
+kein TestFlight-/App-Store-Zugang.
+
+
+Der erste Portal-PR-Lauf fand unter Linux bei 320 px und 200-%-Schrift einen
+horizontalen Überlauf. Lokal mit Arial reproduziert: Das nicht umbrechende
+Zuständigkeitslabel „Hannes + Entwicklung“ war zu breit. Es darf jetzt innerhalb
+seiner Spalte umbrechen. Der UI-Test prüft zusätzlich diese Schrift-Fallback-
+Variante und nennt bei Überläufen die betroffenen Elemente. Das ist eine echte
+Darstellungskorrektur; der Test wurde nicht abgeschwächt.

@@ -20,3 +20,9 @@ Historische Freigaben sind keine pauschale Erlaubnis für neue Produktions-,
 Store- oder Kontoänderungen. Der Auftrag vom 16.11.2026 erlaubt ausdrücklich
 die geprüfte Zusammenführung von PR #53, den noch relevanten Teilen von #26
 und den lokalen iPhone-Korrekturen.
+
+Nach jedem Arbeitspaket auch die geprüfte Projektzusammenfassung in
+`docs/PROJECT_STATUS.json` gemäß `AGENTS.md` aktualisieren; Anleitung und
+Datengrenzen in [docs/OWNER_DASHBOARD.md](docs/OWNER_DASHBOARD.md).
+Hannes hat den täglichen Claude-Zeitplan am 16.11.2026 laut Nutzerangabe deaktiviert.
+Ein Status-Deploy ist kein Auftrag, einen neuen KI-Zeitplan einzurichten.
