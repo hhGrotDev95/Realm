@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 import { cors } from 'hono/cors'
 import { isEnabled, MODULE_KEYS, moduleConflicts, MODULES, type ModuleKey, type ModuleState } from '../../src/modules'
 import { checkBrand, HEX } from '../../src/theme/contrast'
+import { checkMap, parseMapMeta, stageMarkerId } from '../../src/map/doc'
 import { HttpError, normalizeCode, randomCode, randomId, randomToken, sha256, v } from './util'
 
 export interface Env {
@@ -140,7 +141,7 @@ app.get('/api/health', (c) => c.json({ ok: true }))
 
 /* ---------- Festivals (public) ---------- */
 
-type FestivalRow = { id: string; slug: string; name: string; location: string | null; status: string; theme: string; modules: string; updated_at: number }
+type FestivalRow = { id: string; slug: string; name: string; location: string | null; status: string; theme: string; modules: string; map: string; updated_at: number }
 
 app.get('/api/festivals', async (c) => {
   const rows = await c.env.DB.prepare("SELECT slug, name, location FROM festivals WHERE status = 'published' ORDER BY name").all()
@@ -160,7 +161,7 @@ app.get('/api/festivals/:slug', async (c) => {
     db.prepare("SELECT id, question, answer, category, keywords, source, updated_at AS updatedAt FROM faqs WHERE festival_id = ? AND status = 'published' ORDER BY sort, category, question").bind(f.id),
   ])
   return c.json({
-    festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), updatedAt: f.updated_at },
+    festival: { slug: f.slug, name: f.name, location: f.location, status: f.status, theme: JSON.parse(f.theme), modules: JSON.parse(f.modules), map: parseMapMeta(f.map), updatedAt: f.updated_at },
     days: days.results,
     stages: stages.results,
     acts: acts.results,
@@ -691,9 +692,34 @@ app.put('/api/admin/festivals/:slug/stages', async (c) => {
         'INSERT INTO stages (festival_id, id, name, color, x, y, vibe, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(festival_id, id) DO UPDATE SET name = excluded.name, color = excluded.color, vibe = excluded.vibe, sort = excluded.sort',
       ).bind(f.id, s.id, s.name, s.color, pos.get(s.id)?.x ?? 200 + (i % 4) * 180, pos.get(s.id)?.y ?? 220 + Math.floor(i / 4) * 200, s.vibe, s.sort),
     ),
+    // stage markers on the map follow renames and disappear with their stage
+    c.env.DB.prepare("DELETE FROM pois WHERE festival_id = ? AND cat = 'stage' AND id NOT IN (SELECT 'stage-' || value FROM json_each(?))").bind(f.id, JSON.stringify(stages.map((s) => s.id))),
+    ...stages.map((s) => c.env.DB.prepare('UPDATE pois SET name = ? WHERE festival_id = ? AND id = ?').bind(s.name, f.id, stageMarkerId(s.id))),
     touch(c.env.DB, f.id),
   ])
   return c.json({ stages })
+})
+
+/**
+ * Map editor: replaces the site plan (optional image, height) and all markers in one go.
+ * Stage markers also move the stage itself, so walking times and crew positions match.
+ */
+app.put('/api/admin/festivals/:slug/map', async (c) => {
+  const f = await festivalBySlug(c)
+  const stageIds = (await c.env.DB.prepare('SELECT id FROM stages WHERE festival_id = ?').bind(f.id).all<{ id: string }>()).results.map((r) => r.id)
+  const check = checkMap(await body(c), stageIds)
+  if (!check.ok) throw new HttpError(400, check.errors.slice(0, 5).join('; ') + (check.errors.length > 5 ? ` (+${check.errors.length - 5} weitere)` : ''))
+  const { meta, markers } = check
+  const db = c.env.DB
+  await db.batch([
+    db.prepare('DELETE FROM pois WHERE festival_id = ?').bind(f.id),
+    ...markers.map((m) =>
+      db.prepare('INSERT INTO pois (festival_id, id, cat, name, x, y, detail, status, important) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(f.id, m.id, m.cat, m.name, m.x, m.y, m.detail, m.status ?? null, m.important ? 1 : 0),
+    ),
+    ...markers.filter((m) => m.cat === 'stage').map((m) => db.prepare('UPDATE stages SET x = ?, y = ? WHERE festival_id = ? AND id = ?').bind(m.x, m.y, f.id, m.id.slice('stage-'.length))),
+    db.prepare('UPDATE festivals SET map = ?, updated_at = ? WHERE id = ?').bind(JSON.stringify(meta), Date.now(), f.id),
+  ])
+  return c.json({ map: meta, markers: markers.length })
 })
 
 /** Turns optional modules on or off; dependencies must be consistent. */

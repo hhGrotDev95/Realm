@@ -101,7 +101,7 @@ function initial(): Persisted {
 
 /** In live mode the demo crew, chat, meetups and plan start empty – every festival starts clean. */
 function initialOnline(): Persisted {
-  return { ...initial(), plan: [], reminders: {}, meetups: [], chat: [], shareLocation: false, attended: {}, phase: 'during', clockMode: 'real' }
+  return { ...initial(), plan: [], reminders: {}, meetups: [], chat: [], myPins: [], shareLocation: false, attended: {}, phase: 'during', clockMode: 'real' }
 }
 
 // Local state is kept per festival, so plans and crews never mix between tenants.

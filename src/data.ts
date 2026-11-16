@@ -1,6 +1,7 @@
 import type { Theme } from './theme/apply'
 import { isEnabled, type ModuleKey, type ModuleState } from './modules.ts'
 import type { Faq } from './faq/match'
+import { DEFAULT_MAP_H, MAP_W, type MapCat, type MapMeta } from './map/doc.ts'
 // Realm — demo dataset for "Realm Open Air 2027".
 // Times are minutes after midnight of the festival day (values > 1440 = after midnight).
 
@@ -186,7 +187,7 @@ export function friendsFor(actId: string): string[] {
   return FRIENDS.filter((f) => hash(f.id + actId) < 0.1 + a.popularity * 0.6).map((f) => f.id)
 }
 
-export type PoiCat = 'stage' | 'water' | 'wc' | 'food' | 'medical' | 'bar' | 'entrance' | 'camping' | 'info' | 'shuttle'
+export type PoiCat = MapCat
 
 export interface Poi {
   id: string
@@ -220,8 +221,9 @@ export const POIS: Poi[] = [
   { id: 'sh1', cat: 'shuttle', name: 'Shuttle-Terminal', x: 860, y: 860, detail: 'Bahnhof · alle 15 Min.', status: 'open', important: true },
 ]
 
-/** Your simulated position on the grounds. */
-export const ME = { x: 440, y: 420 }
+/** Your simulated position on the grounds (the demo's plaza; the plan's centre elsewhere). */
+const DEMO_ME = { x: 440, y: 420 }
+export const ME = { ...DEMO_ME }
 
 export function walkMinutes(ax: number, ay: number, bx: number, by: number) {
   return Math.max(1, Math.round(Math.hypot(ax - bx, ay - by) / 38))
@@ -306,6 +308,7 @@ export const FESTIVAL = {
   status: 'published' as 'draft' | 'published' | 'archived',
   theme: {} as Theme,
   modules: {} as ModuleState,
+  map: { height: DEFAULT_MAP_H, terrain: 'demo' } as MapMeta,
 }
 
 /** Is an optional module available at this festival? (all on in the demo) */
@@ -378,7 +381,7 @@ export function applyTimetableChanges(changes: TimetableChange[]) {
 
 /** The public festival document served by GET /api/festivals/:slug. */
 export interface FestivalBundle {
-  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; updatedAt: number }
+  festival: { slug: string; name: string; location: string | null; status: 'draft' | 'published' | 'archived'; theme: Theme; modules: Record<string, boolean>; map?: MapMeta; updatedAt: number }
   days: FestivalDay[]
   stages: Stage[]
   acts: Omit<Act, 'change'>[]
@@ -398,6 +401,9 @@ const refill = <T,>(map: Record<string, T>, entries: [string, T][]) => {
  */
 export function loadFestivalBundle(b: FestivalBundle) {
   Object.assign(FESTIVAL, { slug: b.festival.slug, name: b.festival.name, location: b.festival.location, status: b.festival.status, theme: b.festival.theme ?? {}, modules: b.festival.modules ?? {} })
+  // documents cached before the map editor have no map: keep the drawn demo grounds for the demo only
+  FESTIVAL.map = b.festival.map ?? (b.festival.slug === 'realm-open-air' ? { height: DEFAULT_MAP_H, terrain: 'demo' } : { height: DEFAULT_MAP_H })
+  Object.assign(ME, FESTIVAL.map.terrain === 'demo' ? DEMO_ME : { x: MAP_W / 2, y: Math.round(FESTIVAL.map.height / 2) })
   replace(DAYS, b.days)
   replace(STAGES, b.stages)
   refill(stageById, STAGES.map((st) => [st.id, st]))

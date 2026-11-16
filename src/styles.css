@@ -486,3 +486,12 @@ select.field { appearance: none; }
 .faq-answer { margin-top: 12px; padding: 14px; border-radius: var(--r-md); background: var(--bg-elev); box-shadow: inset 0 0 0 1px var(--line); }
 .faq-item { border-bottom: 1px solid var(--line); }
 .faq-item .list-item { border-bottom: 0; }
+
+/* P6 · map editor */
+.map-edit-plan { position: relative; width: 100%; border-radius: 14px; overflow: hidden; background: #14171c; touch-action: none; user-select: none; box-shadow: inset 0 0 0 1px var(--line); }
+.map-edit-plan.placing { cursor: crosshair; box-shadow: inset 0 0 0 2px var(--brand); }
+.map-edit-plan img { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.map-edit-empty { position: absolute; inset: 0; display: grid; place-items: center; padding: 20px; text-align: center; color: var(--text-3, #8a8996); font-size: 13px; background-image: linear-gradient(#1d2129 1px, transparent 1px), linear-gradient(90deg, #1d2129 1px, transparent 1px); background-size: 5% 5%; }
+.map-edit-pin { position: absolute; width: 26px; height: 26px; transform: translate(-50%, -50%); border-radius: 9px; display: grid; place-items: center; background: #f4f3f8; color: #111; box-shadow: 0 0 0 2px #0d0f12; cursor: grab; touch-action: none; }
+.map-edit-pin.on { background: var(--brand); color: var(--brand-ink); outline: 3px solid #fff; outline-offset: 1px; z-index: 2; }
+.map-edit-pin:active { cursor: grabbing; }

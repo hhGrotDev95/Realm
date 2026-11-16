@@ -1,6 +1,7 @@
 // Two-user end-to-end test against the real worker (wrangler dev, local D1) and the Vite dev server.
 import { spawn } from 'node:child_process'
 import { rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { chromium } from 'playwright'
 
 const API = 'http://127.0.0.1:8798'
@@ -399,6 +400,85 @@ try {
     await visitor.getByRole('button', { name: 'Fragen' }).click()
     await visitor.getByText('Quelle: Service-Infos').waitFor()
     await visitor.context().setOffline(false)
+  })
+
+  await step('map editor: organizer uploads a site plan, places stage and water; visitors see it', async () => {
+    const org = await user()
+    await org.setViewportSize({ width: 1200, height: 900 })
+    await org.goto(`${WEB}/?f=testwiese-festival#admin`)
+    await org.getByLabel('Admin-Token').fill('e2e-admin')
+    await org.getByRole('button', { name: 'Anmelden' }).click()
+    await org.getByRole('tab', { name: 'Karte' }).click()
+    // a wizard festival has no markers yet; its stages wait to be placed
+    await org.getByText('Bühnen ohne Position').waitFor()
+    // a 2:1 plan → the map becomes 1000 × 500 units
+    const plan = await org.evaluate(() => {
+      const c = document.createElement('canvas')
+      c.width = 800
+      c.height = 400
+      const g = c.getContext('2d')
+      g.fillStyle = '#2d5a27'
+      g.fillRect(0, 0, 800, 400)
+      g.fillStyle = '#3b6ea5'
+      g.fillRect(500, 200, 200, 150)
+      return c.toDataURL('image/png').split(',')[1]
+    })
+    await org.getByLabel('Geländeplan wählen').setInputFiles({ name: 'plan.png', mimeType: 'image/png', buffer: Buffer.from(plan, 'base64') })
+    await org.getByText('1000 × 500 Einheiten').waitFor()
+    const planBox = () => org.getByTestId('map-plan').boundingBox()
+    const at = async (x, y) => {
+      const box = await planBox()
+      await org.mouse.click(box.x + (x / 1000) * box.width, box.y + (y / 500) * box.height)
+    }
+    await org.locator('.list-item', { hasText: 'Wiese' }).getByRole('button', { name: 'Platzieren' }).click()
+    await at(250, 100)
+    await org.getByRole('heading', { name: 'Bühne Wiese' }).waitFor()
+    await org.getByRole('button', { name: 'Fertig' }).click()
+    await org.getByLabel('Kategorie für neuen Ort').selectOption('water')
+    await org.getByRole('button', { name: 'Auf Plan setzen' }).click()
+    await at(600, 300)
+    await org.getByLabel('Name', { exact: true }).fill('Wasser am Tor')
+    await org.getByLabel('Beschreibung (optional)').fill('Trinkwasser · kostenlos')
+    // drag the stage somewhere else, then nudge it with the keyboard
+    const pin = org.getByRole('button', { name: 'Wiese (Bühne)' })
+    const pb = await pin.boundingBox()
+    const box = await planBox()
+    await org.mouse.move(pb.x + pb.width / 2, pb.y + pb.height / 2)
+    await org.mouse.down()
+    await org.mouse.move(box.x + 0.3 * box.width, box.y + 0.4 * box.height, { steps: 6 })
+    await org.mouse.up()
+    await pin.focus()
+    await org.keyboard.press('ArrowRight')
+    if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/map-editor.png`, fullPage: true })
+    // accessibility of the editor (the a11y suite runs without a backend and cannot reach it)
+    await org.addScriptTag({ path: createRequire(import.meta.url).resolve('axe-core/axe.min.js') })
+    const serious = await org.evaluate(async () => {
+      const r = await window.axe.run(document.querySelector('.map-editor'), { resultTypes: ['violations'], runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } })
+      return r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)
+    })
+    if (serious.length) throw new Error('map editor a11y: ' + serious.join('; '))
+    await org.getByRole('button', { name: 'Karte speichern' }).click()
+    await org.getByText('Karte gespeichert').waitFor()
+
+    const b = await (await fetch(`${API}/api/festivals/testwiese-festival`)).json()
+    if (b.festival.map.height !== 500 || !b.festival.map.image?.startsWith('data:image/')) throw new Error('plan not stored: ' + JSON.stringify({ ...b.festival.map, image: !!b.festival.map.image }))
+    const stage = b.stages.find((s) => s.id === 'wiese')
+    if (Math.abs(stage.x - 305) > 12 || Math.abs(stage.y - 200) > 12) throw new Error(`stage not moved by drag + arrow: ${stage.x}/${stage.y}`)
+    const water = b.pois.find((p) => p.name === 'Wasser am Tor')
+    if (!water || Math.abs(water.x - 600) > 8 || Math.abs(water.y - 300) > 8) throw new Error('water marker wrong: ' + JSON.stringify(water))
+
+    const visitor = await user()
+    await visitor.goto(`${WEB}/?f=testwiese-festival`)
+    await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await nav(visitor, 'Map')
+    await visitor.locator('.map-wrap img[src^="data:image/"]').waitFor()
+    await visitor.getByRole('button', { name: 'Wasser am Tor' }).waitFor()
+    await visitor.getByRole('button', { name: 'Wiese', exact: true }).waitFor()
+    if (await visitor.getByText('SEE', { exact: true }).count()) throw new Error('demo terrain drawn over a real plan')
+    if (process.env.SHOTS) await visitor.screenshot({ path: `${process.env.SHOTS}/map-visitor.png` })
+    await visitor.getByLabel('Karte durchsuchen').fill('Tor')
+    await visitor.locator('.tile', { hasText: 'Wasser am Tor' }).click()
+    await visitor.getByText('Trinkwasser · kostenlos').first().waitFor()
   })
 
   await step('recovery code restores Ben on a new device; the owner removes him', async () => {

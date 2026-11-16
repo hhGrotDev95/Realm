@@ -1,7 +1,7 @@
 import { Archive, Check, Eye, FileUp, Plus, RotateCcw, Rocket, Trash2, Upload } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { adminApi, ApiError, type ImportResult } from '../api'
-import { ACTS, DAYS, FESTIVAL, STAGES, fmt } from '../data'
+import { ACTS, DAYS, FESTIVAL, POIS, STAGES, fmt } from '../data'
 import { parseCsv, parseFile, parseTable, type ParseResult } from '../import/parse'
 
 type Flash = (k: 'ok' | 'err', t: string) => void
@@ -147,6 +147,11 @@ export function SetupWizard({ token, flash, slug, reload }: { token: string; fla
       )}
       {step === 4 && (
         <>
+          {POIS.length === 0 && (
+            <p className="small" role="note" style={{ background: 'var(--surface-2)', padding: '10px 12px', borderRadius: 12, marginTop: 0 }}>
+              Die Karte ist noch leer. Im Bereich <b>Karte</b> kannst du einen Geländeplan hochladen und Bühnen, Wasser, WCs und Sanitäter setzen – auch nach dem Veröffentlichen.
+            </p>
+          )}
           <Settings token={token} flash={flash} slug={slug} reload={reload} />
           <button className="btn ghost" style={{ marginTop: 12 }} onClick={() => setStep(3)}>
             Zurück zum Timetable

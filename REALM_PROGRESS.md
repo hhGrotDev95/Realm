@@ -1,6 +1,6 @@
 # Realm – Fortschritt
 
-Stand: 19.10.2026
+Stand: 16.11.2026
 
 - Runde 1 (Aufgaben 1–3): Branch `claude/realm-next`, gemergt als PR #4
 - Runde 2 (Aufgaben 4–6): Branch `claude/realm-next-2`, gemergt als PR #5
@@ -265,10 +265,10 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 | `npm run test:e2e` · `npm run test:a11y` | 10 Abläufe (neu: Bot) · 14 Ansichten ohne Befund (neu: FAQ mit Bot-Antwort) |
 | `npm run test:live` | 17 Szenarien; Festival-Ablauf: FAQ-Entwurf unsichtbar, nach Freigabe beantwortet der Bot die Frage – auch offline |
 
-## Nächste Schritte
+## Nächste Schritte (überholt – aktuelle Liste ganz unten)
 
-1. Bundle unter 500 kB (Karte, Wrapped, Sheets nachladen) – der Build warnt.
-2. P6: Karteneditor (eigener Geländeplan, Marker mit relativen Koordinaten).
+1. ~~Bundle unter 500 kB~~ (erledigt, Runde „App-Paket“)
+2. ~~P6: Karteneditor~~ (erledigt, siehe unten)
 3. P7: Sprachen DE/EN.
 
 ## Runde: App-Paket & echtes Offline (claude/realm-bundle)
@@ -277,3 +277,38 @@ Beim Testen gefunden und behoben: „Wer ist der Headliner am Samstag?“ bekam 
 - `LazyBoundary`: ein fehlgeschlagener Chunk-Load zeigt „Erneut versuchen“ statt die App abstürzen zu lassen.
 - Smoke-Test prüft Offline jetzt ehrlich (Server wird beendet, da `setOffline` Service-Worker-Fetches nicht abdeckt).
 - Geprüft: typecheck, test:import, build, test:e2e, test:a11y, test:live – alles grün.
+
+## P6 · Karteneditor — erledigt (Branch `ccr-c4b0523e-owmfp7`, 16.11.2026)
+
+Anlass (im Code gefunden): Mit dem Assistenten angelegte Festivals hatten **keinen einzigen Karten-Marker** (`pois` wurde nur vom Demo-Seed befüllt), Bühnen lagen auf Platzhalter-Rasterpositionen, und jede Karte zeigte das gezeichnete Demo-Gelände mit „SEE“/„WALD“.
+
+- `src/map/doc.ts`: gemeinsames Kartenformat + Validierung für Konsole und Worker (Kategorien, Status, eindeutige ids, `stage-<id>` nur für existierende Bühnen, Position innerhalb des Plans, Bild nur PNG/WebP/JPEG als data:-URL ≤ 1,2 Mio. Zeichen – kein SVG, kein externer Link).
+- **Entscheidung Koordinaten:** relativ zur Planbreite – Plan ist immer 1000 Einheiten breit, Höhe = 1000 × Bildhöhe/Bildbreite (300–3000). Bestehende Demo-Koordinaten (1000 × 940) bleiben dadurch unverändert gültig; keine Datenmigration der `pois` nötig.
+- Migration `0009_festival_map.sql`: Spalte `festivals.map` (JSON: `height`, `image?`, `terrain: 'demo'` nur für Realm Open Air).
+- Worker: `PUT /api/admin/festivals/:slug/map` ersetzt Plan + alle Orte atomar (Batch); Bühnen-Marker verschieben `stages.x/y`. `PUT …/stages` benennt Bühnen-Marker mit um und entfernt sie mit der Bühne. Festivaldokument enthält `festival.map`.
+- Konsole: Tab **Karte** (`src/admin/MapEditor.tsx`): Plan hochladen (im Browser auf ≤ 2400 px, WebP/JPEG, schrumpft bis es passt), „Bühnen ohne Position → Platzieren“, „Ort hinzufügen → Auf Plan setzen“, Ziehen, Pfeiltasten (Umschalt = 25), Entf, Formular (Name, Kategorie, Beschreibung, Status, „Immer zeigen“), Fehlerliste vor dem Speichern, Hinweis auf ungespeicherte Änderungen. Assistent Schritt 4 weist auf leere Karte hin.
+- App: zeigt den Plan als Bild; ohne Plan neutrales Raster (Demo behält ihr Gelände, Ebene „Satellit“ nur dort); „Ich“-Position = Planmitte außerhalb der Demo; Startzoom zeigt mind. die halbe Planbreite (breite Pläne öffneten sonst auf einer leeren Ecke).
+- Nebenbei behoben:
+  - **Absturz beim Schließen des Crew-Chats** in aktuellen Chromium-Versionen: `useEffect(() => el.scrollIntoView())` gab das neue Promise von `scrollIntoView` als Cleanup zurück → „destroy is not a function“. Der Live-Test war dadurch auch auf `main` rot.
+  - Live-Modus startete jedes Festival mit dem Demo-Pin „Unser Banner“ – jetzt leer.
+
+| Prüfung | Ergebnis |
+| --- | --- |
+| Typecheck Web + Worker, Build | ohne Fehler, keine Größenwarnung |
+| `npm run test:import` | 8 Parser, 9 Kontrast, 7 Module, 19 FAQ-Bot, **21 Karte** (neu) |
+| `cd worker && npm test` | **28 API-Tests** (neu: Karte – Validierung, nichts geschrieben bei Fehlern, Bühne folgt Marker, Umbenennen/Löschen, Demo unverändert) + Migrationstest (9 Migrationen, `map`-Spalte geprüft) |
+| `npm run test:e2e` · `npm run test:a11y` | 11 Abläufe · 14 Ansichten ohne Befund |
+| `npm run test:live` | **18 Szenarien** (neu: Plan hochladen, Bühne platzieren, Wasser setzen, Ziehen + Pfeiltaste, Speichern, Besucher sieht Plan/Marker/Suche; axe-Prüfung des Editors ohne schwerwiegende Befunde) |
+
+Hinweis für Testläufe in dieser Umgebung: Playwright findet seinen Browser nur mit `CHROMIUM_PATH=/opt/pw-browsers/chromium`. Bricht `test:live` ab, laufen `wrangler dev`/`vite` auf 8798/5199 weiter und verfälschen den nächsten Lauf → vorher `pkill -f "wrangler dev"; pkill -f "vite --port"; pkill -f workerd`.
+
+Nicht geprüft: echtes Gerät/Touch-Ziehen im Editor (nur Maus in Playwright), GitHub Actions (noch kein PR für diesen Branch).
+
+## Nächste Schritte (aktuell)
+
+1. **Kartenmaßstab** (klein, hoher Nutzen): Laufzeiten nutzen fest `Einheiten / 38` – für echte Pläne falsch. Vorschlag: im Karteneditor „Planbreite in Metern“ (optional) in `festivals.map` speichern, `walkMinutes` daraus berechnen (≈ 80 m/min); ohne Angabe bisheriges Verhalten.
+2. **P7 Sprachen DE/EN** (größer): Texte der Besucher-App in ein Wörterbuch ziehen, Sprache aus Browser + Umschalter im Profil; Festival-Inhalte bleiben einsprachig.
+3. Karteneditor-Komfort: Marker per Touch auf Tablets prüfen; Rückgängig für die letzte Verschiebung.
+4. Persönliche Pins im Live-Modus werden pro Festival gespeichert, aber nicht geprüft, ob sie nach einem neuen (kleineren) Plan außerhalb liegen – beim Laden auf den Plan begrenzen.
+
+Blocker unverändert: Deployment (Cloudflare-Konto), Web-Push (VAPID + Deployment).

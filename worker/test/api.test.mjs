@@ -523,6 +523,54 @@ try {
     assert.equal((await api('GET', `${base}`, A, undefined, null)).data.length, 0)
   })
 
+  await test('map editor: plan and markers validated, stages move with their marker, follow renames', async () => {
+    const A = 'test-admin-token'
+    const f = await api('POST', '/api/admin/festivals', A, { name: 'Kartenfest', startDate: '2027-05-07', days: 1 }, null)
+    const slug = f.data.slug
+    await api('PUT', `/api/admin/festivals/${slug}/stages`, A, { stages: [{ name: 'Wiese' }, { name: 'Zelt' }] }, null)
+    let b = (await api('GET', `/api/festivals/${slug}`, A, undefined, null)).data
+    assert.deepEqual(b.festival.map, { height: 940 }) // a new festival starts without a plan or markers
+    assert.equal(b.pois.length, 0)
+    const image = 'data:image/webp;base64,UklGRhYAAABXRUJQVlA4IAoAAAAwAQCdASoBAAEAAUAmJaQAA3AA/v89WAAAAA=='
+    const markers = [
+      { id: 'stage-wiese', cat: 'stage', name: 'Wiese', x: 200, y: 150, detail: 'Hauptbühne' },
+      { id: 'w1', cat: 'water', name: 'Wasser', x: 610.6, y: 420, status: 'open', important: true },
+      { id: 'wc1', cat: 'wc', name: 'WC Süd', x: 900, y: 590, important: false },
+    ]
+    // refused: not an admin, a marker off the plan, a stage that does not exist, an external image
+    assert.equal((await api('PUT', `/api/admin/festivals/${slug}/map`, lea.token, { height: 600, markers }, null)).status, 401)
+    const off = await api('PUT', `/api/admin/festivals/${slug}/map`, A, { height: 500, markers }, null)
+    assert.equal(off.status, 400)
+    assert.match(off.data.error, /WC Süd.*außerhalb/)
+    assert.equal((await api('PUT', `/api/admin/festivals/${slug}/map`, A, { height: 600, markers: [{ id: 'stage-strand', cat: 'stage', name: 'Strand', x: 1, y: 1 }] }, null)).status, 400)
+    assert.equal((await api('PUT', `/api/admin/festivals/${slug}/map`, A, { height: 600, image: 'https://example.com/a.png', markers }, null)).status, 400)
+    // nothing was written by the refused requests
+    assert.equal((await api('GET', `/api/festivals/${slug}`, A, undefined, null)).data.pois.length, 0)
+
+    const ok = await api('PUT', `/api/admin/festivals/${slug}/map`, A, { height: 600, image, markers }, null)
+    assert.equal(ok.status, 200)
+    b = (await api('GET', `/api/festivals/${slug}`, A, undefined, null)).data
+    assert.deepEqual(b.festival.map, { height: 600, image })
+    assert.deepEqual(b.pois.map((p) => [p.id, p.x, p.y, p.important]).sort(), [['stage-wiese', 200, 150, true], ['w1', 611, 420, true], ['wc1', 900, 590, false]])
+    assert.deepEqual(b.stages.find((s) => s.id === 'wiese'), { id: 'wiese', name: 'Wiese', color: b.stages[0].color, x: 200, y: 150, vibe: '' })
+
+    // renaming the stage renames its marker; removing it removes the marker
+    await api('PUT', `/api/admin/festivals/${slug}/stages`, A, { stages: [{ id: 'wiese', name: 'Große Wiese' }, { id: 'zelt', name: 'Zelt' }] }, null)
+    b = (await api('GET', `/api/festivals/${slug}`, A, undefined, null)).data
+    assert.equal(b.pois.find((p) => p.id === 'stage-wiese').name, 'Große Wiese')
+    assert.equal(b.stages.find((s) => s.id === 'wiese').x, 200) // position kept
+    await api('PUT', `/api/admin/festivals/${slug}/stages`, A, { stages: [{ id: 'zelt', name: 'Zelt' }] }, null)
+    b = (await api('GET', `/api/festivals/${slug}`, A, undefined, null)).data
+    assert.deepEqual(b.pois.map((p) => p.id).sort(), ['w1', 'wc1'])
+
+    // removing the plan keeps the markers; other festivals are untouched
+    assert.equal((await api('PUT', `/api/admin/festivals/${slug}/map`, A, { height: 600, image: null, markers: b.pois }, null)).status, 200)
+    assert.deepEqual((await api('GET', `/api/festivals/${slug}`, A, undefined, null)).data.festival.map, { height: 600 })
+    const demo = (await api('GET', '/api/festivals/realm-open-air')).data
+    assert.deepEqual(demo.festival.map, { height: 940, terrain: 'demo' })
+    assert.equal(demo.pois.length, 21)
+  })
+
   await test('CORS preflight is answered', async () => {
     const r = await fetch(BASE + '/api/me', { method: 'OPTIONS', headers: { Origin: 'https://realm.app', 'Access-Control-Request-Method': 'GET' } })
     assert.equal(r.headers.get('access-control-allow-origin'), 'https://realm.app')

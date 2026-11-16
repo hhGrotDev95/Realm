@@ -1,7 +1,8 @@
 import { AnimatePresence, m as motion } from 'framer-motion'
 import { Check, Layers, LocateFixed, Search, X, MapPin, TriangleAlert, Users, Satellite, Minus, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { on, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { on, FESTIVAL, ME, POIS, STAGES, stageById, walkMinutes, type Poi, type PoiCat } from '../data'
+import { MAP_W } from '../map/doc'
 import { useApp } from '../store'
 import { CAT_ICON } from './mapIcons'
 import { AppBar } from '../App'
@@ -14,12 +15,12 @@ const CATS: { id: PoiCat; label: string }[] = [
   { id: 'medical', label: 'Medical' },
   { id: 'bar', label: 'Bars' },
 ]
-const W = 1000
-const H = 940
+const W = MAP_W
 
 type View = { x: number; y: number; k: number }
 
 export function MapScreen() {
+  const H = FESTIVAL.map.height
   const { crew } = useApp()
   const { openSheet, focusPoi, setFocusPoi, shareLocation, myPins, updates, votes, sheet, set, toast, requireIdentity } = useApp()
   const wrap = useRef<HTMLDivElement>(null)
@@ -48,7 +49,9 @@ export function MapScreen() {
 
   useLayoutEffect(() => {
     const el = wrap.current!
-    const k = Math.max(el.clientWidth / W, (el.clientHeight * 0.8) / H) * 1.05
+    // fill the screen, but never zoom in so far that less than half of the plan's width is visible
+    // (wide plans on a portrait phone would otherwise open on an empty corner)
+    const k = Math.min(Math.max(el.clientWidth / W, (el.clientHeight * 0.8) / H), (el.clientWidth * 2) / W) * 1.05
     setView({ k, x: el.clientWidth / 2 - ME.x * k, y: el.clientHeight / 2 - ME.y * k })
   }, [])
 
@@ -169,7 +172,7 @@ export function MapScreen() {
             transition: animate ? 'transform .45s cubic-bezier(.22,1,.36,1)' : undefined,
           }}
         >
-          <Ground satellite={layers.satellite} />
+          {FESTIVAL.map.image ? <Plan src={FESTIVAL.map.image} h={H} /> : FESTIVAL.map.terrain === 'demo' ? <Ground satellite={layers.satellite} /> : <BlankGround h={H} />}
           {routePoi && (
             <svg width={W} height={H} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
               <motion.path
@@ -307,7 +310,7 @@ export function MapScreen() {
                     ['pins', 'Meine Pins', MapPin],
                     ['satellite', 'Satellit', Satellite],
                   ] as const
-                ).map(([k, label, I]) => (
+                ).filter(([k]) => k !== 'satellite' || (!FESTIVAL.map.image && FESTIVAL.map.terrain === 'demo')).map(([k, label, I]) => (
                   <button key={k} onClick={() => setLayers((l) => ({ ...l, [k]: !l[k] }))} aria-pressed={layers[k]}>
                     <I size={18} className="faint" /> {label}
                     {layers[k] && <Check size={18} className="chk" />}
@@ -382,7 +385,37 @@ function Marker({ p, inv, selected, onClick }: { p: Poi; inv: number; selected: 
   )
 }
 
+/** The organiser's own site plan (uploaded in the console). */
+function Plan({ src, h }: { src: string; h: number }) {
+  return <img src={src} alt="" width={W} height={h} draggable={false} style={{ position: 'absolute', inset: 0, width: W, height: h, userSelect: 'none', pointerEvents: 'none' }} />
+}
+
+/** Festivals without a plan yet: a neutral grid with the stages' glow, no invented terrain. */
+function BlankGround({ h }: { h: number }) {
+  return (
+    <svg width={W} height={h} viewBox={`0 0 ${W} ${h}`} style={{ position: 'absolute', inset: 0 }} aria-hidden>
+      <defs>
+        <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+          <path d="M50 0H0V50" fill="none" stroke="#1d2129" strokeWidth="1" />
+        </pattern>
+        {STAGES.map((s) => (
+          <radialGradient key={s.id} id={'g-' + s.id}>
+            <stop offset="0" stopColor={s.color} stopOpacity=".24" />
+            <stop offset="1" stopColor={s.color} stopOpacity="0" />
+          </radialGradient>
+        ))}
+      </defs>
+      <rect width={W} height={h} fill="#14171c" />
+      <rect width={W} height={h} fill="url(#grid)" />
+      {STAGES.map((s) => (
+        <circle key={s.id} cx={s.x} cy={s.y} r="110" fill={`url(#g-${s.id})`} />
+      ))}
+    </svg>
+  )
+}
+
 function Ground({ satellite }: { satellite: boolean }) {
+  const H = FESTIVAL.map.height
   const grass = satellite ? '#1b2a1a' : '#14171c'
   const field = satellite ? '#243620' : '#191d23'
   const path = satellite ? '#4a4535' : '#262b33'
