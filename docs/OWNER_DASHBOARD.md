@@ -107,8 +107,11 @@ Allow-Regel ausschließlich für den Eigentümer aktiviert, Sitzung 24 Stunden.
 Anmeldung über den angebotenen Cloudflare-Login führte in Safari zur vollständigen
 Projektübersicht. Sechs externe anonyme/gefälschte Anfragen wurden zur Access-
 Anmeldung umgeleitet; vor Aktivierung sperrte der Worker sie mit 403.
-Der automatische GitHub-Folgelauf wird nach Übernahme nachgewiesen; der finale
-Übernahmestatus folgt im jüngsten Fortschrittseintrag.
+Der automatische [GitHub-Folgelauf 43891577824](https://github.com/hhGrotDev95/Realm/actions/runs/43891577824)
+bestand nach Merge von [PR #55](https://github.com/hhGrotDev95/Realm/pull/55) für
+`0ab654d8`, einschließlich echter Veröffentlichung und sechs Access-Sperrprüfungen.
+Cloudflare-Version: `83352637-2e2a-42cf-9613-b396be513bc1`. Weitere aktuelle
+Auslieferungen sind im Workflow und am Quellcommit der Seite nachvollziehbar.
 
 Technische Grundlage: [Worker mit Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/)
 und [Cloudflare als Identitätsanbieter](https://developers.cloudflare.com/cloudflare-one/integrations/identity-providers/cloudflare/).

@@ -1,7 +1,7 @@
 {
   "projectName": "Realm · Winter 2027",
   "reviewedAt": "2026-11-16",
-  "reviewedHandoff": "## Private Projektübersicht und Release-Abgleich (16.11.2026, Codex)",
+  "reviewedHandoff": "## Projektportal: automatische Veröffentlichung nachgewiesen (16.11.2026, Codex)",
   "releaseDate": "2027-01-22",
   "reviewedGateStates": {
     "A1": false,
@@ -175,13 +175,19 @@
       "url": "https://github.com/hhGrotDev95/Realm/blob/main/docs/OWNER_DASHBOARD.md",
       "description": "Wie die Übersicht aktualisiert wird und wie ihr privater Zugang funktioniert.",
       "group": "Dokumentation"
+    },
+    {
+      "label": "Statusseite · Veröffentlichungen",
+      "url": "https://github.com/hhGrotDev95/Realm/actions/workflows/owner-portal.yml",
+      "description": "Automatische Prüfungen und Veröffentlichungen dieser Projektübersicht.",
+      "group": "Code"
     }
   ],
   "recent": [
     {
       "date": "2026-11-16",
       "title": "Private Projektübersicht eingerichtet",
-      "summary": "Cloudflare-Anmeldung als Eigentümer erfolgreich; anonyme Aufrufe gesperrt. Die automatische Veröffentlichung aus GitHub wird im zugehörigen Workflow nachgewiesen."
+      "summary": "Privater Cloudflare-Login geprüft. PR #55 ist gemergt; GitHub-Lauf 43891577824 hat die Seite automatisch veröffentlicht und anonyme Zugriffe gesperrt."
     },
     {
       "date": "2026-11-16",
