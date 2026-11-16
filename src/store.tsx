@@ -1,6 +1,6 @@
 import type { FlagReason } from './api'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { mergeOutbox } from './outboxMerge'
+import { mergeConfirmedChat, mergeOutbox } from './outboxMerge'
 import { api, ApiError, execute, online, opId, privacyKey, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
 import { lang, t } from './i18n'
 import { publicAppUrl } from './platform'
@@ -331,19 +331,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (e.key !== storageKey() || !e.newValue || e.storageArea !== storage()) return
       try {
         const adopted = fromStorage(e.newValue, fresh())
+        const current = sRef.current
+        const sameOwner = current.session?.id === adopted.session?.id
         // writes queued here survive a save the other tab made before it saw them
-        const outbox = mergeOutbox(sRef.current.outbox, adopted.outbox, queuedHere.current, { key: privacyKey, sentThere: adopted.outboxSent, sentHere: sRef.current.outboxSent })
+        const outbox = mergeOutbox(current.outbox, adopted.outbox, queuedHere.current, { key: privacyKey, sentThere: adopted.outboxSent, sentHere: current.outboxSent, sameOwner })
+        const chat = sameOwner && current.crewRef?.id === adopted.crewRef?.id ? mergeConfirmedChat(current.chat, adopted.chat, current.outboxSent) : adopted.chat
         const kept = outbox.filter((o) => !adopted.outbox.some((a) => a.id === o.id) && 'crewId' in o && o.crewId === adopted.crewRef?.id)
         const next = {
           ...adopted,
           outbox,
-          outboxSent: [...new Set([...adopted.outboxSent, ...sRef.current.outboxSent])].slice(-50),
+          outboxSent: sameOwner ? [...new Set([...adopted.outboxSent, ...current.outboxSent])].slice(-50) : adopted.outboxSent,
           // … and stay visible as pending in the chat and the meetup list
-          chat: [...adopted.chat, ...kept.flatMap((o) => (o.kind === 'message' && !adopted.chat.some((m) => m.id === o.id) ? [{ id: o.id, from: 'me', text: o.text, min: minuteOfDay(o.at), pending: true }] : []))],
+          chat: [...chat, ...kept.flatMap((o) => (o.kind === 'message' && !chat.some((m) => m.id === o.id) ? [{ id: o.id, from: 'me', text: o.text, min: minuteOfDay(o.at), pending: true }] : []))],
           meetups: [...adopted.meetups, ...kept.flatMap((o) => (o.kind === 'meetup' && !adopted.meetups.some((m) => m.id === o.id) ? [{ id: o.id, title: o.data.note || 'Meetup', ...o.data, going: ['me'], createdBy: 'me' }] : []))],
         }
         written.current = JSON.stringify(adopted) // a healed outbox differs, so it is saved again
-        if (next.session?.token !== sRef.current.session?.token) setToken(next.session?.token ?? null)
+        if (!sameOwner) {
+          confirmations.current.clear()
+          cursor.current = { crewId: '', at: 0, polls: 0 }
+        }
+        if (next.session?.token !== current.session?.token) setToken(next.session?.token ?? null)
+        sRef.current = next // in-flight sends must see identity changes before React renders
         setS(next)
       } catch {}
     }
@@ -401,12 +409,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /** One sync round. Returns false when the network or server failed (caller backs off). */
   const refresh = useCallback(async (): Promise<boolean> => {
     if (!online || !sRef.current.session) return true
+    const session = sRef.current.session
     const crewId = sRef.current.crewRef?.id
+    const sameContext = () => sRef.current.session?.id === session.id && sRef.current.session?.token === session.token && sRef.current.crewRef?.id === crewId
     if (cursor.current.crewId !== (crewId ?? '')) cursor.current = { crewId: crewId ?? '', at: 0, polls: 0 }
     const c = cursor.current
     const incremental = c.at > 0 && c.polls % 15 !== 0
     try {
       const [cs, reports] = await Promise.all([crewId && on('crew') ? api.crew(crewId, incremental ? c.at - 1 : undefined) : null, on('reports') ? api.reports() : []])
+      if (!sameContext()) return true
       if (cs?.pending) {
         // still waiting for the owner: nothing of the crew is shown yet
         setS((p) => ({ ...p, crewRef: { ...cs.crew, pending: true }, remote: null }))
@@ -420,6 +431,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setS((p) => ({ ...p, remoteReports: reports, reportsFetchedAt: Date.now(), votes: { ...p.votes, ...Object.fromEntries(reports.filter((r) => r.myVote).map((r) => [r.id, r.myVote!])) } }))
       return true
     } catch (e) {
+      if (!sameContext()) return true
       if (e instanceof ApiError && e.status === 401) setS((p) => ({ ...p, session: null, crewRef: null, remote: null }))
       if (e instanceof ApiError && e.status === 404 && crewId) {
         setS((p) => ({ ...p, crewRef: null, remote: null, chat: [], meetups: [], declined: [] }))
@@ -440,16 +452,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /** Sends queued writes in order; stops at the first one that should be retried later. */
   const flush = useCallback(async () => {
     if (!online || flushing.current || !sRef.current.session) return
+    const session = sRef.current.session
+    const sameSession = () => sRef.current.session?.id === session.id && sRef.current.session?.token === session.token
     flushing.current = true
     let sent = 0
     try {
       for (const op of sRef.current.outbox) {
+        if (!sameSession()) break
         try {
           await execute(op)
+          if (!sameSession()) break
           sent++
           const msg = confirmations.current.get(op.id)
           if (msg) toast(msg)
         } catch (e) {
+          if (!sameSession()) break
           if (retryable(e)) break
           sent++
           toast(e instanceof ApiError ? t('Nicht gesendet: {error}', { error: e.message }) : t('Nicht gesendet'))
@@ -463,7 +480,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       flushing.current = false
     }
-    if (sent) await refresh()
+    if (sent && sameSession()) await refresh()
   }, [toast]) // refresh is stable enough via its own deps; see below
 
   useEffect(() => {
@@ -878,11 +895,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
       restore: async (code) => {
         try {
           const g = await api.restore(code)
-          setToken(g.token)
           // read the restored profile before switching sessions: switching starts the plan upload,
           // which would otherwise overwrite the saved plan with this device's (often empty) one
-          const me = await api.me()
-          setS((p) => ({ ...p, session: { id: g.id, token: g.token }, crewRef: me.crews[0] ?? null, remote: null, plan: me.plan.length ? me.plan : p.plan, guest: { ...p.guest, id: g.id, nickname: g.nickname, color: g.color, secured: 'code' } }))
+          // Use this request's token without changing the token of an active outbox flush.
+          const me = await api.me(g.token)
+          const p = sRef.current
+          const sameOwner = p.session?.id === g.id
+          const crewRef = (sameOwner && me.crews.find((c) => c.id === p.crewRef?.id)) || me.crews[0] || null
+          const sameCrew = sameOwner && p.crewRef?.id === crewRef?.id
+          const next = {
+            ...p,
+            session: { id: g.id, token: g.token },
+            crewRef,
+            remote: null,
+            outbox: sameOwner ? p.outbox : [],
+            outboxSent: sameOwner ? p.outboxSent : [],
+            chat: sameCrew ? p.chat : [],
+            meetups: sameCrew ? p.meetups : [],
+            declined: sameCrew ? p.declined : [],
+            plan: me.plan.length ? me.plan : p.plan,
+            guest: { ...p.guest, id: g.id, nickname: g.nickname, color: g.color, secured: 'code' as const },
+          }
+          if (!sameOwner) {
+            queuedHere.current.clear()
+            confirmations.current.clear()
+          }
+          cursor.current = { crewId: '', at: 0, polls: 0 }
+          setToken(g.token)
+          sRef.current = next
+          setS(next)
           toast(t('Profil wiederhergestellt'))
           return true
         } catch (e) {
@@ -898,14 +939,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const keys = Object.keys(localStorage).filter((k) => k === LEGACY_KEY || k.startsWith(LEGACY_KEY + ':'))
           const tokens = new Set([s.session?.token, ...keys.map((k) => safeSession(k))].filter((x): x is string => !!x))
           for (const tok of tokens) {
-            setToken(tok)
-            await api.deleteMe().catch((e) => {
+            await api.deleteMe(tok).catch((e) => {
               if (!(e instanceof ApiError && e.status === 401)) throw e // already gone is fine
             })
           }
           setToken(null)
           for (const k of keys) localStorage.removeItem(k)
-          setS(fresh())
+          const next = fresh()
+          queuedHere.current.clear()
+          confirmations.current.clear()
+          sRef.current = next
+          setS(next)
           setStack([])
           setTabRaw('home')
           toast(t('Profil und alle Daten gelöscht'))

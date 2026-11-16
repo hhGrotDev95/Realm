@@ -29,13 +29,13 @@ export const setFestival = (slug: string) => {
 }
 const festivalHeader = (): Record<string, string> => (festival ? { 'X-Festival': festival } : {})
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(method: string, path: string, body?: unknown, authToken = token): Promise<T> {
   if (!API_URL) throw new ApiError(0, 'Kein Server konfiguriert')
   let res: Response
   try {
     res = await fetch(API_URL + path, {
       method,
-      headers: { ...festivalHeader(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      headers: { ...festivalHeader(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(authToken ? { Authorization: 'Bearer ' + authToken } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       // a hanging request gives up and counts as a network error, so it is retried and never blocks the outbox
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -167,9 +167,9 @@ export const api = {
       return call<Session>('POST', '/api/guests', { nickname, color, challenge: { id: ch.id, nonce: await solve(ch.id, ch.bits) } })
     }
   },
-  me: () => call<{ id: string; nickname: string | null; color: string; secured: boolean; crews: CrewRef[]; plan: string[] }>('GET', '/api/me'),
+  me: (authToken?: string) => call<{ id: string; nickname: string | null; color: string; secured: boolean; crews: CrewRef[]; plan: string[] }>('GET', '/api/me', undefined, authToken),
   updateMe: (nickname: string, color: string) => call('PATCH', '/api/me', { nickname, color }),
-  deleteMe: () => call<void>('DELETE', '/api/me'),
+  deleteMe: (authToken?: string) => call<void>('DELETE', '/api/me', undefined, authToken),
   recovery: () => call<{ code: string }>('POST', '/api/me/recovery'),
   restore: (code: string) => call<Session>('POST', '/api/restore', { code }),
   setPlan: (acts: string[]) => call('PUT', '/api/me/plan', { acts }),

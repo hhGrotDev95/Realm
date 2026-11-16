@@ -403,8 +403,14 @@ Realm-Hülle und den Build-4-Tastaturfix mit PR #53. Die native CORS-Allowlist
 ist dabei im Worker-Staging-Quellstand enthalten. Der integrierte Stand bestand
 Typprüfungen, Unit-/Native-Guards, 18 Chrome-Smoke-Fälle, fünf Chatfälle,
 17 Barrierefreiheitsansichten, API/Migrationen sowie den vollständigen
-29-Szenarien-Live-Nachlauf. Ein erster Live-Versuch scheiterte am bestehenden
-Zwei-Tab-Offlinetest; dieser bestand beim Nachlauf, ohne Produktänderung dafür.
+29-Szenarien-Live-Nachlauf. Ein weiterer Ausfall des Zwei-Tab-Offlinetests
+in der GitHub-CI führte anschließend zur Ursachenbehebung: Wartende Aktionen
+bleiben ohne ausdrückliche Abschluss-ID erhalten, bestätigte Chatzeilen werden
+nicht durch ältere wartende Snapshots ersetzt. Profilwechsel übernehmen keine
+fremde Queue; laufende Sendungen/Refreshes prüfen ihren Sitzungskontext.
+Wiederherstellung desselben Profils erhält wartende Nachrichten trotz Tokenwechsel.
+Die erweiterten Unit-/Live-Regressionen und tatsächlichen Abschlussresultate
+sind im jüngsten Eintrag von [REALM_PROGRESS.md](../REALM_PROGRESS.md) dokumentiert.
 
 `ios:sync` und ein unsignierter generischer Xcode-Debug-Build bestanden;
 53 Webdateien waren bytegleich in Buildausgabe, Quellbundle und App-Bundle.

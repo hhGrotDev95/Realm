@@ -689,3 +689,56 @@ Für neue Arbeitspakete gilt der jüngste datierte Übergabeeintrag und der Wint
 - **Grenzen:** Kein neuer signierter/auf dem iPhone installierter Build, keine neue Geräteabnahme. Build 4 vom 13.11. bleibt der letzte tatsächlich geprüfte Gerätestand. A2b/B4, sichere native Sitzung und Store-Freigabe bleiben offen. Kein neuer automatischer Coding-Zeitplan oder API-Zugang eingerichtet; persönliche Hinweise zur täglichen lokalen/Cloud-Arbeit bleiben in DOKU.
 - **Veröffentlichung und Übernahme:** [Integrations-PR #54](https://github.com/hhGrotDev95/Realm/pull/54) enthält den gemeinsamen Quellstand; die Übernahme nach `main` ist ausdrücklich autorisiert und an die Gesamt-CI gebunden. Da lokales `git push` keinen Schreiblogin hatte, wurde die verbundene GitHub-Integration verwendet. Der erste GitHub-Dateibaum `5e5755d5ba8292975bce8b579a2ed16cb37e78e3` stimmt exakt mit dem lokalen Code-Commit `b0ccae3` überein; PR #53 ist als Commit-Vorfahre erhalten. Die lokalen Sicherungscommits bleiben erhalten. Aktueller Merge-/CI-Status ist am PR, der tatsächliche Web-Deploy an [build-info.json](https://realm-staging.heidlhannes95.workers.dev/build-info.json) nachvollziehbar; die persönliche Abschlussübergabe hält den beobachteten Endstand fest. Die native CORS-Allowlist ist Teil dieses regulären Quellstands, nicht mehr nur ein separates Settings-PATCH.
 - **Nächster konkreter Schritt:** A2b – native Sitzungs-/Tokenablage sowie Logout, Profilwechsel und Neustart prüfen und die Keychain-Lücke gezielt schließen. Danach die weiteren Integrationsgrenzen aus `docs/IPHONE_INTEGRATION.md` abnehmen. Keine Wiederholung des bereits abgeschlossenen Bedienpakets, keine V2-Arbeit.
+
+
+### Nachprüfung der Integration · Zwei-Tab-Outbox und Profilgrenzen (16.11.2026)
+
+Die erste GitHub-CI des Code-Stands `9d6e71f` bestand vollständig. Beim
+anschließenden Dokumentationsstand `0d356564` bestand erneut Web/API/Firefox/WebKit,
+aber der Live-Job [43875079964](https://github.com/hhGrotDev95/Realm/actions/runs/43875079964)
+scheiterte an einer nach Wiederverbindung fehlenden/bis dahin unbestätigten
+Nachricht im Zwei-Tab-Test. Zusammen mit dem früheren lokalen Aussetzer war dies
+ein Anlass zur Ursachenprüfung, nicht nur zu einem erneuten CI-Start.
+
+`mergeOutbox` nahm irrtümlich an: Wenn ein anderer Tab eine Aktion einmal gesehen
+hat und sie in einem später eintreffenden Snapshot fehlt, sei sie gesendet.
+Ein älterer Snapshot kann diese Annahme widerlegen. Der neue Unit-Fall reproduzierte
+am alten Code deterministisch eine leere Warteschlange statt der erhaltenen
+Nachricht. Die Korrektur verlangt ausdrückliche Abschluss-IDs; die bestehenden
+Regeln für ersetzte Datenschutzentscheidungen bleiben erhalten. Bestätigte
+Chatzeilen werden im selben Profil und derselben Crew gegen alte wartende Zeilen
+geschützt; frische Serverstände einschließlich Moderation behalten Vorrang.
+
+Der unabhängige Review ergänzte die Profilgrenze: Ein Tab übernimmt bei einer
+anderen Profilkennung nur deren Warteschlange. Laufende Sends/Refreshes prüfen
+ihren Sitzungskontext nach dem Warten; die Zustandsreferenz wechselt synchron.
+Profilwiederherstellung und Löschung anderer gespeicherter Profile verwenden
+anfragebezogene Tokens, ohne währenddessen den aktiven API-Token auszutauschen.
+Eine echte Profilablösung verwirft die alte lokale Queue, die Wiederherstellung
+desselben Profils erhält Queue/Bestätigungen und passende Crew-Daten.
+
+Nach der finalen Runtime-Korrektur bestanden erneut Typprüfung, die gesamte
+Unit-/Native-Suite (darunter 13 gezielte Outbox-Fälle), Web-Build, 18 Chrome-Smoke-
+und fünf Chat-Regressionen. `ios:sync` und der unsignierte generische Xcode-Build
+bestanden; alle 53 Webdateien stimmen zwischen Ausgabe, nativem Quellbundle und
+gebauter App überein (zusätzlich zwei identische generierte Cordova-Stubs).
+
+Die Live-Suite umfasst nun 30 Szenarien, darunter veraltete wartende Snapshots
+nach bestätigter Zustellung, Profilwechsel während einer verzögerten Sendung und
+Wiederherstellung desselben Profils mit wartenden Nachrichten. Die neuen Fälle
+prüfen ausdrückliche Bestätigungen, Sitzungskontext und genau einmalige
+Serverzustellung. Bei der Erweiterung wurden zwei Testabläufe korrigiert:
+das verbliebene Profilfenster vor Navigation schließen und den Plan über die
+Oberfläche samt Serverabgleich vorbereiten, statt einen laufenden leeren
+Browserplan allein durch eine serverseitige Teständerung zu ersetzen.
+Unabhängiger Review von Runtime und Regressionen ohne verbleibenden materiellen
+Befund. Der Profilwechseltest verwendet ein synthetisches Speicherereignis;
+die Authentifizierung bei Löschung mehrerer Profile ist nicht separat live geprüft.
+
+Der veröffentlichte Stand wird vor Übernahme mit allen fünf GitHub-CI-Jobs
+geprüft; vollständige Laufresultate, finaler Commit und Merge sind am
+[Integrations-PR #54](https://github.com/hhGrotDev95/Realm/pull/54) nachvollziehbar.
+Die persönliche Abschlussübergabe hält den tatsächlich beobachteten
+main-/Staging-Stand und die öffentlichen CORS-Prüfungen fest.
+Diese Browser-Sitzungsgrenzen ersetzen weiterhin keine native Keychain-Integration
+oder Geräteabnahme; der nächste A2b-Schritt bleibt unverändert.

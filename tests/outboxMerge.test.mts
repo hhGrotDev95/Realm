@@ -1,7 +1,7 @@
 // Two tabs share one stored state: adopting the other tab's (possibly stale) save must never
 // drop a write this tab queued, and must not resend one the other tab already delivered (src/outboxMerge.ts).
 import assert from 'node:assert/strict'
-import { mergeOutbox } from '../src/outboxMerge.ts'
+import { mergeConfirmedChat, mergeOutbox } from '../src/outboxMerge.ts'
 
 let passed = 0
 const check = (name: string, fn: () => void) => {
@@ -21,12 +21,24 @@ check('a stale save from the other tab keeps the write queued here', () => {
   assert.equal(tracked.get('m2'), false)
 })
 
-check('once the other tab has seen the write, its absence means it was sent', () => {
+check('a previously seen write survives an older save until explicitly acknowledged', () => {
   const tracked = new Map([['m2', false]])
   mergeOutbox([op('m2')], [op('m2')], tracked)
   assert.equal(tracked.get('m2'), true)
-  assert.deepEqual(ids(mergeOutbox([op('m2')], [], tracked)), [])
+  assert.deepEqual(ids(mergeOutbox([op('m2')], [], tracked)), ['m2'])
+  assert.equal(tracked.has('m2'), true)
+  assert.deepEqual(ids(mergeOutbox([op('m2')], [], tracked, { sentThere: ['m2'] })), [])
   assert.equal(tracked.has('m2'), false)
+})
+
+check('out-of-order saves cannot lose either concurrently queued message', () => {
+  const trackedA = new Map([['a', false]])
+  const trackedB = new Map([['b', false]])
+  const bothA = mergeOutbox([op('a')], [op('b')], trackedA)
+  const bothB = mergeOutbox([op('b')], bothA, trackedB)
+  const afterStale = mergeOutbox(bothB, [op('a')], trackedB)
+  assert.deepEqual(ids(afterStale), ['a', 'b'])
+  assert.deepEqual(ids(mergeOutbox(afterStale, [], trackedB, { sentThere: ['a', 'b'] })), [])
 })
 
 check('the other tab’s own writes are adopted, in its order, before ours', () => {
@@ -65,6 +77,26 @@ check('a write the other tab sent without ever saving it queued is not queued ag
 
 check('a stale state still listing a write this tab already sent does not queue it again', () => {
   assert.deepEqual(ids(mergeOutbox([], [op('x'), op('y')], new Map(), { sentHere: ['x'] })), ['y'])
+})
+
+check('another identity adopts only its own queue and acknowledgements', () => {
+  const tracked = new Map([['old-profile', true]])
+  const next = mergeOutbox([op('old-profile')], [op('new-profile')], tracked, { sameOwner: false, sentHere: ['new-profile'] })
+  assert.deepEqual(ids(next), ['new-profile'])
+  assert.equal(tracked.size, 0)
+})
+
+check('stale pending chat cannot erase an acknowledged delivery', () => {
+  const confirmed = { id: 'sent', text: 'delivered', pending: false }
+  const incoming = [{ id: 'sent', text: 'delivered', pending: true }, { id: 'waiting', text: 'queued', pending: true }]
+  assert.deepEqual(mergeConfirmedChat([confirmed], incoming, ['sent']), [confirmed, incoming[1]])
+  assert.deepEqual(mergeConfirmedChat([confirmed], [], ['sent']), [confirmed])
+})
+
+check('fresh moderation wins and old unrelated history is not resurrected', () => {
+  const own = [{ id: 'sent', text: 'delivered' }, { id: 'old', text: 'old history' }]
+  const deleted = { id: 'sent', text: '', deleted: true }
+  assert.deepEqual(mergeConfirmedChat(own, [deleted], ['sent']), [deleted])
 })
 
 console.log(`${passed} outbox merge checks passed`)

@@ -14,6 +14,15 @@
 
 **Zusammenführung am 16.11.2026:** Auf Nutzerauftrag führt [PR #54](https://github.com/hhGrotDev95/Realm/pull/54) PR #53 und die lokalen Realm-iPhone-Korrekturen gemeinsam zusammen. PR #26 enthält eine inzwischen durch PR #33 ersetzte Kartenimplementierung; übernommen wird nur seine weiterhin relevante Wartebedingung im Branding-Live-Test. AGENTS.md und CLAUDE.md verweisen auf denselben aktuellen Hauptstand und diese Winterprioritäten. Dies erweitert keine Geräte- oder Store-Abnahme: Build 4 bleibt der zuletzt am iPhone geprüfte Stand, A2b/B4 bleiben offen. Tatsächliche Prüfungen und Übernahmestatus stehen im jüngsten Eintrag in [REALM_PROGRESS.md](../REALM_PROGRESS.md).
 
+Die Gesamtprüfung deckte zusätzlich eine echte Zwei-Tab-Outbox-Race auf:
+veraltete Speicherstände konnten wartende Nachrichten verlieren oder bestätigte
+Nachrichten wieder wartend anzeigen. Explizite Abschluss-IDs und geschützte
+Bestätigungen korrigieren dies. Laufende Sendungen/Refreshes sind an ihre Sitzung
+gebunden; ein anderes Profil übernimmt keine alte Warteschlange, die
+Wiederherstellung desselben Profils erhält sie. Unit- und verzögerte Live-Fälle
+sichern diese Grenzen ab. Dies ist keine sichere native Tokenablage:
+**Nächster A2b-Schritt bleibt Sitzung/Keychain samt Logout und Neustart.**
+
 ## Was bereits vorhanden ist
 
 - [x] **Realm-Webbasis:** React/Vite, Hono, Cloudflare Worker und D1 mit Veranstalterkonsole, Festival-/Timetable-Import, Offline-Outbox, Crew-Funktionen, Moderation und bestehenden automatisierten Web/API-Prüfungen. Detaillierter Prüfstand: [AUDIT.md](AUDIT.md), [STAGING.md](STAGING.md), [IMPORT.md](IMPORT.md).
