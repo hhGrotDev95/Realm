@@ -128,3 +128,18 @@ Die lokale CORS-Quelländerung ist weiterhin uncommittet. Sie muss vor dem
 nächsten regulären Web-Deploy in dessen Quellstand übernommen werden, sonst
 kann die Pipeline die native Freigabe erneut entfernen. Kein automatischer
 Merge oder Web-Deploy wurde ausgelöst.
+
+
+### CORS im gemeinsamen Quellstand · 16.11.2026
+
+[Integrations-PR #54](https://github.com/hhGrotDev95/Realm/pull/54) enthält die
+native Origin `capacitor://localhost` direkt in `worker/wrangler.toml` neben
+der Web-Staging-Origin. Die API-Suite prüft erlaubte und fremde Origins.
+Damit stammt die Freigabe nach der regulären Übernahme aus derselben
+versionierten Konfiguration wie der übrige Worker. Die oben beschriebenen
+separaten Settings-PATCHes und Driftbefunde bleiben historische Belege.
+
+Die bestehende Staging-Pipeline folgt weiterhin nur erfolgreicher main-Push-CI.
+Ein PR- oder Browser-Test allein ist kein Deploymentnachweis; den tatsächlich
+veröffentlichten Commit immer über `/build-info.json` abgleichen. Für den
+Gesamtstand gelten der jüngste Fortschrittseintrag und der Winterplan.

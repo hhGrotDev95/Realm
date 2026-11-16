@@ -1,6 +1,6 @@
 # Realm · iPhone-Integration
 
-Stand: 13.11.2026. Realm ist die gewählte Produktbasis: dieselbe React-Oberfläche,
+Stand: 16.11.2026. Realm ist die gewählte Produktbasis: dieselbe React-Oberfläche,
 dieselben Funktionen und derselbe Cloudflare-Worker mit D1. Die iPhone-App
 bündelt diese Oberfläche mit Capacitor. Das separate V2 bleibt pausiert und
 wurde für diese Integration weder geändert noch gebaut.
@@ -394,3 +394,21 @@ daraus wurden weder Absturzursache noch durchgehende Prozesslaufzeit abgeleitet.
 Eine vollständige Library-Kopie wurde von der automatischen Freigabeprüfung
 abgelehnt und nicht ausgeführt. Der Messwertabruf nutzt ausschließlich den
 eigenen Diagnoseschlüssel, keine Umgehung über andere App-Speicherpfade.
+
+
+## Gemeinsamer Quellstand · 16.11.2026
+
+[PR #54](https://github.com/hhGrotDev95/Realm/pull/54) verbindet die lokale
+Realm-Hülle und den Build-4-Tastaturfix mit PR #53. Die native CORS-Allowlist
+ist dabei im Worker-Staging-Quellstand enthalten. Der integrierte Stand bestand
+Typprüfungen, Unit-/Native-Guards, 18 Chrome-Smoke-Fälle, fünf Chatfälle,
+17 Barrierefreiheitsansichten, API/Migrationen sowie den vollständigen
+29-Szenarien-Live-Nachlauf. Ein erster Live-Versuch scheiterte am bestehenden
+Zwei-Tab-Offlinetest; dieser bestand beim Nachlauf, ohne Produktänderung dafür.
+
+`ios:sync` und ein unsignierter generischer Xcode-Debug-Build bestanden;
+53 Webdateien waren bytegleich in Buildausgabe, Quellbundle und App-Bundle.
+Dieser Build wurde nicht installiert. Build 4 vom 13.11. bleibt die letzte
+Geräteabnahme im oben beschriebenen Teilumfang. A2b/B4 bleiben offen;
+als Nächstes folgt die sichere native Sitzung/Keychain. Die laufenden und
+abgeschlossenen Remote-Prüfungen sind am Integrations-PR einsehbar.
