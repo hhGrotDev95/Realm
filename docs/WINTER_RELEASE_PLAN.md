@@ -23,10 +23,14 @@ Wiederherstellung desselben Profils erhält sie. Unit- und verzögerte Live-Fäl
 sichern diese Grenzen ab. Dies ist keine sichere native Tokenablage:
 **Nächster A2b-Schritt bleibt Sitzung/Keychain samt Logout und Neustart.**
 
+## A2b-Sitzung · 16. November 2026
+
+Die sichere native Ablage und Sitzungswechsel sind implementiert. Build 5 ist auf dem iPhone installiert; Keychain-Lesezugriff und fehlende Zugangsdaten im Webspeicher technisch beobachtet, bestehendes Profil/Crew/Favoriten laut Hannes erhalten. Die restliche Geräte-Sitzungsstrecke ist noch in Prüfung. Technischer Vertrag und Grenzen: [NATIVE_SESSION.md](NATIVE_SESSION.md); tatsächliche Checks/Veröffentlichung im jüngsten Fortschrittsprotokoll. A2b/B4 werden dadurch nicht vollständig abgehakt.
+
 ## Aktuelle Einordnung · 16. November 2026
 
 Der Zeitplan ist **gefährdet**. Hannes bestätigt am 16.11., dass die bezahlte
-Apple-Developer-Mitgliedschaft noch nicht eingerichtet ist. A1, A2b und A3 sind weiterhin offen; damit ist der
+Apple-Developer-Mitgliedschaft nun eingerichtet ist. App Store Connect verlangt laut seiner Rückmeldung noch die Bestätigung aktualisierter Bedingungen durch den Kontoinhaber. Nutzbarkeit, Team-/Store-Identität und öffentliche Entwicklerangabe sind noch nicht technisch belegt. A1, A2b und A3 sind weiterhin offen; damit ist der
 6.-November-Prüfpunkt nicht vollständig erfüllt. Der interne, signierte und
 installierte Build 4 existiert seit dem 13. November. Vollständige Zielgeräte-
 prüfungen, native Integration und die TestFlight-Beta am 27. November sind noch

@@ -9,6 +9,7 @@ import '@fontsource-variable/bricolage-grotesque'
 import './styles.css'
 import { t } from './i18n'
 import { isNativeApp } from './platform'
+import { bootSecureSession } from './secureSession'
 
 // The organizer console lives at /#admin and is loaded only there.
 const Admin = lazy(() => import('./admin/Admin'))
@@ -43,7 +44,7 @@ if (isAdmin()) {
     </StrictMode>,
   )
 } else {
-  bootFestival().then((boot) => {
+  bootSecureSession().then(() => bootFestival()).then((boot) => {
     if (!boot.ok) return root.render(<BootError error={boot.error} />)
     // newer festival data arrived after rendering the cached copy: let the app re-read it
     boot.fresh.then((changed) => changed && window.dispatchEvent(new Event('realm:festival-updated')))
@@ -56,7 +57,13 @@ if (isAdmin()) {
         </LazyMotion>
       </StrictMode>,
     )
-  })
+  }).catch(() => root.render(
+    <div className="stagewrap"><div className="card" role="alert">
+      <h1>{t('Sitzung nicht verfügbar')}</h1>
+      <p>{t('Entsperre dein iPhone und versuche es erneut. Deine gespeicherten Daten werden nicht zurückgesetzt.')}</p>
+      <button className="btn primary" onClick={() => location.reload()}>{t('Erneut versuchen')}</button>
+    </div></div>,
+  ))
 }
 window.addEventListener('hashchange', () => location.reload())
 

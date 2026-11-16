@@ -964,8 +964,12 @@ function Identity({ reason }: { reason: string }) {
 }
 
 function Profile() {
-  const { guest, phase, setPhase, openSheet, reset, closeSheet, setTab, plan, online, deleteProfile, session, set, clockMode } = useApp()
+  const { guest, phase, setPhase, openSheet, reset, closeSheet, setTab, plan, online, deleteProfile, session, set, clockMode, logout, signedOut, authBusy, outbox, deletionUncertain, clearLocalProfileData } = useApp()
   const [confirmReset, setConfirmReset] = useState(false)
+  const [confirmDeviceClear, setConfirmDeviceClear] = useState(false)
+  const [confirmLogout, setConfirmLogout] = useState(false)
+  const [recoveryCodeSaved, setRecoveryCodeSaved] = useState(false)
+  const hasPendingWrites = outbox.length > 0
   return (
     <>
       <ModerationInbox />
@@ -975,7 +979,9 @@ function Profile() {
           <div style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: 22 }}>{guest.nickname ?? t('Gast')}</div>
           <div className="tiny faint">
             {/* where the profile lives and whether it can be restored are two different things (audit F13) */}
-            {!online
+            {deletionUncertain
+              ? t('Serverprofilstatus unklar')
+              : !online
               ? t('Demo · nur auf diesem Gerät gespeichert')
               : !session
                 ? t('Nur auf diesem Gerät gespeichert')
@@ -988,6 +994,14 @@ function Profile() {
           {guest.nickname ? t('Bearbeiten') : t('Name wählen')}
         </button>
       </div>
+      {signedOut && (
+        <div className="alert warning" style={{ marginBottom: 18 }}>
+          <span className="grow">{t('Abgemeldet')}</span>
+          <button type="button" className="btn secondary sm" onClick={() => openSheet({ kind: 'restore' })}>
+            <KeyRound size={16} /> {t('Mit Recovery-Code wiederherstellen')}
+          </button>
+        </div>
+      )}
       {!guest.secured && (
         <button className="tile" style={{ marginBottom: 22 }} onClick={() => openSheet({ kind: 'secure' })}>
           <span className="tile-icon" style={{ background: 'var(--brand-soft)', color: 'var(--brand)' }}>
@@ -1064,6 +1078,11 @@ function Profile() {
           <span className="grow small">{t('Offline verfügbar: Timetable, Karte, {n} geplante Acts', { n: plan.length })}</span>
         </div>
         {online && <DeviceStorage />}
+        {deletionUncertain && (
+          <div className="alert warning" style={{ margin: '8px 0' }}>
+            <span className="small">{t('Die Serverlöschung ist nicht vollständig bestätigt. Du kannst sie erneut versuchen oder nur die Daten auf diesem Gerät entfernen. Dadurch wird keine Löschung auf dem Server bestätigt.')}</span>
+          </div>
+        )}
         <div className="list-item small faint">
           {online ? (session ? t('ID {id}… · pseudonym · verbunden', { id: session.id.slice(0, 10) }) : t('Noch kein Profil auf dem Server – entsteht beim ersten sozialen Feature')) : t('ID {id}… · pseudonym · Demo-Modus', { id: guest.id.slice(0, 10) })}
         </div>
@@ -1074,18 +1093,61 @@ function Profile() {
         )}
         {confirmReset ? (
           <div className="list-item">
-            <span className="grow small">{online ? t('Profil und alle Daten auf dem Server endgültig löschen?') : t('Alle lokalen Daten löschen?')}</span>
-            <button className="btn danger sm" onClick={online ? deleteProfile : reset}>
-              {t('Löschen')}
+            <span className="grow small">{deletionUncertain ? t('Serverlöschung erneut versuchen?') : online ? t('Profil und alle Daten auf dem Server endgültig löschen?') : t('Alle lokalen Daten löschen?')}</span>
+            <button className="btn danger sm" disabled={authBusy} onClick={online ? deleteProfile : reset}>
+              {deletionUncertain ? t('Erneut versuchen') : t('Löschen')}
             </button>
-            <button className="btn ghost sm" onClick={() => setConfirmReset(false)}>
+            <button className="btn ghost sm" disabled={authBusy} onClick={() => setConfirmReset(false)}>
               {t('Abbrechen')}
             </button>
           </div>
         ) : (
-          <button className="list-item small" style={{ color: 'var(--crit)' }} onClick={() => setConfirmReset(true)}>
+          <button className="list-item small" disabled={authBusy} style={{ color: 'var(--crit)' }} onClick={() => setConfirmReset(true)}>
             <RotateCcw size={18} /> {online ? t('Profil löschen') : t('Demo zurücksetzen')}
           </button>
+        )}
+        {deletionUncertain && (
+          confirmDeviceClear ? (
+            <div className="list-item" style={{ flexWrap: 'wrap', rowGap: 8 }}>
+              <span className="small" style={{ flexBasis: '100%' }}>{t('Lokale Profile, Pläne und wartende Änderungen werden entfernt. Für möglicherweise verbliebene Serverdaten brauchst du deinen Recovery-Code.')}</span>
+              <button type="button" className="btn danger sm" disabled={authBusy} onClick={async () => { await clearLocalProfileData(); setConfirmDeviceClear(false) }}>
+                {t('Gerätedaten endgültig entfernen')}
+              </button>
+              <button type="button" className="btn ghost sm" disabled={authBusy} onClick={() => setConfirmDeviceClear(false)}>{t('Abbrechen')}</button>
+            </div>
+          ) : (
+            <button type="button" className="list-item small" disabled={authBusy} style={{ color: 'var(--crit)' }} onClick={() => setConfirmDeviceClear(true)}>
+              {t('Nur Gerätedaten entfernen')}
+            </button>
+          )
+        )}
+        {online && session && guest.secured && (
+          confirmLogout ? (
+            <div className="list-item" style={{ flexWrap: 'wrap', rowGap: 8 }}>
+              <span className="small" style={{ flexBasis: '100%' }}>{t('Sichere deinen Recovery-Code, bevor du dich abmeldest. Deine lokalen Daten auf diesem Gerät bleiben erhalten. Die Abmeldung widerruft den gemeinsamen Server-Token auch auf anderen Geräten.')}</span>
+              <label className="row small" style={{ flexBasis: '100%', gap: 8, alignItems: 'flex-start' }}>
+                <input type="checkbox" checked={recoveryCodeSaved} onChange={(e) => setRecoveryCodeSaved(e.target.checked)} style={{ width: 18, height: 18, marginTop: 1, flex: 'none' }} />
+                <span>{t('Ich habe meinen Recovery-Code sicher gespeichert.')}</span>
+              </label>
+              {hasPendingWrites && <span className="small muted" style={{ flexBasis: '100%' }}>{t('Abmelden ist nicht möglich, solange Änderungen noch gesendet werden.')}</span>}
+              <button
+                type="button"
+                className="btn danger sm"
+                disabled={authBusy || hasPendingWrites || !recoveryCodeSaved}
+                onClick={async () => {
+                  if (await logout()) setConfirmLogout(false)
+                }}
+              >
+                {authBusy ? t('Wird abgemeldet …') : t('Abmelden')}
+              </button>
+              <button type="button" className="btn ghost sm" disabled={authBusy} onClick={() => { setConfirmLogout(false); setRecoveryCodeSaved(false) }}>{t('Abbrechen')}</button>
+            </div>
+          ) : (
+            <button type="button" className="list-item small" disabled={authBusy || hasPendingWrites} style={{ color: 'var(--crit)' }} onClick={() => setConfirmLogout(true)}>
+              <KeyRound size={18} /> {t('Abmelden')}
+              {hasPendingWrites && <span className="small muted">{t('Änderungen warten auf Übertragung')}</span>}
+            </button>
+          )
         )}
         <div className="row small" style={{ gap: 16, justifyContent: 'center', padding: '10px 0 2px' }}>
           <button type="button" className="link-btn" onClick={() => openSheet({ kind: 'legal', doc: 'imprint' })}>
@@ -1189,7 +1251,7 @@ function FestivalPicker() {
 }
 
 function Secure() {
-  const { secure, guest, toast, closeSheet, online, requireIdentity } = useApp()
+  const { secure, guest, toast, closeSheet, online, requireIdentity, authBusy } = useApp()
   const [code, setCode] = useState<string | undefined>(guest.recoveryCode)
   const [busy, setBusy] = useState(false)
   const makeCode = () =>
@@ -1230,13 +1292,13 @@ function Secure() {
         </>
       ) : online ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button className="btn primary block" disabled={busy} onClick={makeCode}>
+          <button className="btn primary block" disabled={busy || authBusy} onClick={makeCode}>
             <KeyRound size={17} /> {busy ? t('Wird erstellt …') : t('Recovery-Code erstellen')}
           </button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button className="btn primary block" onClick={makeCode}>
+          <button className="btn primary block" disabled={authBusy} onClick={makeCode}>
             <KeyRound size={17} /> {t('Recovery-Code erstellen')}
           </button>
           <p className="tiny faint" style={{ textAlign: 'center' }}>
@@ -1249,7 +1311,7 @@ function Secure() {
 }
 
 function Restore() {
-  const { restore, closeSheet } = useApp()
+  const { restore, closeSheet, authBusy, outbox } = useApp()
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   return (
@@ -1257,7 +1319,7 @@ function Restore() {
       <div className="sheet-head">
         <div className="grow">
           <h2>{t('Profil wiederherstellen')}</h2>
-          <div className="small muted">{t('Gib den Recovery-Code ein, den du beim Sichern erhalten hast. Dein aktuelles Gastprofil auf diesem Gerät wird ersetzt.')}</div>
+          <div className="small muted">{t('Gib den Recovery-Code ein, den du beim Sichern erhalten hast. Dein aktuelles Gastprofil und die dazugehörigen lokalen Profildaten werden ersetzt.')}</div>
         </div>
       </div>
       <form
@@ -1269,7 +1331,8 @@ function Restore() {
         }}
       >
         <input className="field code" style={{ height: 'auto' }} placeholder="XXXX-XXXX-XXXX-XXXX" value={code} onChange={(e) => setCode(e.target.value)} autoCapitalize="characters" autoComplete="one-time-code" />
-        <button className="btn primary block" style={{ marginTop: 14 }} disabled={busy || code.replace(/[^a-z0-9]/gi, '').length < 16}>
+        {outbox.length > 0 && <p className="small muted">{t('Mit wartenden Änderungen kannst du nur dasselbe Profil wiederherstellen.')}</p>}
+        <button className="btn primary block" style={{ marginTop: 14 }} disabled={busy || authBusy || code.replace(/[^a-z0-9]/gi, '').length < 16}>
           {busy ? t('Wird geprüft …') : t('Wiederherstellen')}
         </button>
       </form>

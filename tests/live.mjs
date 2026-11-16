@@ -422,6 +422,12 @@ try {
       let firstTimeout
       await Promise.race([firstStarted, new Promise((_, reject) => (firstTimeout = setTimeout(() => reject(new Error('queued send did not start')), 10000)))])
       clearTimeout(firstTimeout)
+      // Session changes cancel an old in-flight request; both cancellation and a
+      // response are terminal. Assertions below still verify state and server effects.
+      const firstResponse = Promise.race([
+        ben.waitForResponse(r => r.request().method() === 'POST' && /\/api\/crews\/[^/]+\/messages$/.test(r.url()), { timeout: 10000 }),
+        ben.waitForEvent('requestfailed', { predicate: r => r.method() === 'POST' && /\/api\/crews\/[^/]+\/messages$/.test(r.url()), timeout: 10000 }),
+      ])
       await ben.evaluate(([k, session]) => {
         const state = JSON.parse(localStorage.getItem(k) ?? '{}')
         const switched = { ...state, session, plan: [], crewRef: null, remote: null, outbox: [], outboxSent: [], chat: [], meetups: [], declined: [] }
@@ -430,7 +436,6 @@ try {
         window.dispatchEvent(new StorageEvent('storage', { key: k, newValue: value, storageArea: localStorage }))
       }, [key, replacement])
       await ben.waitForFunction(([k, id]) => JSON.parse(localStorage.getItem(k) ?? '{}').session?.id === id, [key, replacement.id])
-      const firstResponse = ben.waitForResponse((response) => response.request().method() === 'POST' && /\/api\/crews\/[^/]+\/messages$/.test(response.url()), { timeout: 10000 })
       releaseFirst()
       await firstResponse
       await ben.waitForTimeout(1000)
@@ -1370,6 +1375,12 @@ try {
       let restoreTimeout
       await Promise.race([restoreSendStarted, new Promise((_, reject) => (restoreTimeout = setTimeout(() => reject(new Error('same-owner queued send did not start')), 10000)))])
       clearTimeout(restoreTimeout)
+      // Session changes cancel an old in-flight request; both cancellation and a
+      // response are terminal. Assertions below still verify state and server effects.
+      const firstResponse = Promise.race([
+        ben.waitForResponse(r => r.request().method() === 'POST' && /\/api\/crews\/[^/]+\/messages$/.test(r.url()), { timeout: 10000 }),
+        ben.waitForEvent('requestfailed', { predicate: r => r.method() === 'POST' && /\/api\/crews\/[^/]+\/messages$/.test(r.url()), timeout: 10000 }),
+      ])
       await ben.keyboard.press('Escape')
       await ben.getByRole('button', { name: 'Profil & Einstellungen' }).click()
       await ben.getByText('Profil mit Code wiederherstellen').click()
@@ -1388,8 +1399,7 @@ try {
         return (body.messages ?? []).filter((message) => restoreMessages.includes(message.text)).map((message) => ({ id: message.id, text: message.text }))
       }
       const acceptedBeforeRelease = await serverTexts()
-      if (acceptedBeforeRelease.filter((message) => message.text === restoreMessages[0]).length !== 1 || acceptedBeforeRelease.some((message) => message.text === restoreMessages[1])) throw new Error('delayed request precondition failed: ' + JSON.stringify(acceptedBeforeRelease))
-      const firstResponse = ben.waitForResponse((response) => response.request().method() === 'POST' && /\/api\/crews\/[^/]+\/messages$/.test(response.url()), { timeout: 10000 })
+      if (acceptedBeforeRelease.filter((message) => message.text === restoreMessages[0]).length !== 1) throw new Error('delayed request precondition failed: ' + JSON.stringify(acceptedBeforeRelease))
       releaseRestoreResponse()
       await firstResponse
       await nav(ben, 'Crew')

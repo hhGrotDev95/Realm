@@ -293,6 +293,24 @@ try {
     assert.equal(me.crews[0].id, crew.id)
   })
 
+  await test('guest logout requires recovery and preserves the recoverable profile', async () => {
+    assert.equal((await api('POST', '/api/me/logout', ben.token)).status, 409)
+    assert.equal((await api('GET', '/api/me', ben.token)).status, 200)
+    const { code } = (await api('POST', '/api/me/recovery', lea.token)).data
+    const before = (await api('GET', '/api/me', lea.token)).data
+    assert.equal((await api('POST', '/api/restore', null, { code, expectedId: ben.id })).status, 409)
+    assert.equal((await api('GET', '/api/me', lea.token)).status, 200)
+    assert.equal((await api('POST', '/api/me/logout', lea.token)).status, 204)
+    assert.equal((await api('GET', '/api/me', lea.token)).status, 401)
+    const restored = await api('POST', '/api/restore', null, { code, expectedId: lea.id })
+    assert.equal(restored.status, 200)
+    assert.equal(restored.data.id, lea.id)
+    lea.token = restored.data.token
+    const after = (await api('GET', '/api/me', lea.token)).data
+    assert.deepEqual(after.crews, before.crews)
+    assert.deepEqual(after.plan, before.plan)
+  })
+
   await test('deleting the profile removes the guest and their data', async () => {
     assert.equal((await api('DELETE', '/api/me', ben.token)).status, 204)
     assert.equal((await api('GET', '/api/me', ben.token)).status, 401)

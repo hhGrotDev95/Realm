@@ -1,9 +1,11 @@
 import type { FlagReason } from './api'
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { deleteProfiles, DELETION_KEY, DELETION_PENDING_KEY, hasUncertainDeletion } from './profileDeletion'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from 'react'
 import { mergeConfirmedChat, mergeOutbox } from './outboxMerge'
 import { api, ApiError, execute, online, opId, privacyKey, retryable, setToken, type Announcement, type CrewState, type OutboxOp, type RemoteReport, type Session } from './api'
 import { lang, t } from './i18n'
-import { publicAppUrl } from './platform'
+import { isNativeApp, publicAppUrl } from './platform'
+import { clearSecureSessions, commitSession, hydrateSession, nativeSessionCredentials, serializeSession } from './secureSession'
 import { ageSince } from './aging'
 import { pollDelay, POLL_ACTIVE_MS } from './sync'
 import { reminderPlan } from './reminders'
@@ -56,6 +58,8 @@ interface Persisted {
   planNotices: PlanNotice[]
   // backend (only used when VITE_API_URL is set)
   session: Pick<Session, 'id' | 'token'> | null
+  signedOut: boolean
+  sessionRevision: string
   /** `pending`: the join request still waits for the owner (audit F05) */
   crewRef: { id: string; name: string; code: string; pending?: boolean } | null
   remote: { me: string; owner?: string; approveJoins?: boolean; members: CrewState['members'] } | null
@@ -112,6 +116,8 @@ function initial(): Persisted {
     dismissed: [],
     planNotices: [],
     session: null,
+    signedOut: false,
+    sessionRevision: '',
     crewRef: null,
     remote: null,
     remoteReports: [],
@@ -138,8 +144,9 @@ function load(): Persisted {
   let state = fresh()
   try {
     // the single-festival version stored everything under one key: adopt it for the default festival
-    const raw = localStorage.getItem(storageKey()) ?? (online && FESTIVAL.slug === DEFAULT_FESTIVAL ? localStorage.getItem(LEGACY_KEY) : null)
-    if (raw) state = fromStorage(raw, state)
+    const key = localStorage.getItem(storageKey()) !== null ? storageKey() : online && FESTIVAL.slug === DEFAULT_FESTIVAL ? LEGACY_KEY : storageKey()
+    const raw = localStorage.getItem(key)
+    if (raw) state = hydrateSession(key, fromStorage(raw, state))
   } catch {}
   // invite links: /?join=ABCD-EFGH
   const join = new URLSearchParams(location.search).get('join')
@@ -171,15 +178,6 @@ const storage = (): Storage | null => {
 }
 /** the state without what the server sends again anyway: older chat (unsent messages stay) and community reports */
 const slimmed = (s: Persisted): Persisted => ({ ...s, chat: s.chat.filter((m, i) => m.pending || i >= s.chat.length - 50), remoteReports: [], reportsFetchedAt: 0 })
-
-/** the guest session stored in one festival's local state, if any */
-function safeSession(key: string): string | null {
-  try {
-    return (JSON.parse(localStorage.getItem(key) ?? 'null') as Persisted | null)?.session?.token ?? null
-  } catch {
-    return null
-  }
-}
 
 const MAX_BACKOFF_MS = 120_000
 
@@ -265,6 +263,10 @@ interface Ctx extends Persisted {
   leaveCrew: () => Promise<void>
   restore: (code: string) => Promise<boolean>
   deleteProfile: () => Promise<void>
+  logout: () => Promise<boolean>
+  authBusy: boolean
+  deletionUncertain: boolean
+  clearLocalProfileData: () => Promise<void>
   inviteLink: () => string | null
   netOnline: boolean
   deleteMessage: (id: string) => void
@@ -279,7 +281,34 @@ const C = createContext<Ctx>(null!)
 export const useApp = () => useContext(C)
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [s, setS] = useState<Persisted>(load)
+  const [s, setState] = useState<Persisted>(load)
+  const [deletionUncertain, setDeletionUncertain] = useState(() => { try { return hasUncertainDeletion(localStorage) } catch { return true } })
+  const authLock = useRef(false)
+  const authEpoch = useRef(0)
+  // Ordinary effects cannot mutate the state while its identity is being committed.
+  const setS = (update: SetStateAction<Persisted>) => {
+    const epoch = authEpoch.current
+    if (authLock.current) return
+    setState(p => authLock.current || authEpoch.current !== epoch ? p : typeof update === 'function' ? update(p) : update)
+  }
+  const [authBusy, setAuthBusy] = useState(false)
+  const [sessionFailure, setSessionFailure] = useState(false)
+  const failedSession = useRef(false)
+  const beginAuth = () => {
+    if (authLock.current) throw new Error(t('Sitzungswechsel läuft bereits'))
+    authLock.current = true
+    authEpoch.current++
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    setAuthBusy(true)
+  }
+  const endAuth = () => { authLock.current = false; setAuthBusy(false) }
+  const persistIdentity = async (next: Persisted) => {
+    try { await commitSession(storageKey(), next) }
+    catch (e) {
+      if (isNativeApp) { failedSession.current = true; setToken(null); setSessionFailure(true) }
+      throw e
+    }
+  }
   const [tab, setTabRaw] = useState<Tab>('home')
   const [stack, setStack] = useState<SheetState[]>([])
   const [toastMsg, setToast] = useState<Ctx['toastMsg']>(null)
@@ -312,23 +341,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const written = useRef<string | null>(null)
   const saveWarned = useRef(false)
   useEffect(() => {
-    const value = JSON.stringify(s)
+    if (authLock.current || sessionFailure) return
+    const value = serializeSession(s)
     if (value === written.current) return
     written.current = value
     const ls = storage()
-    const res = ls ? save(ls, storageKey(), value, { evictable: () => otherBundleKeys(ls, FESTIVAL.slug), slim: () => JSON.stringify(slimmed(s)) }) : 'failed'
+    const res = ls ? save(ls, storageKey(), value, { evictable: () => otherBundleKeys(ls, FESTIVAL.slug), slim: () => serializeSession(slimmed(s)) }) : 'failed'
     if (res !== 'failed') saveWarned.current = false
     else if (!saveWarned.current) {
       saveWarned.current = true
       toast(t('Speicher des Geräts voll oder gesperrt – Änderungen gehen beim Schließen verloren'))
     }
-  }, [s, toast])
+  }, [s, toast, authBusy, sessionFailure])
   /** writes queued in this tab, and whether the other tab's saves have shown them yet (src/outboxMerge.ts) */
   const queuedHere = useRef(new Map<string, boolean>())
   // a second tab of the app saves its own changes: adopt them, so neither tab overwrites the other's plan
   useEffect(() => {
     const h = (e: StorageEvent) => {
-      if (e.key !== storageKey() || !e.newValue || e.storageArea !== storage()) return
+      if (isNativeApp || authLock.current || e.key !== storageKey() || !e.newValue || e.storageArea !== storage()) return
       try {
         const adopted = fromStorage(e.newValue, fresh())
         const current = sRef.current
@@ -408,10 +438,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /** One sync round. Returns false when the network or server failed (caller backs off). */
   const refresh = useCallback(async (): Promise<boolean> => {
-    if (!online || !sRef.current.session) return true
+    if (!online || authLock.current || !sRef.current.session) return true
     const session = sRef.current.session
     const crewId = sRef.current.crewRef?.id
-    const sameContext = () => sRef.current.session?.id === session.id && sRef.current.session?.token === session.token && sRef.current.crewRef?.id === crewId
+    const sameContext = () => !authLock.current && sRef.current.session?.id === session.id && sRef.current.session?.token === session.token && sRef.current.crewRef?.id === crewId
     if (cursor.current.crewId !== (crewId ?? '')) cursor.current = { crewId: crewId ?? '', at: 0, polls: 0 }
     const c = cursor.current
     const incremental = c.at > 0 && c.polls % 15 !== 0
@@ -432,7 +462,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true
     } catch (e) {
       if (!sameContext()) return true
-      if (e instanceof ApiError && e.status === 401) setS((p) => ({ ...p, session: null, crewRef: null, remote: null }))
+      if (e instanceof ApiError && e.status === 401) await expireSession(session.token)
       if (e instanceof ApiError && e.status === 404 && crewId) {
         setS((p) => ({ ...p, crewRef: null, remote: null, chat: [], meetups: [], declined: [] }))
         toast(t('Du bist nicht mehr Mitglied dieser Crew'))
@@ -451,9 +481,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /** Sends queued writes in order; stops at the first one that should be retried later. */
   const flush = useCallback(async () => {
-    if (!online || flushing.current || !sRef.current.session) return
+    if (!online || authLock.current || flushing.current || !sRef.current.session) return
     const session = sRef.current.session
-    const sameSession = () => sRef.current.session?.id === session.id && sRef.current.session?.token === session.token
+    const sameSession = () => !authLock.current && sRef.current.session?.id === session.id && sRef.current.session?.token === session.token
     flushing.current = true
     let sent = 0
     try {
@@ -467,6 +497,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (msg) toast(msg)
         } catch (e) {
           if (!sameSession()) break
+          if (e instanceof ApiError && e.status === 401) { await expireSession(session.token); break }
           if (retryable(e)) break
           sent++
           toast(e instanceof ApiError ? t('Nicht gesendet: {error}', { error: e.message }) : t('Nicht gesendet'))
@@ -497,15 +528,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [flush])
 
-  // verify the session once and pick up crews joined on another device
+  // A late response must never clear or decorate a newer profile/token.
   useEffect(() => {
-    if (!online || !s.session) return
-    api
-      .me()
-      .then((me) => setS((p) => ({ ...p, crewRef: p.crewRef ?? me.crews[0] ?? null, guest: { ...p.guest, nickname: me.nickname, color: me.color, secured: me.secured ? p.guest.secured ?? 'code' : null } })))
-      .catch((e) => e instanceof ApiError && e.status === 401 && setS((p) => ({ ...p, session: null, crewRef: null, remote: null })))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [s.session?.id])
+    if (!online || !s.session || authBusy) return
+    const token = s.session.token
+    api.me(token).then(me => {
+      if (authLock.current || sRef.current.session?.token !== token) return
+      setS(p => p.session?.token !== token ? p : ({ ...p, crewRef: p.crewRef ?? me.crews[0] ?? null, guest: { ...p.guest, nickname: me.nickname, color: me.color, secured: me.secured ? p.guest.secured ?? 'code' : null } }))
+    }).catch(e => { if (e instanceof ApiError && e.status === 401) void expireSession(token) })
+  }, [s.session?.token, authBusy])
 
   // polling while visible: every ~8 s while in use, rarer when untouched (audit F17), backing off
   // exponentially (up to 2 min) while requests fail; hidden tabs do not poll at all
@@ -593,19 +624,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // plan sync (debounced); a failed upload is retried with backoff and again when the network
   // returns – otherwise the crew and a later restore would see a stale plan until the next edit
   useEffect(() => {
-    if (!online || !s.session || !netOnline) return
+    if (!online || !s.session || !netOnline || authBusy) return
+    const token = s.session.token
+    let stopped = false
     const plan = s.plan
     let delay = 15_000
     let t = 0
-    const send = () =>
+    const send = () => {
+      if (stopped || authLock.current || sRef.current.session?.token !== token) return
       api.setPlan(plan).catch((e) => {
-        if (!retryable(e)) return
+        if (stopped || authLock.current || sRef.current.session?.token !== token || !retryable(e)) return
         t = window.setTimeout(send, delay)
         delay = Math.min(delay * 2, 120_000)
       })
+    }
     t = window.setTimeout(send, 800)
-    return () => window.clearTimeout(t)
-  }, [s.plan, s.session?.id, netOnline])
+    return () => { stopped = true; window.clearTimeout(t) }
+  }, [s.plan, s.session?.token, netOnline, authBusy])
 
   // planned acts the line-up no longer has (the organizer removed them or re-imported the
   // programme): checked against a copy fetched right now – an older cache, e.g. in a second tab,
@@ -643,6 +678,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    */
   const enqueuePrivacy = useCallback(
     (op: OutboxOp) => {
+      if (authLock.current || !sRef.current.session) return
       const key = privacyKey(op)
       const next = (list: OutboxOp[]) => [op, ...list.filter((o) => privacyKey(o) !== key)]
       setS((p) => ({ ...p, outbox: next(p.outbox) }))
@@ -657,7 +693,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // coarse location sync: only the nearest stage area, only while sharing; while sharing the
   // app re-confirms every 30 min, because the server ends a share 2 h after the last confirmation
   useEffect(() => {
-    if (!online || !s.session || !s.crewRef) return
+    if (!online || authBusy || !s.session || !s.crewRef) return
     const crewId = s.crewRef.id
     const was = sharedBefore.current
     sharedBefore.current = s.shareLocation
@@ -668,7 +704,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!s.shareLocation) return
     const timer = window.setInterval(send, 30 * 60_000)
     return () => window.clearInterval(timer)
-  }, [s.shareLocation, s.crewRef?.id, s.session?.id, s.myPlace])
+  }, [s.shareLocation, s.crewRef?.id, s.session?.token, s.myPlace, authBusy])
 
   // a switched-off module ends the local share as well (the server already ended it)
   useEffect(() => {
@@ -678,17 +714,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // leaving the step challenge deletes the synced totals – also when the module is off by now
   const stepsBefore = useRef(s.stepsOptIn)
   useEffect(() => {
+    if (authBusy) return
     const was = stepsBefore.current
     stepsBefore.current = s.stepsOptIn
     if (online && s.session && was && !s.stepsOptIn) enqueuePrivacy({ id: opId('st'), kind: 'deleteSteps' })
-  }, [s.stepsOptIn, s.session?.id])
+  }, [s.stepsOptIn, s.session?.token, authBusy])
 
+  const expireSession = async (token: string) => {
+    if (authLock.current || sRef.current.session?.token !== token) return
+    beginAuth()
+    setToken(null)
+    try {
+      const next = { ...sRef.current, session: null, signedOut: true, remote: null }
+      await persistIdentity(next)
+      sRef.current = next
+      setState(next)
+    } catch { setSessionFailure(true) }
+    finally { endAuth() }
+  }
+
+  const creatingSession = useRef<Promise<void> | null>(null)
   const ensureSession = useCallback(async (nickname: string | null, color: string) => {
     if (sRef.current.session) return
-    const g = await api.createGuest(nickname, color)
-    setToken(g.token)
-    setS((p) => ({ ...p, session: { id: g.id, token: g.token }, guest: { ...p.guest, id: g.id } }))
-    sRef.current = { ...sRef.current, session: { id: g.id, token: g.token } }
+    if (sRef.current.signedOut) throw new Error(t('Stelle dein Profil mit dem Wiederherstellungscode wieder her'))
+    if (creatingSession.current) return creatingSession.current
+    beginAuth()
+    creatingSession.current = (async () => {
+      try {
+        const g = await api.createGuest(nickname, color)
+        const next = { ...sRef.current, session: { id: g.id, token: g.token }, signedOut: false, guest: { ...sRef.current.guest, id: g.id } }
+        await persistIdentity(next)
+        setToken(g.token)
+        sRef.current = next
+        setState(next)
+      } finally { creatingSession.current = null; endAuth() }
+    })()
+    return creatingSession.current
   }, [])
 
   // opening the sheet that is already on top (a double tap, a deep link handled twice) must not
@@ -710,6 +771,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const msToStart = real ? real.msToStart : DEMO_MS_TO_START
     const set: Ctx['set'] = (k, v) => setS((p) => ({ ...p, [k]: v }))
     const requireIdentity: Ctx['requireIdentity'] = (reason, then) => {
+      if (authLock.current) return
+      if (s.signedOut) { openSheet({ kind: 'restore' }); return }
       if (s.guest.nickname && (!online || s.session)) return then()
       pending.current = then
       setStack((st) => [...st, { kind: 'identity', reason }])
@@ -807,6 +870,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     return {
       ...s,
+      authBusy,
+      deletionUncertain,
       here: hereFor(s.myPlace),
       pendingPrivacy,
       phase,
@@ -893,18 +958,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       },
       restore: async (code) => {
+        if (authLock.current) return false
+        beginAuth()
+        setToken(null)
         try {
-          const g = await api.restore(code)
+          const g = await api.restore(code, sRef.current.outbox.length ? sRef.current.guest.id : undefined)
           // read the restored profile before switching sessions: switching starts the plan upload,
           // which would otherwise overwrite the saved plan with this device's (often empty) one
           // Use this request's token without changing the token of an active outbox flush.
           const me = await api.me(g.token)
           const p = sRef.current
-          const sameOwner = p.session?.id === g.id
+          const sameOwner = p.guest.id === g.id
           const crewRef = (sameOwner && me.crews.find((c) => c.id === p.crewRef?.id)) || me.crews[0] || null
           const sameCrew = sameOwner && p.crewRef?.id === crewRef?.id
           const next = {
-            ...p,
+            ...(sameOwner ? p : fresh()),
+            signedOut: false,
             session: { id: g.id, token: g.token },
             crewRef,
             remote: null,
@@ -913,49 +982,121 @@ export function AppProvider({ children }: { children: ReactNode }) {
             chat: sameCrew ? p.chat : [],
             meetups: sameCrew ? p.meetups : [],
             declined: sameCrew ? p.declined : [],
-            plan: me.plan.length ? me.plan : p.plan,
-            guest: { ...p.guest, id: g.id, nickname: g.nickname, color: g.color, secured: 'code' as const },
+            plan: sameOwner ? p.plan : me.plan,
+            guest: { id: g.id, nickname: g.nickname, color: g.color, secured: 'code' as const, recoveryCode: code.trim().toUpperCase() },
           }
+          await persistIdentity(next)
           if (!sameOwner) {
+            sharedBefore.current = next.shareLocation
+            stepsBefore.current = next.stepsOptIn
             queuedHere.current.clear()
             confirmations.current.clear()
           }
           cursor.current = { crewId: '', at: 0, polls: 0 }
           setToken(g.token)
           sRef.current = next
-          setS(next)
+          setState(next)
           toast(t('Profil wiederhergestellt'))
           return true
         } catch (e) {
-          setToken(sRef.current.session?.token ?? null) // the restore did not complete: keep the current profile
+          if (!failedSession.current) setToken(sRef.current.session?.token ?? null) // the restore did not complete: keep the current profile
           fail(e)
           return false
-        }
+        } finally { endAuth() }
+      },
+      logout: async () => {
+        const p = sRef.current
+        if (authLock.current || !p.session) return false
+        if (!p.guest.secured) { toast(t('Sichere zuerst dein Profil mit einem Wiederherstellungscode')); return false }
+        if (p.outbox.length) { toast(t('Sende zuerst die wartenden Änderungen')); return false }
+        beginAuth()
+        const token = p.session.token
+        setToken(null)
+        try {
+          const next = { ...p, session: null, signedOut: true, remote: null, guest: { ...p.guest, recoveryCode: undefined } }
+          await persistIdentity(next)
+          sRef.current = next
+          setState(next)
+          pending.current = null
+          queuedHere.current.clear()
+          confirmations.current.clear()
+          setStack([])
+          setTabRaw('home')
+          try {
+            await api.logout(token)
+            toast(t('Abgemeldet'))
+          } catch (e) {
+            toast(e instanceof ApiError && e.status === 401 ? t('Abgemeldet') : t('Auf diesem Gerät abgemeldet. Die Serversitzung konnte nicht widerrufen werden; eine Wiederherstellung mit Code ersetzt sie.'))
+          }
+          return true
+        } catch (e) { if (!failedSession.current) setToken(sRef.current.session?.token ?? null); fail(e); return false }
+        finally { endAuth() }
       },
       deleteProfile: async () => {
+        if (authLock.current) return
+        beginAuth()
+        setToken(null)
         try {
           // every local copy of an identity goes: the state of each festival this browser visited, and the
           // server profile behind each session found there (audit F12)
           const keys = Object.keys(localStorage).filter((k) => k === LEGACY_KEY || k.startsWith(LEGACY_KEY + ':'))
-          const tokens = new Set([s.session?.token, ...keys.map((k) => safeSession(k))].filter((x): x is string => !!x))
-          for (const tok of tokens) {
-            await api.deleteMe(tok).catch((e) => {
-              if (!(e instanceof ApiError && e.status === 401)) throw e // already gone is fine
-            })
-          }
+          const profiles = keys.flatMap(k => {
+            const state = JSON.parse(localStorage.getItem(k) ?? '{}') as Partial<Persisted>
+            return state.guest?.id && (state.session || state.signedOut) ? [{ id: state.guest.id, token: state.session?.token }] : []
+          })
+          // Native credentials and the current session override stale legacy aliases by ID.
+          profiles.push(...nativeSessionCredentials())
+          if (sRef.current.session) profiles.push(sRef.current.session)
+          else if (sRef.current.signedOut) profiles.push({ id: sRef.current.guest.id, token: undefined })
+          await deleteProfiles(localStorage, profiles, token => api.deleteMe(token))
+          await clearSecureSessions()
           setToken(null)
           for (const k of keys) localStorage.removeItem(k)
+          localStorage.removeItem(DELETION_KEY)
+          localStorage.removeItem(DELETION_PENDING_KEY)
+          setDeletionUncertain(false)
           const next = fresh()
+          sharedBefore.current = next.shareLocation
+          stepsBefore.current = next.stepsOptIn
           queuedHere.current.clear()
           confirmations.current.clear()
           sRef.current = next
-          setS(next)
+          setState(next)
           setStack([])
           setTabRaw('home')
           toast(t('Profil und alle Daten gelöscht'))
         } catch (e) {
-          fail(e)
-        }
+          setToken(sRef.current.session?.token ?? null)
+          if (e instanceof Error && e.message === 'Restore required before deletion') toast(t('Stelle dein Profil mit dem Wiederherstellungscode wieder her'))
+          else fail(e)
+          try { setDeletionUncertain(hasUncertainDeletion(localStorage)) } catch { setDeletionUncertain(true) }
+        } finally { endAuth() }
+      },
+      clearLocalProfileData: async () => {
+        if (authLock.current || !deletionUncertain) return
+        beginAuth()
+        setToken(null)
+        try {
+          await clearSecureSessions()
+          for (const key of Object.keys(localStorage)) {
+            if (key === LEGACY_KEY || key.startsWith(LEGACY_KEY + ':') || key.startsWith('realm.session.pending:')) localStorage.removeItem(key)
+          }
+          localStorage.removeItem(DELETION_KEY)
+          localStorage.removeItem(DELETION_PENDING_KEY)
+          setDeletionUncertain(false)
+          const next = fresh()
+          sharedBefore.current = next.shareLocation
+          stepsBefore.current = next.stepsOptIn
+          queuedHere.current.clear()
+          confirmations.current.clear()
+          pending.current = null
+          sRef.current = next
+          setState(next)
+          setStack([])
+          setTabRaw('home')
+          toast(t('Gerätedaten entfernt; Serverlöschung bleibt unbestätigt'))
+        } catch { setSessionFailure(true) }
+        finally { endAuth() }
       },
       tab,
       setTab,
@@ -1009,17 +1150,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const fn = pending.current
         pending.current = null
         setStack((st) => st.filter((x) => x?.kind !== 'identity'))
-        if (fn) setTimeout(fn, 280)
+        if (fn) {
+          const token = sRef.current.session?.token
+          setTimeout(() => { if (!authLock.current && !sRef.current.signedOut && sRef.current.session?.token === token) fn() }, 280)
+        }
       },
-      secure: (how) => {
-        if (online && how === 'code')
-          return api.recovery().then(
-            ({ code }) => (setS((p) => ({ ...p, guest: { ...p.guest, secured: 'code', recoveryCode: code } })), code),
-            (e) => (fail(e), undefined),
-          )
-        const code = how === 'code' ? Array.from({ length: 4 }, () => rid().slice(0, 4).toUpperCase()).join('-') : undefined
-        setS((p) => ({ ...p, guest: { ...p.guest, secured: how, recoveryCode: code } }))
-        return code
+      secure: async (how) => {
+        if (authLock.current) return undefined
+        beginAuth()
+        try {
+          const code = online && how === 'code' ? (await api.recovery()).code : how === 'code' ? Array.from({ length: 4 }, () => rid().slice(0, 4).toUpperCase()).join('-') : undefined
+          const next = { ...sRef.current, guest: { ...sRef.current.guest, secured: how, recoveryCode: code } }
+          await persistIdentity(next)
+          sRef.current = next
+          setState(next)
+          return code
+        } catch (e) { fail(e); return undefined }
+        finally { endAuth() }
       },
       requireIdentity,
       addMeetup: (m) => {
@@ -1073,9 +1220,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setTabRaw('home')
       },
     }
-  }, [s, tick, tab, stack, toastMsg, focusPoi, scrollTopSignal, openSheet, closeSheet, setTab, toast, fail, refresh, ensureSession, flush, netOnline])
+  }, [s, tick, tab, stack, toastMsg, focusPoi, scrollTopSignal, openSheet, closeSheet, setTab, toast, fail, refresh, ensureSession, flush, netOnline, authBusy, deletionUncertain])
 
-  return <C.Provider value={value}>{children}</C.Provider>
+  if (sessionFailure) return <div className="stagewrap"><div className="card" role="alert"><h1>{t('Sitzung nicht verfügbar')}</h1><p>{t('Entsperre dein iPhone und versuche es erneut. Deine gespeicherten Daten werden nicht zurückgesetzt.')}</p><button className="btn primary" onClick={() => location.reload()}>{t('Erneut versuchen')}</button></div></div>
+  return <C.Provider value={value}><div style={{ display: 'contents' }} inert={authBusy || undefined}>{children}</div>{authBusy && <div role="status" aria-live="polite" style={{ position: 'fixed', inset: 0, zIndex: 10000, display: 'grid', placeItems: 'center', background: '#0a0a0dee' }}><p>{t('Sitzung wird gesichert …')}</p></div>}</C.Provider>
 }
 
 /** Groups overlapping planned acts per day into conflict clusters. */
