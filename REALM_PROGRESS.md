@@ -786,3 +786,11 @@ veröffentlichte Erstausgabe ist noch als lokale Vorschau gekennzeichnet.
 Hannes bestätigt am 16.11.: Die kostenpflichtige Apple-Developer-Mitgliedschaft
 ist noch nicht eingerichtet. A1 bleibt offen; Personal-Team-Testbuilds sind
 kein TestFlight-/App-Store-Zugang.
+
+
+Der erste Portal-PR-Lauf fand unter Linux bei 320 px und 200-%-Schrift einen
+horizontalen Überlauf. Lokal mit Arial reproduziert: Das nicht umbrechende
+Zuständigkeitslabel „Hannes + Entwicklung“ war zu breit. Es darf jetzt innerhalb
+seiner Spalte umbrechen. Der UI-Test prüft zusätzlich diese Schrift-Fallback-
+Variante und nennt bei Überläufen die betroffenen Elemente. Das ist eine echte
+Darstellungskorrektur; der Test wurde nicht abgeschwächt.

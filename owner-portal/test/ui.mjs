@@ -23,11 +23,12 @@ let browser
 try {
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined })
   const url = `http://127.0.0.1:${server.address().port}`
-  for (const width of [320, 390, 1280]) {
+  for (const { width, font } of [{ width: 320 }, { width: 390 }, { width: 1280 }, { width: 320, font: 'Arial, sans-serif' }]) {
     // CSP is bypassed only to inject axe in this isolated test server.
     const page = await browser.newPage({ viewport: { width, height: 844 }, bypassCSP: true })
     const response = await page.goto(url)
     assert.equal(response.status(), 200)
+    if (font) await page.addStyleTag({ content: `:root { --sans: ${font} }` })
     assert.equal(await page.getByRole('progressbar').getAttribute('value'), String(data.progress.done))
     assert.equal(await page.getByRole('link', { name: 'Adminportal' }).getAttribute('href'),
       'https://realm-staging.heidlhannes95.workers.dev/#admin')
@@ -44,6 +45,8 @@ try {
     const checkOverflow = async () => {
       const dimensions = await page.evaluate(() => ({
         width: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth,
+        overflow: [...document.querySelectorAll('body *')].filter(el => el.getBoundingClientRect().right > innerWidth + 1)
+          .slice(0, 10).map(el => ({ tag: el.tagName, class: el.className, text: el.textContent.slice(0, 80) })),
       }))
       assert.ok(dimensions.scroll <= dimensions.width + 1, `Horizontal overflow at ${width}px: ${JSON.stringify(dimensions)}`)
     }
@@ -52,8 +55,8 @@ try {
       await page.locator('summary').click()
       await page.evaluate(() => window.scrollTo(0, 0))
       await mkdir(process.env.OWNER_SCREENSHOT_DIR, { recursive: true })
-      await page.screenshot({ path: `${process.env.OWNER_SCREENSHOT_DIR}/owner-${width}.png`, fullPage: true })
-      await page.screenshot({ path: `${process.env.OWNER_SCREENSHOT_DIR}/owner-${width}-viewport.png` })
+      await page.screenshot({ path: `${process.env.OWNER_SCREENSHOT_DIR}/owner-${width}${font ? '-fallback' : ''}.png`, fullPage: true })
+      await page.screenshot({ path: `${process.env.OWNER_SCREENSHOT_DIR}/owner-${width}${font ? '-fallback' : ''}-viewport.png` })
     }
     // Enlarge every computed font, including px-based type, to test text-only scaling.
     await page.evaluate(() => {
@@ -63,7 +66,7 @@ try {
     })
     await checkOverflow()
     await page.close()
-    console.log(`Owner portal: ${width}px, expanded checklist, axe and 200% text passed`)
+    console.log(`Owner portal: ${width}px${font ? ' / Arial fallback' : ''}, expanded checklist, axe and 200% text passed`)
   }
 } finally {
   await browser?.close()
