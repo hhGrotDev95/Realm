@@ -29,13 +29,13 @@ export const setFestival = (slug: string) => {
 }
 const festivalHeader = (): Record<string, string> => (festival ? { 'X-Festival': festival } : {})
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(method: string, path: string, body?: unknown, authToken = token): Promise<T> {
   if (!API_URL) throw new ApiError(0, 'Kein Server konfiguriert')
   let res: Response
   try {
     res = await fetch(API_URL + path, {
       method,
-      headers: { ...festivalHeader(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+      headers: { ...festivalHeader(), ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(authToken ? { Authorization: 'Bearer ' + authToken } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       // a hanging request gives up and counts as a network error, so it is retried and never blocks the outbox
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -167,9 +167,9 @@ export const api = {
       return call<Session>('POST', '/api/guests', { nickname, color, challenge: { id: ch.id, nonce: await solve(ch.id, ch.bits) } })
     }
   },
-  me: () => call<{ id: string; nickname: string | null; color: string; secured: boolean; crews: CrewRef[]; plan: string[] }>('GET', '/api/me'),
+  me: (authToken?: string) => call<{ id: string; nickname: string | null; color: string; secured: boolean; crews: CrewRef[]; plan: string[] }>('GET', '/api/me', undefined, authToken),
   updateMe: (nickname: string, color: string) => call('PATCH', '/api/me', { nickname, color }),
-  deleteMe: () => call<void>('DELETE', '/api/me'),
+  deleteMe: (authToken?: string) => call<void>('DELETE', '/api/me', undefined, authToken),
   recovery: () => call<{ code: string }>('POST', '/api/me/recovery'),
   restore: (code: string) => call<Session>('POST', '/api/restore', { code }),
   setPlan: (acts: string[]) => call('PUT', '/api/me/plan', { acts }),
@@ -355,6 +355,8 @@ export const adminApi = (adminToken: string) => {
     snapshots: (slug: string) => req<{ id: string; createdAt: number; note: string }[]>('GET', `/api/admin/festivals/${slug}/snapshots`),
     restoreSnapshot: (slug: string, id: string) => req<{ restored: number }>('POST', `/api/admin/festivals/${slug}/snapshots/${id}/restore`),
     announce: (a: { title: string; body?: string; titleEn?: string; bodyEn?: string; place?: string; poi?: string; severity: Announcement['severity']; validMin?: number; actId?: string }) => req<Announcement>('POST', '/api/admin/announcements', a),
+    /** changes an active announcement; null clears a field, a left-out field stays as it is (validMin counts from now) */
+    updateAnnouncement: (id: string, a: { title?: string; body?: string | null; titleEn?: string | null; bodyEn?: string | null; place?: string | null; poi?: string | null; severity?: Announcement['severity']; validMin?: number | null }) => req<Announcement>('PATCH', `/api/admin/announcements/${id}`, a),
     removeAnnouncement: (id: string) => req<void>('DELETE', `/api/admin/announcements/${id}`),
     setChange: (actId: string, c: { start?: number; end?: number; stage?: string; cancelled?: boolean; note?: string }) => req<TimetableChange>('PUT', `/api/admin/timetable/${actId}`, c),
     revertChange: (actId: string) => req<void>('DELETE', `/api/admin/timetable/${actId}`),

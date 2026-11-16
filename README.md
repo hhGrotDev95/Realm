@@ -1,8 +1,14 @@
-# Realm – Festival Companion (V2)
+# Realm – Festival Companion
 
-Mobile-first Web-App für ein Festival („Realm Open Air 2027“, Demo-Daten). Leitprinzip: **V1 zeigt alle Möglichkeiten – V2 zeigt nur, was gerade relevant ist.**
+Mobile-first Web-App für ein Festival („Realm Open Air 2027“, Demo-Daten). Realm bleibt die gemeinsame Basis für Website und iPhone: Oberfläche, Funktionen und Backend bleiben erhalten. Die frühere interne Versionsbezeichnung V2 ist nicht das separate, weiterhin pausierte LIR-V2-Projekt.
 
 Entwicklungsvorschau mit Testdaten: [App](https://realm-staging.heidlhannes95.workers.dev) · [ausgelieferter Stand](https://realm-staging.heidlhannes95.workers.dev/development). Einrichtung und Aktualisierung: [docs/STAGING.md](docs/STAGING.md).
+
+Abhakbarer Winterplan für eine öffentliche iPhone-App und die responsive Website für weitere Geräte: [docs/WINTER_RELEASE_PLAN.md](docs/WINTER_RELEASE_PLAN.md).
+
+Gemeinsamer Einstieg für lokale und Cloud-Entwicklung: [AGENTS.md](AGENTS.md), danach der jüngste datierte Eintrag in [REALM_PROGRESS.md](REALM_PROGRESS.md). GitHub-`main` ist der gemeinsame Quellstand; private Gerätetestbelege und persönliche DOKU werden nicht veröffentlicht. Neue Arbeiten beginnen nach Abruf dieses Stands, nicht aus alten Chat-Snapshots.
+
+Die iPhone-Integration mit Capacitor ist begonnen: `npm run ios:sync` baut dieselbe Oberfläche als lokales Staging-Bundle, `npm run ios:open` öffnet das Xcode-Projekt. Einrichtung, Prüfstand und offene Geräteabnahme: [docs/IPHONE_INTEGRATION.md](docs/IPHONE_INTEGRATION.md).
 
 ```bash
 npm install

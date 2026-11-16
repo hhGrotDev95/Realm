@@ -1,24 +1,22 @@
-# Realm – Arbeitsanweisungen für automatische Durchläufe
+# Realm · gemeinsamer Arbeitsstand
 
-Realm ist eine Festival-Companion-App (Vite/React im Browser, Cloudflare-Worker + D1 in `worker/`). Produktvision, Fahrplan und Stand: `REALM_PROGRESS.md` (unten „Nächster Schritt“), Prüfbericht-Status: `docs/AUDIT.md`.
+Realm ist eine Festival-App mit responsiver Website und iPhone-Hülle, keine
+Aufgaben-/Habit-App. Die gemeinsame Projektanleitung steht in [AGENTS.md](AGENTS.md).
+Sie gilt unabhängig davon, welcher Assistent die Arbeit ausführt.
 
-## Vor jeder Arbeit
+Vor jedem Durchlauf den aktuellen `origin/main`, offene PRs, den
+[Winterplan](docs/WINTER_RELEASE_PLAN.md) und den jüngsten datierten Eintrag in
+[REALM_PROGRESS.md](REALM_PROGRESS.md) lesen. Vorhandene lokale Änderungen und
+ungemergte Commits erhalten. Nicht auf einen alten Session-Ausgangsstand
+zurücksetzen; bereits enthaltene Funktionen nicht erneut implementieren.
 
-1. **Immer vom aktuellen `main` ausgehen.** Der vorgegebene Session-Branch zeigt beim Start oft noch auf den alten Merge `b8ccffe` (PR #13). Auf diesem Stand wurden am 27. und 28.10. bereits erledigte Arbeiten (Karteneditor P6) ein zweites Mal gebaut. Deshalb zuerst:
-   `git fetch origin main && git checkout -B <session-branch> origin/main`
-   (nur wenn der Branch keine eigenen, ungemergten Commits trägt – sonst diese auf `origin/main` rebasen).
-2. Offene PRs prüfen. Eigene PRs werden nach grüner CI selbst gemergt (Absprache vom 20.10.2026).
-3. `REALM_PROGRESS.md` → „Nächster Schritt“ lesen; offene Produktentscheidungen dort **nicht** eigenmächtig umsetzen.
+Prüfungen aus `package.json` und `worker/package.json` verwenden und tatsächlich
+ausgeführte Ergebnisse dokumentieren. `npm run build:ios` prüft die gebündelten
+Web-Assets, nicht Xcode-Kompilierung oder iPhone-Laufzeit. Zugangsdaten und die
+persönliche DOKU bleiben außerhalb des öffentlichen Repositorys.
 
-## Prüfen
-
-- `npm ci` und `cd worker && npm ci` (nicht vorinstalliert)
-- `npm run typecheck`, `npm run test:import` (alle Unit-Tests), `npm run build`
-- Browser-Tests mit dem vorinstallierten Chromium: `CHROMIUM_PATH=/opt/pw-browsers/chromium npm run test:e2e` (ebenso `test:a11y`, `test:live`)
-- Worker: `cd worker && npm run typecheck && npm test`
-- Neue UI-Texte über `t('Deutscher Text')` und englisch in `src/i18n/` – der Test `tests/i18n.test.mts` schlägt sonst an.
-- Firefox/WebKit laufen nur in CI.
-
-## Fortschritt festhalten
-
-Jede Runde ergänzt `REALM_PROGRESS.md` (erledigt, Prüfungen mit tatsächlichem Ergebnis, Blocker, konkreter nächster Schritt).
+Merge und Veröffentlichung richten sich nach dem aktuellen Nutzerauftrag.
+Historische Freigaben sind keine pauschale Erlaubnis für neue Produktions-,
+Store- oder Kontoänderungen. Der Auftrag vom 16.11.2026 erlaubt ausdrücklich
+die geprüfte Zusammenführung von PR #53, den noch relevanten Teilen von #26
+und den lokalen iPhone-Korrekturen.

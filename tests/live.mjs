@@ -258,6 +258,8 @@ try {
     await lea.reload()
     await nav(lea, 'Crew')
     await lea.getByRole('button', { name: /^Crew-Chat/ }).click()
+    // after a reload the chat first shows the offline copy; the server's newer messages follow with the first sync
+    await lea.locator('.bubble.them', { hasText: 'Und danach' }).waitFor({ timeout: 15000 })
     const texts = await lea.locator('.bubble.them').allInnerTexts()
     const a = texts.findIndex((x) => x.includes('Hängt das?'))
     const b = texts.findIndex((x) => x.includes('Und danach'))
@@ -265,15 +267,17 @@ try {
     await lea.keyboard.press('Escape')
   })
 
+  let ben2
   await step('two tabs offline: messages written in both arrive exactly once after reconnect', async () => {
     // both tabs share one stored state (and one outbox); both start sending when the network returns
-    const ben2 = await ben.context().newPage()
+    ben2 = await ben.context().newPage()
     ben2.on('pageerror', (e) => errors.push(e.stack ?? e.message))
     await ben2.goto(WEB)
     await nav(ben2, 'Crew')
     await ben.getByRole('button', { name: /^Crew-Chat/ }).click()
     await ben2.getByRole('button', { name: /^Crew-Chat/ }).click()
     await ben.context().setOffline(true)
+    const texts = ['Tab eins', 'Tab zwei', 'Gleichzeitig A', 'Gleichzeitig B', 'Nicht verdrängt']
     const send = async (p, text) => {
       await p.getByPlaceholder(/Nachricht/).fill(text)
       await p.getByRole('button', { name: 'Senden' }).click()
@@ -297,10 +301,43 @@ try {
     await ben.waitForTimeout(300)
     const kept = await ben.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? '{}').outbox?.some((o) => o.text === 'Nicht verdrängt'), key)
     if (!kept) throw new Error('a stale state from the other tab dropped a queued message from storage')
-    const texts = ['Tab eins', 'Tab zwei', 'Gleichzeitig A', 'Gleichzeitig B', 'Nicht verdrängt']
+    const pendingSnapshot = await ben.evaluate((k) => localStorage.getItem(k), key)
     for (const p of [ben, ben2]) for (const text of texts) await p.locator('.bubble.me', { hasText: text }).waitFor({ timeout: 5000 })
     await ben.context().setOffline(false)
-    for (const p of [ben, ben2]) for (const text of texts) await p.locator('.bubble.me:not(.pending)', { hasText: text }).waitFor({ timeout: 20000 })
+    const localSnapshot = (p) => p.evaluate(([storageKey, syntheticTexts]) => {
+      const state = JSON.parse(localStorage.getItem(storageKey) ?? '{}')
+      const synthetic = (text) => syntheticTexts.some((expected) => text?.includes(expected))
+      return {
+        online: navigator.onLine,
+        composer: document.querySelector('input[placeholder*="Nachricht"]')?.value ?? null,
+        bubbles: [...document.querySelectorAll('.bubble.me')].filter((el) => synthetic(el.textContent ?? '')).map((el) => ({ text: el.textContent?.trim(), pending: el.classList.contains('pending') })),
+        outbox: (Array.isArray(state.outbox) ? state.outbox : []).filter((op) => op.kind === 'message' && synthetic(op.text)).map((op) => ({ id: op.id, kind: op.kind, text: op.text })),
+        chat: (Array.isArray(state.chat) ? state.chat : []).filter((message) => synthetic(message.text)).map((message) => ({ id: message.id, text: message.text, pending: !!message.pending, from: message.from === 'me' ? 'me' : 'other' })),
+        outboxSent: (Array.isArray(state.outboxSent) ? state.outboxSent : []).filter((id) => (Array.isArray(state.chat) ? state.chat : []).some((message) => message.id === id && synthetic(message.text))),
+      }
+    }, ['realm.v2:realm-open-air', texts])
+    const serverSnapshot = async () => {
+      const [token, crewId] = await ben.evaluate((storageKey) => {
+        const state = JSON.parse(localStorage.getItem(storageKey) ?? '{}')
+        return [state.session?.token, state.crewRef?.id]
+      }, 'realm.v2:realm-open-air')
+      if (!token || !crewId) return { status: 'missing auth or crew' }
+      const response = await fetch(`${API}/api/crews/${crewId}`, { headers: { Authorization: `Bearer ${token}`, 'X-Festival': 'realm-open-air' } })
+      const body = await response.json()
+      return { status: response.status, messages: (body.messages ?? []).filter((message) => texts.some((text) => message.text?.includes(text))).map((message) => ({ id: message.id, text: message.text })) }
+    }
+    try {
+      for (const p of [ben, ben2]) for (const text of texts) await p.locator('.bubble.me:not(.pending)', { hasText: text }).waitFor({ timeout: 20000 })
+    } catch (error) {
+      const diagnostic = {
+        error: error instanceof Error ? error.message : String(error),
+        ben: await localSnapshot(ben),
+        ben2: await localSnapshot(ben2),
+        server: await serverSnapshot(),
+      }
+      console.error('two-tab offline diagnostics (synthetic messages only):', JSON.stringify(diagnostic))
+      throw error
+    }
     await lea.reload()
     await nav(lea, 'Crew')
     await lea.getByRole('button', { name: /^Crew-Chat/ }).click()
@@ -315,9 +352,106 @@ try {
     let left = await queued()
     for (const end = Date.now() + 3000; left?.length && Date.now() < end; left = await queued()) await ben.waitForTimeout(200)
     if (!left || left.length) throw new Error('outbox not empty after delivery: ' + JSON.stringify(left))
+    await ben2.evaluate(([k, value]) => {
+      localStorage.setItem(k, value)
+      window.dispatchEvent(new StorageEvent('storage', { key: k, newValue: value, storageArea: localStorage }))
+    }, [key, pendingSnapshot])
+    await ben2.waitForTimeout(300)
+    const afterStale = await ben2.evaluate(([k, syntheticTexts]) => {
+      const state = JSON.parse(localStorage.getItem(k) ?? '{}')
+      return {
+        outbox: (state.outbox ?? []).filter((op) => syntheticTexts.includes(op.text)).map((op) => op.text),
+        chat: (state.chat ?? []).filter((message) => syntheticTexts.includes(message.text)).map((message) => ({ text: message.text, pending: !!message.pending })),
+      }
+    }, [key, texts])
+    if (afterStale.outbox.length) throw new Error('an acknowledged stale snapshot requeued messages: ' + JSON.stringify(afterStale.outbox))
+    for (const text of texts) {
+      const message = ben2.locator('.bubble.me', { hasText: text })
+      await message.waitFor({ timeout: 5000 })
+      if ((await message.count()) !== 1 || (await ben2.locator('.bubble.me.pending', { hasText: text }).count())) throw new Error('an acknowledged stale snapshot changed the confirmed chat: ' + JSON.stringify(afterStale))
+    }
     await lea.keyboard.press('Escape')
     await ben.keyboard.press('Escape')
     await ben2.close()
+  })
+
+  await step('switching guest during a queued send cannot flush the old queue as the new guest', async () => {
+    const key = 'realm.v2:realm-open-air'
+    const originalState = await ben.evaluate((k) => localStorage.getItem(k), key)
+    const originalToken = await tokenOf(ben)
+    const replacementResponse = await fetch(`${API}/api/guests`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '10.0.0.254' }, body: JSON.stringify({ nickname: 'Queue switch test' }) })
+    if (!replacementResponse.ok) throw new Error('could not create synthetic replacement guest: ' + replacementResponse.status)
+    const replacement = await replacementResponse.json()
+    const requests = []
+    let releaseFirst
+    let firstStartedResolve
+    let held = false
+    const firstStarted = new Promise((resolve) => (firstStartedResolve = resolve))
+    const pattern = '**/api/crews/*/messages'
+    await ben.route(pattern, async (route) => {
+      const request = route.request()
+      if (request.method() === 'POST') {
+        const text = request.postDataJSON()?.text
+        requests.push({ text, originalGuest: request.headers().authorization === `Bearer ${originalToken}`, replacementGuest: request.headers().authorization === `Bearer ${replacement.token}` })
+        if (!held) {
+          held = true
+          firstStartedResolve()
+          await new Promise((resolve) => (releaseFirst = resolve))
+        }
+      }
+      await route.continue()
+    })
+    try {
+      await nav(ben, 'Crew')
+      await ben.getByRole('button', { name: /^Crew-Chat/ }).click()
+      await ben.context().setOffline(true)
+      for (const text of ['Session queue A', 'Session queue B']) {
+        await ben.getByPlaceholder(/Nachricht/).fill(text)
+        await ben.getByRole('button', { name: 'Senden' }).click()
+        await ben.locator('.bubble.me.pending', { hasText: text }).waitFor({ timeout: 5000 })
+      }
+      const deadline = Date.now() + 5000
+      let queued = []
+      while (Date.now() < deadline) {
+        queued = await ben.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? '{}').outbox?.map((op) => op.text) ?? [], key)
+        if (['Session queue A', 'Session queue B'].every((text) => queued.includes(text))) break
+        await ben.waitForTimeout(50)
+      }
+      if (!['Session queue A', 'Session queue B'].every((text) => queued.includes(text))) throw new Error('two queued session-switch messages were not persisted')
+      await ben.context().setOffline(false)
+      let firstTimeout
+      await Promise.race([firstStarted, new Promise((_, reject) => (firstTimeout = setTimeout(() => reject(new Error('queued send did not start')), 10000)))])
+      clearTimeout(firstTimeout)
+      await ben.evaluate(([k, session]) => {
+        const state = JSON.parse(localStorage.getItem(k) ?? '{}')
+        const switched = { ...state, session, plan: [], crewRef: null, remote: null, outbox: [], outboxSent: [], chat: [], meetups: [], declined: [] }
+        const value = JSON.stringify(switched)
+        localStorage.setItem(k, value)
+        window.dispatchEvent(new StorageEvent('storage', { key: k, newValue: value, storageArea: localStorage }))
+      }, [key, replacement])
+      await ben.waitForFunction(([k, id]) => JSON.parse(localStorage.getItem(k) ?? '{}').session?.id === id, [key, replacement.id])
+      const firstResponse = ben.waitForResponse((response) => response.request().method() === 'POST' && /\/api\/crews\/[^/]+\/messages$/.test(response.url()), { timeout: 10000 })
+      releaseFirst()
+      await firstResponse
+      await ben.waitForTimeout(1000)
+      const switchedState = await ben.evaluate(([k, id]) => {
+        const state = JSON.parse(localStorage.getItem(k) ?? '{}')
+        return { sessionIsSwitchedGuest: state.session?.id === id, queued: (state.outbox ?? []).map((op) => op.text), chat: (state.chat ?? []).map((message) => message.text) }
+      }, [key, replacement.id])
+      if (!requests.some((request) => request.text === 'Session queue A' && request.originalGuest)) throw new Error('the delayed message did not start under the original guest: ' + JSON.stringify(requests))
+      if (requests.some((request) => request.text === 'Session queue B' || request.replacementGuest)) throw new Error('an old queued message was sent as the replacement guest: ' + JSON.stringify(requests))
+      if (!switchedState.sessionIsSwitchedGuest || switchedState.queued.some((text) => text.startsWith('Session queue')) || switchedState.chat.some((text) => text.startsWith('Session queue'))) throw new Error('the old queue overwrote the replacement guest state: ' + JSON.stringify(switchedState))
+    } finally {
+      releaseFirst?.()
+      await ben.unroute(pattern)
+      await ben.context().setOffline(false)
+      await ben.evaluate(([k, value]) => {
+        localStorage.setItem(k, value)
+        window.dispatchEvent(new StorageEvent('storage', { key: k, newValue: value, storageArea: localStorage }))
+      }, [key, originalState])
+      await ben.reload()
+      await nav(ben, 'Crew')
+    }
   })
 
   await step('privacy (audit F02): a location share switched off while offline ends on the server after reconnect – without reload', async () => {
@@ -566,6 +700,60 @@ try {
       const terminal = (await (await fetch(`${API}/api/festivals/realm-open-air`)).json()).pois.find((p) => p.name === 'Shuttle-Terminal')
       if (!shuttle || shuttle.poi !== terminal?.id) throw new Error('announcement did not keep the recognised map point: ' + JSON.stringify(shuttle))
     }
+    const title = org.getByPlaceholder('z. B. Gewitterwarnung ab 22:30')
+    await title.fill('Zusatzmeldung B für Speichertest')
+    await org.getByRole('button', { name: 'Veröffentlichen' }).click()
+    await org.getByText('Meldung veröffentlicht').waitFor()
+    await org.locator('.list-item', { hasText: 'Zusatzmeldung B für Speichertest' }).waitFor()
+    // a typo or an escalation is fixed in place (backlog 5n): age and map point stay, the visitor gets the warning
+    {
+      const row = org.locator('.list-item', { hasText: 'Shuttle fährt ab 23 Uhr alle 5 Min.' })
+      await row.getByRole('button', { name: '„Shuttle fährt ab 23 Uhr alle 5 Min.“ bearbeiten' }).click()
+      await org.getByRole('heading', { name: 'Meldung bearbeiten' }).waitFor()
+      if ((await title.inputValue()) !== 'Shuttle fährt ab 23 Uhr alle 5 Min.') throw new Error('edit form not prefilled')
+      if ((await org.getByLabel('Ort (optional)').inputValue()) !== 'shuttle-terminal') throw new Error('edit form lost the place')
+      if (await org.getByRole('button', { name: 'Änderungen speichern' }).isEnabled()) throw new Error('saving offered without a change')
+      // cancelling restores the empty "new" form
+      await org.getByRole('button', { name: 'Abbrechen' }).click()
+      await org.getByRole('heading', { name: 'Neue Meldung' }).waitFor()
+      if ((await title.inputValue()) !== '') throw new Error('cancel did not restore the new-announcement form')
+      await title.fill('Entwurf bleibt nach dem Speichern erhalten')
+      await row.getByRole('button', { name: '„Shuttle fährt ab 23 Uhr alle 5 Min.“ bearbeiten' }).click()
+      await title.fill('Shuttle fährt ab 23 Uhr alle 10 Min.')
+      await org.getByRole('button', { name: 'Warnung', exact: true }).click()
+      let releasePatch
+      let patchStartedResolve
+      const patchStarted = new Promise((resolve) => (patchStartedResolve = resolve))
+      await org.route('**/api/admin/announcements/*', async (route) => {
+        if (route.request().method() === 'PATCH') {
+          patchStartedResolve()
+          await new Promise((resolve) => (releasePatch = resolve))
+        }
+        await route.continue()
+      })
+      await org.getByRole('button', { name: 'Änderungen speichern' }).click()
+      let patchTimeout
+      try {
+        await Promise.race([patchStarted, new Promise((_, reject) => (patchTimeout = setTimeout(() => reject(new Error('announcement PATCH did not start')), 15000)))])
+        const editB = org.locator('.list-item', { hasText: 'Zusatzmeldung B für Speichertest' }).getByRole('button', { name: '„Zusatzmeldung B für Speichertest“ bearbeiten' })
+        const removeB = org.locator('.list-item', { hasText: 'Zusatzmeldung B für Speichertest' }).getByRole('button', { name: '„Zusatzmeldung B für Speichertest“ entfernen' })
+        if (!(await title.isDisabled()) || !(await editB.isDisabled()) || !(await removeB.isDisabled())) throw new Error('announcement form or other rows remained editable during PATCH')
+        releasePatch()
+        await org.getByText(/^Meldung geändert/).waitFor()
+      } finally {
+        clearTimeout(patchTimeout)
+        releasePatch?.()
+        await org.unroute('**/api/admin/announcements/*')
+      }
+      const edited = org.locator('.list-item', { hasText: 'Shuttle fährt ab 23 Uhr alle 10 Min.' })
+      await edited.getByText('Warnung', { exact: true }).waitFor()
+      await edited.getByTestId('announcement-map').getByText('Karte: Shuttle-Terminal').waitFor()
+      if (await org.locator('.list-item', { hasText: 'alle 5 Min.' }).count()) throw new Error('edit created a second announcement')
+      await org.getByRole('heading', { name: 'Neue Meldung' }).waitFor()
+      if ((await title.inputValue()) !== 'Entwurf bleibt nach dem Speichern erhalten') throw new Error('saving an edit lost the draft that was in the form before editing')
+      await lea.reload()
+      await lea.locator('.alert.warning', { hasText: 'Shuttle fährt ab 23 Uhr alle 10 Min.' }).waitFor({ timeout: 15000 })
+    }
     // three synced plans hold Ruby Kade: the timetable says whom a change reaches (groups below 3 withheld)
     const roa = await (await fetch(`${API}/api/festivals/realm-open-air`)).json()
     const rubyAct = roa.acts.find((a) => a.artist === 'Ruby Kade')
@@ -592,7 +780,7 @@ try {
     await org.locator('.list-item', { hasText: 'Ruby Kade' }).getByText('→ 18:15').waitFor()
     if (process.env.SHOTS) await org.screenshot({ path: `${process.env.SHOTS}/admin.png` })
     await lea.reload()
-    await lea.getByText('Shuttle fährt ab 23 Uhr alle 5 Min.').first().waitFor({ timeout: 15000 })
+    await lea.getByText('Shuttle fährt ab 23 Uhr alle 10 Min.').first().waitFor({ timeout: 15000 })
     await nav(lea, 'Line-up')
     await lea.getByRole('tab', { name: 'Alle', exact: true }).click()
     await lea.locator('.act', { hasText: 'Ruby Kade' }).getByText('Neu 18:15 statt 17:45').waitFor({ timeout: 15000 })
@@ -605,10 +793,16 @@ try {
     await org.getByTestId('announcement-draft').getByRole('button', { name: 'Verwerfen' }).click()
     if (await org.getByPlaceholder('z. B. Gewitterwarnung ab 22:30').inputValue()) throw new Error('discarding the draft left the form filled')
     // publish a linked announcement; reverting the change then offers to remove it (backlog 5g)
+    // slow network: the published changes arrive late; a shift typed before that must not be overwritten by them (CI #53)
+    await org.route('**/api/timetable/changes', async (route) => {
+      await new Promise((r) => setTimeout(r, 1500))
+      await route.continue().catch(() => {}) // already let through by unroute below
+    })
     await org.getByRole('tab', { name: /Live-Änderungen/ }).click()
     await org.getByRole('button', { name: 'Freitag' }).click()
     await org.locator('.list-item', { hasText: 'Ruby Kade' }).click()
     await org.getByRole('button', { name: '+30 Min.' }).click()
+    await org.unroute('**/api/timetable/changes')
     await org.getByRole('button', { name: 'Änderung veröffentlichen' }).click()
     await org.locator('.list-item', { hasText: 'Ruby Kade' }).getByText('→ 18:45').waitFor()
     await org.getByTestId('offer-announcement').getByRole('button', { name: 'Meldung vorbereiten' }).click()
@@ -844,6 +1038,7 @@ try {
     await org.getByText('Branding gespeichert').waitFor()
     await visitor.reload()
     await visitor.getByRole('heading', { name: 'Testwiese Festival' }).waitFor()
+    await visitor.waitForFunction(() => getComputedStyle(document.documentElement).getPropertyValue('--brand').trim() === '#4fd1c5', { timeout: 15000 })
     const brand = await visitor.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--brand').trim())
     if (brand !== '#4fd1c5') throw new Error('brand colour not applied: ' + brand)
     const display = await visitor.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--display'))
@@ -1120,8 +1315,96 @@ try {
     await ben.getByRole('button', { name: /Recovery-Code erstellen/ }).click()
     const recovery = (await ben.locator('.code').textContent()).trim()
     // Ben's saved plan must survive the restore, even when the profile loads slowly on festival WLAN
+    await ben.getByRole('button', { name: 'Fertig' }).click()
+    await ben.keyboard.press('Escape')
+    await nav(ben, 'Line-up')
+    await ben.getByRole('tab', { name: 'Alle', exact: true }).click()
+    for (const artist of ['Maduk', 'Somna']) {
+      const add = ben.locator('.act', { hasText: artist }).getByRole('button', { name: 'Zum Plan hinzufügen' })
+      if (await add.count()) await add.click()
+    }
     const benToken = await tokenOf(ben)
-    await fetch(`${API}/api/me/plan`, { method: 'PUT', headers: { Authorization: 'Bearer ' + benToken, 'X-Festival': 'realm-open-air', 'Content-Type': 'application/json' }, body: JSON.stringify({ acts: ['1-maduk', '1-somna'] }) })
+    const planDeadline = Date.now() + 10000
+    let savedPlan = []
+    while (Date.now() < planDeadline) {
+      savedPlan = await serverPlan(benToken)
+      if (savedPlan.includes('1-maduk') && savedPlan.includes('1-somna')) break
+      await ben.waitForTimeout(250)
+    }
+    if (!savedPlan.includes('1-maduk') || !savedPlan.includes('1-somna')) throw new Error('Ben plan did not reach the server before recovery: ' + JSON.stringify(savedPlan))
+    await nav(ben, 'Crew')
+    await ben.getByRole('button', { name: /^Crew-Chat/ }).click()
+    const originalOwnerId = await ben.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:realm-open-air') ?? '{}').session?.id)
+    const restoreMessages = ['Same owner delayed A', 'Same owner delayed B']
+    const restoreRequests = []
+    let releaseRestoreResponse
+    let restoreSendStartedResolve
+    let restoreResponseHeld = false
+    const restoreSendStarted = new Promise((resolve) => (restoreSendStartedResolve = resolve))
+    const chatPattern = '**/api/crews/*/messages'
+    await ben.route(chatPattern, async (route) => {
+      const request = route.request()
+      if (request.method() === 'POST') {
+        const text = request.postDataJSON()?.text
+        const token = await ben.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:realm-open-air') ?? '{}').session?.token)
+        restoreRequests.push({ text, matchesCurrentSession: request.headers().authorization === `Bearer ${token}`, originalOwner: request.headers().authorization === `Bearer ${benToken}` })
+        if (!restoreResponseHeld) {
+          restoreResponseHeld = true
+          const response = await route.fetch()
+          restoreSendStartedResolve()
+          await new Promise((resolve) => (releaseRestoreResponse = resolve))
+          await route.fulfill({ response })
+          return
+        }
+      }
+      await route.continue()
+    })
+    try {
+      await ben.context().setOffline(true)
+      for (const text of restoreMessages) {
+        await ben.getByPlaceholder(/Nachricht/).fill(text)
+        await ben.getByRole('button', { name: 'Senden' }).click()
+        await ben.locator('.bubble.me.pending', { hasText: text }).waitFor({ timeout: 5000 })
+      }
+      await ben.context().setOffline(false)
+      let restoreTimeout
+      await Promise.race([restoreSendStarted, new Promise((_, reject) => (restoreTimeout = setTimeout(() => reject(new Error('same-owner queued send did not start')), 10000)))])
+      clearTimeout(restoreTimeout)
+      await ben.keyboard.press('Escape')
+      await ben.getByRole('button', { name: 'Profil & Einstellungen' }).click()
+      await ben.getByText('Profil mit Code wiederherstellen').click()
+      await ben.getByPlaceholder('XXXX-XXXX-XXXX-XXXX').fill(recovery)
+      await ben.getByRole('button', { name: 'Wiederherstellen' }).click()
+      await ben.getByText('Profil wiederhergestellt').waitFor()
+      await ben.keyboard.press('Escape') // close the remaining profile sheet before using the Crew tab
+      const restoredToken = await tokenOf(ben)
+      const restoredOwnerId = await ben.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:realm-open-air') ?? '{}').session?.id)
+      if (restoredOwnerId !== originalOwnerId || restoredToken === benToken) throw new Error('same-owner restore did not retain the owner and rotate its session')
+      const crewId = await ben.evaluate(() => JSON.parse(localStorage.getItem('realm.v2:realm-open-air') ?? '{}').crewRef?.id)
+      const leaToken = await tokenOf(lea)
+      const serverTexts = async () => {
+        const response = await fetch(`${API}/api/crews/${crewId}`, { headers: { Authorization: `Bearer ${leaToken}`, 'X-Festival': 'realm-open-air' } })
+        const body = await response.json()
+        return (body.messages ?? []).filter((message) => restoreMessages.includes(message.text)).map((message) => ({ id: message.id, text: message.text }))
+      }
+      const acceptedBeforeRelease = await serverTexts()
+      if (acceptedBeforeRelease.filter((message) => message.text === restoreMessages[0]).length !== 1 || acceptedBeforeRelease.some((message) => message.text === restoreMessages[1])) throw new Error('delayed request precondition failed: ' + JSON.stringify(acceptedBeforeRelease))
+      const firstResponse = ben.waitForResponse((response) => response.request().method() === 'POST' && /\/api\/crews\/[^/]+\/messages$/.test(response.url()), { timeout: 10000 })
+      releaseRestoreResponse()
+      await firstResponse
+      await nav(ben, 'Crew')
+      await ben.getByRole('button', { name: /^Crew-Chat/ }).click()
+      for (const text of restoreMessages) await ben.locator('.bubble.me:not(.pending)', { hasText: text }).waitFor({ timeout: 20000 })
+      const acceptedAfterRelease = await serverTexts()
+      for (const text of restoreMessages) if (acceptedAfterRelease.filter((message) => message.text === text).length !== 1) throw new Error('same-owner restore did not deliver each queued message once: ' + JSON.stringify(acceptedAfterRelease))
+      if (!restoreRequests.some((request) => request.text === restoreMessages[0] && request.originalOwner) || !restoreRequests.some((request) => request.text === restoreMessages[1] && request.matchesCurrentSession)) throw new Error('same-owner queue did not continue with the restored session: ' + JSON.stringify(restoreRequests))
+      const restoredPlan = await serverPlan(restoredToken)
+      if (!restoredPlan.includes('1-maduk') || !restoredPlan.includes('1-somna')) throw new Error('same-owner restore changed the saved plan: ' + JSON.stringify(restoredPlan))
+    } finally {
+      releaseRestoreResponse?.()
+      await ben.unroute(chatPattern)
+      await ben.context().setOffline(false)
+    }
     const fresh = await user()
     await fresh.goto(WEB)
     await fresh.route('**/api/me', async (r) => {

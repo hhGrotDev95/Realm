@@ -8,6 +8,7 @@ import '@fontsource-variable/inter'
 import '@fontsource-variable/bricolage-grotesque'
 import './styles.css'
 import { t } from './i18n'
+import { isNativeApp } from './platform'
 
 // The organizer console lives at /#admin and is loaded only there.
 const Admin = lazy(() => import('./admin/Admin'))
@@ -59,6 +60,7 @@ if (isAdmin()) {
 }
 window.addEventListener('hashchange', () => location.reload())
 
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+// Capacitor bundles all app assets; only the website needs the service-worker shell cache.
+if (!isNativeApp && 'serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}))
 }

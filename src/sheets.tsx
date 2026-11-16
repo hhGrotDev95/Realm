@@ -13,6 +13,7 @@ import { downloadIcs } from './calendar/download'
 import { ActRow } from './screens/Lineup'
 import { useApp, type SheetState } from './store'
 import { poiForUpdate } from './updatePoi'
+import { useChatKeyboard } from './useChatKeyboard'
 import { status, untilLabel } from './time'
 import { t, num, setLang, LANGS, lang } from './i18n'
 import { Avatar, AvatarStack, Segmented, Sheet, SourceTag, StageDot, ago, spring, LazyBoundary, Switch } from './ui'
@@ -28,9 +29,9 @@ export function Sheets() {
   const s = sheet ?? shown
   const full = s?.kind === 'chat' || s?.kind === 'shared' || s?.kind === 'updates' || s?.kind === 'faq' || s?.kind === 'festivalChat'
   return (
-    <Sheet open={open} onClose={closeSheet} full={full} label={sheetLabel(s)}>
+    <Sheet open={open} onClose={closeSheet} full={full} label={sheetLabel(s)} className={s?.kind === 'chat' ? 'crew-chat-sheet' : ''}>
       <AnimatePresence mode="wait" initial={false}>
-        <motion.div key={JSON.stringify(s)} initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.18 }}>
+        <motion.div className={s?.kind === 'chat' ? 'crew-chat' : undefined} key={JSON.stringify(s)} initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} transition={{ duration: 0.18 }}>
           {s?.kind === 'act' && <ActSheet id={s.id} />}
           {s?.kind === 'poi' && <PoiSheet id={s.id} />}
           {s?.kind === 'resolver' && <Resolver ids={s.ids} k={s.key} />}
@@ -1282,10 +1283,12 @@ function Chat() {
   const { chat, sendChat, requireIdentity, openSheet, now, deleteMessage, flagMessage } = useApp()
   const [text, setText] = useState('')
   const [active, setActive] = useState<string | null>(null)
-  const end = useRef<HTMLDivElement>(null)
-  // block body: newer browsers return a Promise from scrollIntoView, which must not become the effect's cleanup
+  const history = useRef<HTMLDivElement>(null)
+  useChatKeyboard(history)
+  // Scroll only the message history: the heading and composer stay in place.
   useEffect(() => {
-    end.current?.scrollIntoView({ behavior: 'smooth' })
+    const list = history.current
+    list?.scrollTo({ top: list.scrollHeight, behavior: 'smooth' })
   }, [chat.length])
   return (
     <>
@@ -1297,7 +1300,7 @@ function Chat() {
           </div>
         </div>
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minHeight: 300 }}>
+      <div className="crew-chat-history" ref={history}>
         {chat.map((m, i) => {
           const me = m.from === 'me'
           const showName = !me && chat[i - 1]?.from !== m.from
@@ -1350,26 +1353,21 @@ function Chat() {
             </motion.div>
           )
         })}
-        <div ref={end} />
       </div>
-      <form
-        className="chat-input"
-        style={{ position: 'sticky', bottom: 0, background: 'var(--bg-elev)', paddingBottom: 4 }}
-        onSubmit={(e) => {
-          e.preventDefault()
-          const msg = text.trim()
-          if (!msg) return
-          requireIdentity(t('Damit deine Crew sieht, wer schreibt.'), () => {
-            sendChat(msg)
-            setText('')
-          })
-        }}
-      >
-        <input className="field" style={{ borderRadius: 99 }} placeholder={t('Nachricht · {time}', { time: fmt(now.min) })} value={text} onChange={(e) => setText(e.target.value)} />
-        <button className="icon-btn" style={{ background: 'var(--brand)', color: 'var(--brand-ink)', width: 48, height: 48, flex: 'none' }} aria-label={t('Senden')}>
+      <div className="chat-input">
+        <input className="field" style={{ borderRadius: 99 }} placeholder={t('Nachricht · {time}', { time: fmt(now.min) })} value={text} onChange={(e) => setText(e.target.value)} enterKeyHint="done" />
+        <button type="button" className="icon-btn" style={{ background: 'var(--brand)', color: 'var(--brand-ink)', width: 48, height: 48, flex: 'none' }} aria-label={t('Senden')}
+          onClick={() => {
+            const msg = text.trim()
+            if (!msg) return
+            requireIdentity(t('Damit deine Crew sieht, wer schreibt.'), () => {
+              sendChat(msg)
+              setText('')
+            })
+          }}>
           <Send size={19} />
         </button>
-      </form>
+      </div>
     </>
   )
 }
