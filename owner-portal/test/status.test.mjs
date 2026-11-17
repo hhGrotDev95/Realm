@@ -86,7 +86,8 @@ test('rejects unsafe URLs', () => {
 });
 
 test('keeps the manually reviewed date unchanged when generating a fresh timestamp', () => {
-  const status = build({ generatedAt: '2026-12-01T08:00:00.000Z' });
+  // Fix both dates in this fixture, independently of the daily project review date.
+  const status = build({ curated: { ...curated, reviewedAt: '2026-11-16' }, generatedAt: '2026-12-01T08:00:00.000Z' });
   assert.equal(status.reviewedAt, '2026-11-16');
   assert.equal(status.generatedAt, '2026-12-01T08:00:00.000Z');
 });

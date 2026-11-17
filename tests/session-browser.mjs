@@ -61,6 +61,13 @@ const deferred = () => {
   const promise = new Promise((r) => { resolve = r })
   return { promise, resolve }
 }
+const waitUntil = async (predicate, description, timeout = 5000) => {
+  const deadline = Date.now() + timeout
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${description}`)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+}
 
 function fixtureApi(profiles, options = {}) {
   const calls = []
@@ -109,7 +116,7 @@ function fixtureApi(profiles, options = {}) {
 }
 
 async function contextFor({ seed, secureItem = null, failRead = false, delayRead = 0, profiles = { one: oldProfile, two: nextProfile }, apiOptions } = {}) {
-  const native = { value: secureItem, reads: 0, writes: [], failRead, delayRead, delayWrite: 0 }
+  const native = { value: secureItem, reads: 0, writes: [], failRead, delayRead, writeStarted: null, writeGate: null }
   const context = await browser.newContext({ viewport: { width: 400, height: 860 }, locale: 'de-DE' })
   const api = fixtureApi(profiles, apiOptions)
   await context.route(`${API}/api/**`, api.handler)
@@ -122,7 +129,9 @@ async function contextFor({ seed, secureItem = null, failRead = false, delayRead
       return { value: native.value }
     }
     if (method === 'write') {
-      if (native.delayWrite) await new Promise((resolve) => setTimeout(resolve, native.delayWrite))
+      native.writeStarted?.resolve()
+      native.writeStarted = null
+      if (native.writeGate) await native.writeGate.promise
       native.writes.push(options.value)
       native.value = options.value
       return
@@ -259,8 +268,8 @@ try {
     await context.close()
   }
 
-  // While logout waits for a native secure-store write, an accelerated location interval may
-  // run, but its stale identity cannot enqueue a write for the next account.
+  // Invoke the saved location interval while logout waits for a native secure-store write.
+  // This puts the timer exactly inside the identity lock instead of racing the UI beforehand.
   {
     const withCrew = initialState(oldProfile, {
       clockMode: 'real',
@@ -270,23 +279,49 @@ try {
     const { context, page, native, api } = await contextFor({ seed: legacySeed(oldProfile, withCrew) })
     await context.addInitScript(() => {
       const original = window.setInterval.bind(window)
-      window.setInterval = (callback, delay, ...args) => original(callback, delay === 30 * 60_000 ? 60 : delay, ...args)
+      window.setInterval = (callback, delay, ...args) => {
+        if (delay === 30 * 60_000) {
+          window.__realmLocationInterval = callback
+          return original(() => {}, delay, ...args)
+        }
+        return original(callback, delay, ...args)
+      }
     })
     await page.goto(WEB)
     await page.locator('nav').waitFor()
-    await page.waitForTimeout(250)
-    assert(api.calls.some((call) => call.path === '/api/crews/crew-1/location'), 'share setup did not reach the API fixture')
-    native.delayWrite = 600
+    await waitUntil(() => api.calls.some((call) => call.path === '/api/crews/crew-1/location'), 'share setup API request')
+    await page.waitForFunction(() => {
+      const state = JSON.parse(localStorage.getItem('realm.v2:realm-open-air') ?? 'null')
+      return state?.outbox?.length === 0 && state?.outboxSent?.length > 0
+    })
     await openProfile(page)
     await page.getByRole('button', { name: 'Abmelden', exact: true }).click()
     await page.getByLabel('Ich habe meinen Recovery-Code sicher gespeichert.').check()
-    await page.getByRole('button', { name: 'Abmelden', exact: true }).last().click()
-    await page.waitForTimeout(180)
-    const whileWaiting = await storedState(page)
-    assert.equal(whileWaiting.outbox.length, 0, 'timer added an operation during the Keychain commit')
+    let keychainWriteStarted = false
+    const keychainWriteGate = deferred()
+    native.writeStarted = { resolve: () => { keychainWriteStarted = true } }
+    native.writeGate = keychainWriteGate
+    const locationCalls = () => api.calls.filter((call) => call.path === '/api/crews/crew-1/location').length
+    const locationCallsBeforeLogout = locationCalls()
+    try {
+      await page.getByRole('button', { name: 'Abmelden', exact: true }).last().click()
+      await waitUntil(() => keychainWriteStarted, 'logout Keychain write')
+      assert.equal(await page.evaluate(() => typeof window.__realmLocationInterval), 'function', 'location timer callback was not captured')
+      await page.evaluate(() => window.__realmLocationInterval())
+      await page.waitForTimeout(120)
+      const whileWaiting = await storedState(page)
+      // Persistence is paused during the identity lock: observe storage and server traffic,
+      // without claiming that storage reveals the component's intermediate in-memory state.
+      assert.equal(whileWaiting.outbox.length, 0, 'timer persisted an operation during the Keychain commit')
+      assert.equal(locationCalls(), locationCallsBeforeLogout, 'timer sent location while the Keychain write was held')
+    } finally {
+      keychainWriteGate.resolve()
+      native.writeGate = null
+    }
     await page.getByRole('status').getByText('Abgemeldet', { exact: true }).waitFor()
     await page.waitForTimeout(120)
     assert.equal((await storedState(page)).outbox.length, 0)
+    assert.equal(locationCalls(), locationCallsBeforeLogout, 'timer sent location after logout')
     await context.close()
   }
 

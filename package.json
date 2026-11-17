@@ -18,14 +18,15 @@
     "build:ios": "tsc -b && node scripts/build-ios.mjs",
     "ios:sync": "npm run build:ios && cap sync ios",
     "ios:open": "cap open ios",
-    "test:native": "node --experimental-strip-types --no-warnings tests/native.test.mts",
+    "test:native": "node --experimental-strip-types --no-warnings tests/native.test.mts && node --experimental-strip-types --no-warnings tests/sharing.test.mts",
     "test:chat-keyboard": "node tests/chat-keyboard.mjs",
     "build:owner": "node owner-portal/build.mjs",
     "test:owner": "node --test owner-portal/test/*.test.mjs",
     "test:owner:ui": "node owner-portal/test/ui.mjs",
     "check:owner": "node owner-portal/check-access.mjs",
     "test:session": "node --experimental-strip-types --no-warnings tests/sessionVault.test.mts && node --experimental-strip-types --no-warnings tests/profileDeletion.test.mts",
-    "test:session:browser": "node --experimental-strip-types --no-warnings tests/session-browser.mjs"
+    "test:session:browser": "node --experimental-strip-types --no-warnings tests/session-browser.mjs",
+    "test:sharing": "node --experimental-strip-types --no-warnings tests/sharing-browser.mjs"
   },
   "dependencies": {
     "@capacitor/core": "8.5.3",

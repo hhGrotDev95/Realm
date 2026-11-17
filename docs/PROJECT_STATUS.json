@@ -1,7 +1,7 @@
 {
   "projectName": "Realm · Winter 2027",
-  "reviewedAt": "2026-11-16",
-  "reviewedHandoff": "## A2b-Sitzungsprüfung abgeschlossen und veröffentlicht (16.11.2026, Codex)",
+  "reviewedAt": "2026-11-17",
+  "reviewedHandoff": "## A2b: Teilen und Clipboard auf dem iPhone (17.11.2026, Codex)",
   "releaseDate": "2027-01-22",
   "reviewedGateStates": {
     "A1": false,
@@ -24,7 +24,7 @@
   },
   "schedule": {
     "label": "Zeitplan unter Druck",
-    "summary": "Der 6.-November-Prüfpunkt ist verstrichen; A1, A2b und A3 sind offen. Build 5 ist seit dem 16. November installiert; das Sitzungs-Teilpaket ist am iPhone geprüft. Installierbarer interner Build und responsive Zielgeräteprüfungen sind bis zum 20. November vorgesehen; TestFlight und Web-Beta bis zum 27. November. Beide Termine sind gefährdet und keine Zusage."
+    "summary": "Der 6.-November-Prüfpunkt ist verstrichen; A1, A2b und A3 sind offen. Build 6 ist seit dem 17. November installiert; Text-/Link-Teilen und Clipboard sind nach dem Sitzungspaket am iPhone geprüft. Installierbarer interner Build und responsive Zielgeräteprüfungen sind bis zum 20. November vorgesehen; TestFlight und Web-Beta bis zum 27. November. Beide Termine sind gefährdet und keine Zusage."
   },
   "foundation": [
     {
@@ -37,13 +37,13 @@
     },
     {
       "title": "Releasegrenzen",
-      "text": "Das Sitzungs-Teilpaket ist abgeschlossen; A2b, vollständige Geräte-/Web-Abnahme und Store-Freigabe bleiben offen. Teilen, Kalenderexport, Universal Links und native Erinnerungen sind die nächsten Integrationspunkte."
+      "text": "Sitzungspaket auf Build 5 und vorhandenes Text-/Link-Teilen auf Build 6 geprüft. Kalenderexport, Universal Links, native Erinnerungen und vollständige Geräte-/Store-Abnahme bleiben offen."
     }
   ],
   "nextActions": [
     {
-      "title": "Teilen und Clipboard auf dem iPhone prüfen",
-      "text": "Native Teilen-/Clipboard-Abläufe gezielt prüfen; anschließend Kalenderexport, Universal Links und Erinnerungen. Das abgeschlossene Keychain-/Sitzungspaket auf Build 5 nicht erneut beginnen.",
+      "title": "Kalenderexport auf dem iPhone prüfen",
+      "text": "Nach dem geprüften Text-/Link-Teilen folgt Kalenderexport; anschließend Universal Links und native Erinnerungen. Wrapped-Bildkarten bleiben als spätere Erweiterung vorgemerkt.",
       "owner": "Entwicklung"
     },
     {
@@ -82,7 +82,7 @@
       "date": "2026-11-20",
       "title": "Installierbarer interner iPhone-Build und responsive Zielgeräteprüfung",
       "state": "at-risk",
-      "note": "Build 5 ist signiert, installiert und für Sitzung/Keychain geprüft. Die gesamte native Integration und responsive Prüfung auf den vereinbarten Zielgeräten sind noch nicht vollständig belegt."
+      "note": "Build 6 ist signiert und installiert; vorhandenes Text-/Link-Teilen und Clipboard sind auf dem iPhone geprüft. Die gesamte native Integration und responsive Zielgeräteprüfung sind noch nicht vollständig belegt."
     },
     {
       "date": "2026-11-27",
@@ -199,9 +199,25 @@
       "url": "https://appstoreconnect.apple.com/",
       "description": "Nach Bestätigung der Bedingungen Kontozugang und TestFlight vorbereiten.",
       "group": "Betrieb"
+    },
+    {
+      "label": "Teilen und Clipboard",
+      "url": "https://github.com/hhGrotDev95/Realm/blob/main/docs/SHARING.md",
+      "description": "Verhalten, Gerätebelege und Grenzen der Teilen-/Kopierfunktionen.",
+      "group": "Dokumentation"
     }
   ],
   "recent": [
+    {
+      "date": "2026-11-17",
+      "title": "Text-/Link-Teilen und Clipboard am iPhone geprüft",
+      "summary": "Build 6 bestätigt Home/Crew, Abbruch, Linkziel, private Code-Kopie, Offline-Teilen und Wrapped-Text. Fehlerfälle melden keinen falschen Kopiererfolg."
+    },
+    {
+      "date": "2026-11-17",
+      "title": "Wrapped als Bild teilen: Wunsch vorgemerkt",
+      "summary": "Gewünscht sind einzelne Seiten oder eine Abschlusskarte für WhatsApp/Social Media. Noch nicht implementiert; Empfehlung: zuerst eine Zusammenfassungskarte nach den verbleibenden A2b-Grundlagen."
+    },
     {
       "date": "2026-11-16",
       "title": "Keychain und Sitzungspaket am iPhone bestanden",
@@ -216,20 +232,15 @@
       "date": "2026-11-16",
       "title": "Claude-Zeitplan deaktiviert",
       "summary": "Laut Nutzerangabe ist der zuvor für 06:00 beschriebene Claude-Lauf deaktiviert. Es wurde kein bezahlter oder neuer KI-Job eingerichtet."
-    },
-    {
-      "date": "2026-11-16",
-      "title": "Zwei-Tab-Outbox und Profilgrenzen nachgeprüft",
-      "summary": "CI und gezielte Regressionen bestehen; native Keychain-Integration und Geräteabnahme bleiben offen."
     }
   ],
   "device": {
-    "label": "iPhone Build 5 · Sitzungspaket geprüft",
-    "summary": "16.11.: vorhandenes Profil nach Upgrade und Offline-Neustart erhalten; separates Profil B bleibt getrennt; Abmeldung übersteht Neustart; Code stellt Profil A samt Crew/Favoriten wieder her. Keine Zugangsdaten im Webspeicher beobachtet. Weitere A2b-/B4-Fälle offen."
+    "label": "iPhone Build 6 · Teilen und Kopieren geprüft",
+    "summary": "17.11.: Home/Crew-Teilen, Abbrechen, korrekter Einladungslink samt Safari-Ziel, Recovery-Code-Kopie, Offline-Linkkopie und vorhandener Wrapped-Text bestätigt. Netz/Zeiteinstellung zurückgestellt. Bildkarten für Wrapped noch nicht umgesetzt; weitere A2b-/B4-Fälle offen."
   },
   "web": {
-    "label": "Web zuletzt geprüft · 16.11.2026",
-    "summary": "Staging mit dem geprüften Sitzungs-Code aus PR #57 veröffentlicht; zuletzt separat beobachtet d89c643, sauberer Build. Die verlinkte Buildseite zeigt den jeweils ausgelieferten Commit; iPhone Build 5 ist ein eigenes Artefakt.",
+    "label": "Web-Stand separat nachprüfbar",
+    "summary": "Vor diesem Arbeitspaket separat beobachtet: sauberer Commit afb4dc26. Die Buildseite zeigt den jeweils tatsächlich ausgelieferten Commit; iPhone Build 6 ist ein gesondertes Artefakt.",
     "url": "https://realm-staging.heidlhannes95.workers.dev/development"
   },
   "gateOverrides": {
@@ -241,7 +252,7 @@
     "A2b": {
       "state": "in-progress",
       "owner": "Entwicklung",
-      "note": "Keychain, Logout, Profilwechsel und App-Neustart auf Build 5 geprüft. Teilen/Clipboard, Kalenderexport, Universal Links, Erinnerungen und weitere B4-Fälle bleiben offen."
+      "note": "Sitzungspaket auf Build 5 und Text-/Link-Teilen samt Clipboard auf Build 6 geprüft. Kalenderexport, Universal Links, Erinnerungen und weitere B4-Fälle bleiben offen. Wrapped-Bildkarten sind separat vorgemerkt."
     },
     "A3": {
       "state": "blocked",
@@ -256,7 +267,7 @@
     "B5": {
       "state": "upcoming",
       "owner": "Hannes + Entwicklung",
-      "note": "Bis zum 20. November: installierbarer interner iPhone-Build und responsive Zielgeräteprüfungen. Build 4 liegt bereits signiert und installiert vor; die vereinbarten Zielgeräteprüfungen sind noch offen. TestFlight ist für den 27. November vorgesehen."
+      "note": "Bis zum 20. November: installierbarer interner iPhone-Build und responsive Zielgeräteprüfungen. Build 6 liegt bereits signiert und installiert vor; die vereinbarten Zielgeräteprüfungen sind noch offen. TestFlight ist für den 27. November vorgesehen."
     },
     "C0": {
       "state": "blocked",

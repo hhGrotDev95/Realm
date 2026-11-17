@@ -4,12 +4,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { FESTIVAL, actById, DAYS, fmt, stageById, STAGES, type StageId } from '../data'
 import { useApp } from '../store'
 import { num, t } from '../i18n'
+import { useSharing } from '../useSharing'
 
 const DURATION = 5200
 
 export function Wrapped() {
   const { crew } = useApp()
   const { plan, attended, closeSheet, guest, toast, online } = useApp()
+  const sharing = useSharing(toast)
   const [i, setI] = useState(0)
   const [paused, setPaused] = useState(false)
 
@@ -111,14 +113,11 @@ export function Wrapped() {
           <button
             className="btn"
             style={{ background: '#fff', color: '#111', alignSelf: 'flex-start', marginTop: 12 }}
+            disabled={sharing.busy}
             onClick={(e) => {
               e.stopPropagation()
               const text = t('Mein {name}: {n} Sets, Lieblingsstage {stage}.', { name: FESTIVAL.name, n: data.seen.length, stage: stageById[data.fav]?.name ?? '–' })
-              if (navigator.share) navigator.share({ text }).catch(() => {})
-              else {
-                navigator.clipboard?.writeText(text).catch(() => {})
-                toast(t('In die Zwischenablage kopiert'))
-              }
+              void sharing.share({ text }, text, t('In die Zwischenablage kopiert'))
             }}
           >
             <Share2 size={17} /> {t('Teilen')}

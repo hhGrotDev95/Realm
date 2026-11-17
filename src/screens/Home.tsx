@@ -6,6 +6,7 @@ import { conflictClusters, isMeetupActive, useApp } from '../store'
 import { poiForUpdate } from '../updatePoi'
 import { t } from '../i18n'
 import { publicAppUrl } from '../platform'
+import { useSharing } from '../useSharing'
 import { nowNext, planFor, status, untilLabel } from '../time'
 import { AvatarStack, SourceTag, StageDot, ago, stagger } from '../ui'
 
@@ -394,7 +395,8 @@ function Countdown() {
 }
 
 function Before() {
-  const { plan, resolved, setTab, openSheet, requireIdentity, toast, online, inviteLink } = useApp()
+  const { plan, resolved, setTab, openSheet, requireIdentity, toast, online, inviteLink, crew } = useApp()
+  const sharing = useSharing(toast)
   const conflicts = DAYS.flatMap((d) => conflictClusters(plan, d.idx, resolved))
   return (
     <>
@@ -447,12 +449,12 @@ function Before() {
         <button
           className="btn secondary block"
           style={{ marginTop: 14 }}
+          disabled={sharing.busy}
           onClick={() =>
             requireIdentity(t('Damit deine Freunde wissen, von wem die Einladung kommt.'), () => {
               const link = online ? inviteLink() : `${publicAppUrl()}/?join=DEMO-CREW`
               if (!link) return setTab('crew')
-              navigator.clipboard?.writeText(link).catch(() => {})
-              toast(t('Einladungslink kopiert'))
+              void sharing.share({ text: t('Komm in meine Crew „{name}“ bei Realm.', { name: crew.name }), url: link }, link, t('Einladungslink kopiert'))
             })
           }
         >

@@ -1,6 +1,6 @@
 # Realm · iPhone-Integration
 
-Stand: 16.11.2026. Realm ist die gewählte Produktbasis: dieselbe React-Oberfläche,
+Stand: 17.11.2026. Realm ist die gewählte Produktbasis: dieselbe React-Oberfläche,
 dieselben Funktionen und derselbe Cloudflare-Worker mit D1. Die iPhone-App
 bündelt diese Oberfläche mit Capacitor. Das separate V2 bleibt pausiert und
 wurde für diese Integration weder geändert noch gebaut.
@@ -426,3 +426,25 @@ Realm 1.0 Build 5 ist signiert über Build 4 installiert. [PR #57](https://githu
 Gerät: Hannes bestätigt erhaltene Identität/Crew/beide Favoriten nach Upgrade und Offline-Prozessneustart. Testprofil B erscheint ohne die Daten von A und bleibt nach Neustart B; Code A bringt das Originalprofil zurück. Online-Abmeldung bewahrt die Favoriten, bleibt nach Neustart abgemeldet, anschließend stellt Code A alles wieder her. Die Zähler bestätigen null Klartext-Credentials, erfolgreiche Keychain-Zugriffe und passende An-/Abmeldemarker. Das ursprüngliche Profil ist abschließend aktiv. Codes wurden ausschließlich vom Nutzer privat gespeichert/eingegeben.
 
 Build 5 wurde vor dem Commit gebaut; seine Metadaten kennzeichnen Basis `95975e7` plus lokale Änderungen. Signatur, Team-/Bundle-Identität, alle 53 Webdateien und private Quellhashbelege binden das tatsächlich getestete Artefakt. Dokumentations-/Merge-Commits sind keine neu installierten Builds. Native Ausfall-/Crash-/Neuinstallationsfälle sind zusätzlich synthetisch geprüft, kein physischer Gerätewechsel. A2b/B4 bleiben offen. Nächster Arbeitsschritt: Teilen/Clipboard, danach Kalenderexport, Universal Links und native Erinnerungen.
+
+
+## Text-/Link-Teilen und Clipboard · 17.11.2026
+
+Realm 1.0 Build 6 ist mit gleicher App-/Signierungsidentität über Build 5
+installiert. Signatur und 53 gebündelte Webdateien sind verglichen. Der Build
+basiert auf `afb4dc26` plus den aktuellen Teilen-Korrekturen; private Quellhashes
+binden dieses Artefakt. Keine neue Keychain-/Backend- oder Plugin-Konfiguration.
+
+Hannes bestätigt beide System-Teilen-Menüs (Home/Crew), stillen Abbruch bei
+bedienbarer App, genau einen korrekten öffentlichen Link mit Festival/Einladung,
+das passende Safari-Ziel, vollständige Recovery-Code-Kopie beim privaten
+Vergleich, Offline-Linkkopie und den vorhandenen Wrapped-Text. Netz und
+ursprüngliche Zeiteinstellung sind wiederhergestellt. Keine echte Nachricht an
+Dritte, kein Auslesen der Zwischenablage oder echter Codes. Browser-Mocks prüfen
+Fehler und verzögerte Antworten getrennt von diesen Nutzerbeobachtungen.
+
+[SHARING.md](SHARING.md) beschreibt Vertrag, Prüfumfang und Grenzen. Gewünschte
+Wrapped-Bildkarten sind eine noch nicht implementierte Folgeaufgabe. Als Nächstes
+Kalenderexport, anschließend Universal Links und native Erinnerungen. A2b/B4 und
+Store-Freigabe bleiben offen; der Sitzungstest auf Build 5 wird nicht pauschal
+wiederholt oder als vollständige Neuabnahme von Build 6 ausgegeben.

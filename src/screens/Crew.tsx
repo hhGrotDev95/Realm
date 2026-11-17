@@ -8,6 +8,7 @@ import { status } from '../time'
 import { AvatarStack, StageDot, Switch, stagger } from '../ui'
 import { useScrollTop } from './Home'
 import { num, t } from '../i18n'
+import { useSharing } from '../useSharing'
 
 export function Crew() {
   const { crew, online, crewRef } = useApp()
@@ -18,6 +19,7 @@ export function Crew() {
 
 function CrewHome() {
   const { crew, inviteLink, toast, leaveCrew, online } = useApp()
+  const sharing = useSharing(toast)
   const { now, plan, meetups, declined, openSheet, setTab, setFocusPoi, shareLocation, set, guest, requireIdentity, stepsOptIn, chat, phase, pendingPrivacy, here } = useApp()
   const ref = useScrollTop()
 
@@ -39,12 +41,8 @@ function CrewHome() {
   const share = async () => {
     const url = inviteLink()
     if (!url) return
-    const text = t('Komm in meine Crew „{name}“ bei Realm: {url}', { name: crew.name, url })
-    if (navigator.share) await navigator.share({ text, url }).catch(() => {})
-    else {
-      await navigator.clipboard?.writeText(url).catch(() => {})
-      toast(t('Einladungslink kopiert'))
-    }
+    const text = t('Komm in meine Crew „{name}“ bei Realm.', { name: crew.name })
+    await sharing.share({ text, url }, url, t('Einladungslink kopiert'))
   }
 
   return (
@@ -71,7 +69,7 @@ function CrewHome() {
                 {crew.members.length ? t('{n} Personen · Code {code}', { n: crew.members.length + 1, code: crew.code ?? '' }) : t('1 Person · Code {code}', { code: crew.code ?? '' })}
               </span>
             </span>
-            <button className="btn secondary sm" onClick={share}>
+            <button className="btn secondary sm" onClick={share} disabled={sharing.busy}>
               <Share2 size={15} /> {t('Einladen')}
             </button>
           </motion.section>
@@ -95,7 +93,7 @@ function CrewHome() {
             <p className="small muted" style={{ margin: '0 0 14px' }}>
               {t('Teile den Link oder den Code')} <b>{crew.code}</b> – {t('deine Freunde brauchen keinen Account.')}
             </p>
-            <button className="btn primary sm" onClick={share}>
+            <button className="btn primary sm" onClick={share} disabled={sharing.busy}>
               {t('Einladungslink teilen')}
             </button>
           </motion.section>
