@@ -1,6 +1,8 @@
 export const EN_SCREENS: Record<string, string> = {
-  "Komm in meine Crew „{name}“ bei Realm: {url}": "Join my crew “{name}” on Realm: {url}",
   "Einladungslink kopiert": "Invite link copied",
+  "Komm in meine Crew „{name}“ bei Realm.": "Join my crew “{name}” on Realm.",
+  "Kopieren nicht möglich. Bitte versuche es erneut.": "Unable to copy. Please try again.",
+  "Teilen nicht möglich. Bitte versuche es erneut.": "Unable to share. Please try again.",
   "Deine Crew sieht dich mit diesem Namen.": "Your crew will see you under this name.",
   "Nur ein Name und eine Farbe – kein Account, keine E-Mail.": "Just a name and a colour – no account, no email.",
   "{n} Personen · Code {code}": "{n} people · code {code}",

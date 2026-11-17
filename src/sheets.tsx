@@ -14,6 +14,7 @@ import { ActRow } from './screens/Lineup'
 import { useApp, type SheetState } from './store'
 import { poiForUpdate } from './updatePoi'
 import { useChatKeyboard } from './useChatKeyboard'
+import { useSharing } from './useSharing'
 import { status, untilLabel } from './time'
 import { t, num, setLang, LANGS, lang } from './i18n'
 import { Avatar, AvatarStack, Segmented, Sheet, SourceTag, StageDot, ago, spring, LazyBoundary, Switch } from './ui'
@@ -1252,6 +1253,7 @@ function FestivalPicker() {
 
 function Secure() {
   const { secure, guest, toast, closeSheet, online, requireIdentity, authBusy } = useApp()
+  const sharing = useSharing(toast)
   const [code, setCode] = useState<string | undefined>(guest.recoveryCode)
   const [busy, setBusy] = useState(false)
   const makeCode = () =>
@@ -1279,10 +1281,8 @@ function Secure() {
           </p>
           <button
             className="btn secondary block"
-            onClick={() => {
-              navigator.clipboard?.writeText(code).catch(() => {})
-              toast(t('Code kopiert'))
-            }}
+            disabled={sharing.busy || authBusy}
+            onClick={() => void sharing.copy(code, t('Code kopiert'))}
           >
             <Copy size={17} /> {t('Kopieren')}
           </button>
